@@ -1,7 +1,7 @@
 # Yomi
 
-A personal music streaming setup: a Flutter client (iOS and Android) for a self-hosted
-[Navidrome](https://www.navidrome.org/) server, plus a small Go service that accepts uploads.
+personal music streaming setup flutter client for a self-hosted
+[Navidrome][1] server and small Go service that accepts uploads.
 
 ```
 app/      Flutter client (Subsonic API, offline downloads, lyrics, home/away routing)
@@ -33,3 +33,5 @@ GOOS=linux GOARCH=arm GOARM=7 CGO_ENABLED=0 go build -o dist/yomi-upload .
 
 Configured through environment variables: `YOMI_LISTEN`, `YOMI_NAVIDROME`, `YOMI_MUSIC`,
 `YOMI_MAX_FILE_MB`.
+
+[1]:	https://www.navidrome.org/
