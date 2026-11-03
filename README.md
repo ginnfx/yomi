@@ -1,3 +1,4 @@
+<img width="256" height="256" alt="app_icon_256" src="https://github.com/user-attachments/assets/1fdf3e85-df54-4b52-98fe-6af64a2a7737" />
 # Yomi
 
 personal music streaming setup flutter client for a self-hosted
