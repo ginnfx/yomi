@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import 'error_view.dart';
@@ -21,9 +23,14 @@ class AsyncSection<T> extends StatefulWidget {
 }
 
 class _AsyncSectionState<T> extends State<AsyncSection<T>> {
-  late Future<T> _future = widget.load();
+  late Future<T> _future = _load();
 
-  void _retry() => setState(() => _future = widget.load());
+  Future<T> _load() =>
+      Future<T>.sync(widget.load).timeout(const Duration(seconds: 20));
+
+  void _retry() => setState(() {
+    _future = _load();
+  });
 
   @override
   Widget build(BuildContext context) {

@@ -10,6 +10,7 @@ import '../../state/connectivity_controller.dart';
 import '../../state/player_controller.dart';
 import '../../state/settings.dart';
 import '../../state/session.dart';
+import '../../state/upload_queue.dart';
 import '../theme.dart';
 import '../widgets/async_section.dart';
 import '../widgets/cover_art.dart';
@@ -42,6 +43,18 @@ class _LibraryPageState extends State<LibraryPage> {
       ? _Tab.downloaded
       : _Tab.songs;
   int _reloadKey = 0;
+  String? _serverUrl;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final url = context.watch<SessionController>().serverUrl;
+    if (_serverUrl != url) {
+      _serverUrl = url;
+      _reloadKey++;
+    }
+  }
+
   bool _isSearching = false;
   String _query = '';
   Timer? _debounce;
@@ -271,6 +284,45 @@ class _SongsTabState extends State<_SongsTab> {
   bool _isLoading = false;
   bool _isDone = false;
   int _generation = 0;
+  int? _totalSongs;
+  bool _countLoading = false;
+  Timer? _countTimer;
+  UploadQueue? _uploads;
+  int _completedUploads = 0;
+
+  Future<void> _refreshCount() async {
+    if (!mounted || _countLoading) return;
+    _countLoading = true;
+    final client = context.read<SessionController>().client;
+    try {
+      final count = await client.songCount();
+      if (mounted && count != null) setState(() => _totalSongs = count);
+    } on Object {
+      /* Keep the last known total when offline. */
+    } finally {
+      _countLoading = false;
+    }
+  }
+
+  void _onUploadsChanged() {
+    final completed = _uploads!.count(UploadState.done);
+    if (completed != _completedUploads) {
+      _completedUploads = completed;
+      unawaited(_refreshCount());
+    }
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final uploads = context.read<UploadQueue>();
+    if (!identical(uploads, _uploads)) {
+      _uploads?.removeListener(_onUploadsChanged);
+      _uploads = uploads;
+      _completedUploads = uploads.count(UploadState.done);
+      uploads.addListener(_onUploadsChanged);
+    }
+  }
 
   @override
   void initState() {
@@ -278,6 +330,17 @@ class _SongsTabState extends State<_SongsTab> {
     _scroll.addListener(_onScroll);
     _loadMore();
     _loadGenres();
+    final client = context.read<SessionController>().client;
+    client.cachedSongCount().then((count) {
+      if (mounted && _totalSongs == null && count != null) {
+        setState(() => _totalSongs = count);
+      }
+    });
+    unawaited(_refreshCount());
+    _countTimer = Timer.periodic(
+      const Duration(seconds: 5),
+      (_) => _refreshCount(),
+    );
   }
 
   Future<void> _loadGenres() async {
@@ -312,6 +375,8 @@ class _SongsTabState extends State<_SongsTab> {
 
   @override
   void dispose() {
+    _countTimer?.cancel();
+    _uploads?.removeListener(_onUploadsChanged);
     _scroll.dispose();
     super.dispose();
   }
@@ -404,9 +469,15 @@ class _SongsTabState extends State<_SongsTab> {
                 ),
                 const Spacer(),
                 Text(
-                  _isDone
+                  _selectedGenres.isNotEmpty
+                      ? (_isDone
+                            ? '${_songs.length} songs'
+                            : '${_songs.length} loaded')
+                      : _totalSongs != null
+                      ? '$_totalSongs songs'
+                      : _isDone
                       ? '${_songs.length} songs'
-                      : '${_songs.length}+ songs',
+                      : 'Counting…',
                   style: yomiText(
                     12.5,
                     weight: FontWeight.w600,

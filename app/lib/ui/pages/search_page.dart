@@ -7,6 +7,8 @@ import '../../core/genres.dart';
 import '../../core/models.dart';
 import '../../state/player_controller.dart';
 import '../../state/session.dart';
+import '../../state/home_controller.dart';
+import '../../core/subsonic_client.dart';
 import '../theme.dart';
 import '../widgets/album_card.dart';
 import '../widgets/async_section.dart';
@@ -40,6 +42,23 @@ class _SearchPageState extends State<SearchPage> {
   Object? _error;
   bool _isLoading = false;
   int _generation = 0;
+  int _browseRevision = 0;
+  String? _routeUrl;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final url = context.watch<SessionController>().serverUrl;
+    if (_routeUrl != null && _routeUrl != url) {
+      _generation++;
+      _error = null;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && _controller.text.trim().isNotEmpty)
+          _search(_controller.text);
+      });
+    }
+    _routeUrl = url;
+  }
 
   @override
   void dispose() {
@@ -49,6 +68,7 @@ class _SearchPageState extends State<SearchPage> {
   }
 
   void _onChanged(String text) {
+    _generation++;
     _timer?.cancel();
     setState(() {});
     if (text.trim().isEmpty) {
@@ -68,12 +88,43 @@ class _SearchPageState extends State<SearchPage> {
   Future<void> _search(String text, {bool more = false}) async {
     final generation = ++_generation;
     setState(() => _isLoading = true);
+    final session = context.read<SessionController>();
+    final local =
+        <String, Song>{
+              for (final shelf in context.read<HomeController>().shelves)
+                for (final song in shelf.songs) song.id: song,
+            }.values
+            .where(
+              (song) => '${song.title} ${song.artist} ${song.album}'
+                  .toLowerCase()
+                  .contains(text.trim().toLowerCase()),
+            )
+            .toList();
+    if (!more && local.isNotEmpty) {
+      setState(() {
+        _songs = local;
+        _artists = const [];
+        _hasSearched = true;
+        _error = null;
+      });
+    }
     try {
-      final results = await context.read<SessionController>().client.search(
-        text,
-        count: _pageSize,
-        offset: more ? _songs.length : 0,
-      );
+      SearchResults results;
+      try {
+        results = await session.client.search(
+          text,
+          count: _pageSize,
+          offset: more ? _songs.length : 0,
+        );
+      } on SubsonicException catch (error) {
+        if (error.kind != ErrorKind.unreachable) rethrow;
+        await session.checkServer();
+        results = await session.client.search(
+          text,
+          count: _pageSize,
+          offset: more ? _songs.length : 0,
+        );
+      }
       if (!mounted || generation != _generation) return;
       setState(() {
         if (more) {
@@ -90,7 +141,7 @@ class _SearchPageState extends State<SearchPage> {
     } on Object catch (error) {
       if (!mounted || generation != _generation) return;
       setState(() {
-        _error = error;
+        _error = _songs.isEmpty ? error : null;
         _isLoading = false;
       });
     }
@@ -114,7 +165,7 @@ class _SearchPageState extends State<SearchPage> {
 
   @override
   Widget build(BuildContext context) {
-    final client = context.read<SessionController>().client;
+    final client = context.watch<SessionController>().client;
     final player = context.read<PlayerController>();
     final isEmpty = _hasSearched && _artists.isEmpty && _songs.isEmpty;
     return SafeArea(
@@ -171,13 +222,37 @@ class _SearchPageState extends State<SearchPage> {
           if (_error != null)
             ErrorView(error: _error!, onRetry: () => _search(_controller.text))
           else if (!_hasSearched) ...[
-            const SectionTitle('Browse'),
+            Row(
+              children: [
+                const Expanded(child: SectionTitle('Browse')),
+                IconButton(
+                  tooltip: 'Refresh suggestions',
+                  icon: const Icon(Icons.refresh_rounded),
+                  onPressed: () => setState(() => _browseRevision++),
+                ),
+                const SizedBox(width: kPagePadding),
+              ],
+            ),
             AsyncSection<List<Song>>(
               skeleton: const Padding(
                 padding: EdgeInsets.symmetric(horizontal: kPagePadding),
                 child: Shimmer(child: SkeletonBox(height: 200, radius: 16)),
               ),
-              load: () => client.randomSongs(size: 8),
+              key: ValueKey('browse-${client.baseUrl}-$_browseRevision'),
+              load: () {
+                final songs = <String, Song>{
+                  for (final shelf in context.read<HomeController>().shelves)
+                    for (final song in shelf.songs) song.id: song,
+                }.values.toList()..shuffle();
+                return songs.isEmpty
+                    ? client
+                          .randomSongs(size: 24)
+                          .then(
+                            (pool) =>
+                                (pool.toList()..shuffle()).take(8).toList(),
+                          )
+                    : Future.value(songs.take(8).toList());
+              },
               builder: (context, songs) => Padding(
                 padding: const EdgeInsets.symmetric(horizontal: kPagePadding),
                 child: context.isWideLayout
@@ -335,6 +410,9 @@ class _BrowseTile extends StatelessWidget {
               size: c.maxWidth,
               radius: 18,
               seed: song.title,
+              artist: song.artist,
+              album: song.album,
+              title: song.title,
             ),
           ),
           DecoratedBox(

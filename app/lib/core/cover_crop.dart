@@ -120,7 +120,11 @@ class CoverImageService {
     final future = _loadAndTrim(url, cacheKey);
     _images[cacheKey] = future;
     future.then((image) {
-      if (image != null) _ready[cacheKey] = image;
+      if (image != null) {
+        _ready[cacheKey] = image;
+      } else if (identical(_images[cacheKey], future)) {
+        _images.remove(cacheKey);
+      }
     });
     if (_images.length > _cacheLimit) {
       final oldest = _images.keys.first;
@@ -132,10 +136,11 @@ class CoverImageService {
 
   Future<ui.Image?> _loadAndTrim(String url, String cacheKey) async {
     try {
-      final file = await DefaultCacheManager().getSingleFile(
-        url,
-        key: cacheKey,
-      );
+      final manager = DefaultCacheManager();
+      final saved = await manager.getFileFromCache(cacheKey);
+      final file = saved != null && await saved.file.exists()
+          ? saved.file
+          : await manager.getSingleFile(url, key: cacheKey);
       final codec = await ui.instantiateImageCodec(await file.readAsBytes());
       final original = (await codec.getNextFrame()).image;
       final data = await original.toByteData(

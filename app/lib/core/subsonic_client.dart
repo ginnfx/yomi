@@ -1,3 +1,7 @@
+import 'dart:async';
+
+import 'package:shared_preferences/shared_preferences.dart';
+
 import 'dart:convert';
 import 'dart:math';
 
@@ -46,9 +50,11 @@ class SubsonicClient {
     required this.username,
     required String password,
     http.Client? httpClient,
+    bool? cacheEnabled,
     String Function()? saltGenerator,
     bool Function()? isReadOnly,
   }) : baseUrl = baseUrl.replaceAll(RegExp(r'/+$'), ''),
+       _cacheEnabled = cacheEnabled ?? httpClient == null,
        _password = password,
        _http = httpClient ?? http.Client(),
        _newSalt = saltGenerator ?? _randomSalt,
@@ -57,6 +63,7 @@ class SubsonicClient {
   final String baseUrl;
   final String username;
   final String _password;
+  final bool _cacheEnabled;
   final http.Client _http;
   final String Function() _newSalt;
   final bool Function() _isReadOnly;
@@ -81,7 +88,20 @@ class SubsonicClient {
     Map<String, Object?> params = const {},
   ]) async {
     _requireWritable();
-    return _get(endpoint, params);
+    final result = await _get(endpoint, params);
+    if (_cacheEnabled) {
+      final account = sha256.convert(
+        utf8.encode('$baseUrl|$username|$_password'),
+      );
+      try {
+        await (await SharedPreferences.getInstance()).remove(
+          'catalog_v1_$account',
+        );
+      } on Object {
+        /* The write succeeded even if cache storage is unavailable. */
+      }
+    }
+    return result;
   }
 
   late final String _sessionSalt = _newSalt();
@@ -131,7 +151,88 @@ class SubsonicClient {
     );
   }
 
+  final Map<String, Future<Map<String, dynamic>>> _pendingReads = {};
+  static const _cachedEndpoints = {
+    'getSong',
+    'getRandomSongs',
+    'getAlbumList2',
+    'getAlbum',
+    'getArtists',
+    'getArtist',
+    'getGenres',
+    'getSongsByGenre',
+    'getPlaylists',
+    'getPlaylist',
+    'getStarred2',
+    'search3',
+  };
+
   Future<Map<String, dynamic>> _get(
+    String endpoint, [
+    Map<String, Object?> params = const {},
+    Duration? timeout,
+    bool post = false,
+  ]) async {
+    if (!_cacheEnabled || post || !_cachedEndpoints.contains(endpoint)) {
+      return _fetch(endpoint, params, timeout, post);
+    }
+    final account = sha256.convert(
+      utf8.encode('$baseUrl|$username|$_password'),
+    );
+    final key = 'catalog_v1_$account';
+    final query = jsonEncode([endpoint, params]);
+    final SharedPreferences prefs;
+    try {
+      prefs = await SharedPreferences.getInstance();
+    } on Object {
+      return _fetch(endpoint, params, timeout, post);
+    }
+    Map<String, dynamic> readCache() {
+      try {
+        return Map<String, dynamic>.from(
+          jsonDecode(prefs.getString(key) ?? '{}') as Map,
+        );
+      } on Object {
+        return {};
+      }
+    }
+
+    final cached = readCache()[query];
+    Future<Map<String, dynamic>> refresh() =>
+        _pendingReads.putIfAbsent(query, () async {
+          try {
+            final result = await _fetch(
+              endpoint,
+              params,
+              timeout ?? const Duration(seconds: 5),
+              post,
+            );
+            final entries = readCache()..remove(query);
+            entries[query] = {
+              'at': DateTime.now().millisecondsSinceEpoch,
+              'data': result,
+            };
+            while (entries.length > 64) {
+              entries.remove(entries.keys.first);
+            }
+            await prefs.setString(key, jsonEncode(entries));
+            return result;
+          } finally {
+            _pendingReads.remove(query);
+          }
+        });
+    if (cached is Map && cached['data'] is Map) {
+      final age =
+          DateTime.now().millisecondsSinceEpoch - (cached['at'] as int? ?? 0);
+      if (age > const Duration(minutes: 5).inMilliseconds) {
+        unawaited(refresh().then<void>((_) {}, onError: (Object _) {}));
+      }
+      return Map<String, dynamic>.from(cached['data'] as Map);
+    }
+    return refresh();
+  }
+
+  Future<Map<String, dynamic>> _fetch(
     String endpoint, [
     Map<String, Object?> params = const {},
     Duration? timeout,
@@ -464,6 +565,39 @@ class SubsonicClient {
     );
   }
 
+  String get _countCacheKey =>
+      'song_count_${sha256.convert(utf8.encode('$baseUrl|$username'))}';
+
+  Future<int?> cachedSongCount() async {
+    try {
+      return (await SharedPreferences.getInstance()).getInt(_countCacheKey);
+    } on Object {
+      return null;
+    }
+  }
+
+  Future<int?> songCount() async {
+    final body = await _get(
+      'getScanStatus',
+      const {},
+      const Duration(seconds: 5),
+    );
+    final scan = body['scanStatus'];
+    final count = scan is Map ? (scan['count'] as num?)?.toInt() : null;
+    if (count != null && count >= 0) {
+      try {
+        await (await SharedPreferences.getInstance()).setInt(
+          _countCacheKey,
+          count,
+        );
+      } on Object {
+        /* A count still works without disk caching. */
+      }
+      return count;
+    }
+    return null;
+  }
+
   Future<void> startScan() => _write('startScan');
 
   Uri streamUri(String songId, {int? maxBitRate}) =>
@@ -485,6 +619,7 @@ class SubsonicClient {
               .whereType<String>()
               .firstOrNull;
         } on Exception {
+          _artistCoverCache.remove(artistId);
           return null;
         }
       });

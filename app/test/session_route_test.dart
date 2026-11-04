@@ -1,3 +1,5 @@
+import 'package:flutter/widgets.dart';
+
 import 'dart:async';
 
 import 'package:connectivity_plus/connectivity_plus.dart';
@@ -100,6 +102,20 @@ void main() {
     await waitForUrl(home);
     expect(session.serverUrl, home);
   });
+
+  test(
+    'rechecks proximity on resume even when Wi-Fi type is unchanged',
+    () async {
+      final session = await signedIn();
+      homeReachable = false;
+      session.didChangeAppLifecycleState(AppLifecycleState.resumed);
+      final deadline = DateTime.now().add(const Duration(seconds: 5));
+      while (session.serverUrl != away && DateTime.now().isBefore(deadline)) {
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+      }
+      expect(session.serverUrl, away);
+    },
+  );
 
   test('without a home address it always uses the one address', () async {
     final session = await signedIn(withHome: false);

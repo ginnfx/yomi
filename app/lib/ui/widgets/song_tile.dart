@@ -79,6 +79,9 @@ class SongTile extends StatelessWidget {
                 else
                   CoverArt(
                     coverArtId: song.coverArtId,
+                    artist: song.artist,
+                    album: song.album,
+                    title: song.title,
                     size: 56,
                     radius: 12,
                     seed: song.album,
@@ -238,6 +241,9 @@ Future<void> showSongMenu(
           ListTile(
             leading: CoverArt(
               coverArtId: song.coverArtId,
+              artist: song.artist,
+              album: song.album,
+              title: song.title,
               size: 52,
               radius: 12,
             ),

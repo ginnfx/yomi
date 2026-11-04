@@ -59,6 +59,13 @@ class UploadPage extends StatelessWidget {
                   ),
                 ),
                 const _PickButtons(),
+                if (items.isEmpty) ...[
+                  const SizedBox(height: YomiSpace.l),
+                  Text(
+                    'No uploads queued',
+                    style: yomiText(14, color: YomiColors.textSecondary),
+                  ),
+                ],
                 if (queue.pause != null) ...[
                   const SizedBox(height: YomiSpace.l),
                   _PauseNotice(pause: queue.pause!),

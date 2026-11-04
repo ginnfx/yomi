@@ -123,7 +123,7 @@ class _HomePageState extends State<HomePage> {
         );
       case 'quick':
         return AsyncSection<List<_QuickPick>>(
-          key: ValueKey('quick-$_refresh'),
+          key: ValueKey('quick-${session.serverUrl}-$_refresh'),
           skeleton: const Padding(
             padding: EdgeInsets.only(top: 18),
             child: Shimmer(child: SkeletonBox(height: 190, radius: 16)),
@@ -131,7 +131,7 @@ class _HomePageState extends State<HomePage> {
           load: () async {
             final results = await Future.wait([
               client.playlists(),
-              client.recentSongs(count: _quickPickCount),
+              client.randomSongs(size: _quickPickCount),
             ]);
             final playlists = (results[0] as List<Playlist>)
                 .take(3)

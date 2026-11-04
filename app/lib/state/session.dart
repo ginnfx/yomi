@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
-import 'package:flutter/foundation.dart';
+import 'package:flutter/widgets.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 import '../core/connection_probe.dart';
@@ -66,7 +66,7 @@ Future<bool> _pingProbe(String url, String user, String password) async {
 
 /// Holds the signed-in account and the clients built from it. With a home and an away
 /// address saved, it checks which one works and switches by itself when the network changes.
-class SessionController extends ChangeNotifier {
+class SessionController extends ChangeNotifier with WidgetsBindingObserver {
   SessionController({
     FlutterSecureStorage? storage,
     ConnectivityController? connectivity,
@@ -122,6 +122,20 @@ class SessionController extends ChangeNotifier {
   ActiveRoute _route = ActiveRoute.away;
   bool _isRestoring = true;
   bool _isResolving = false;
+  WidgetsBinding? _binding;
+
+  void startMonitoring() {
+    _binding ??= WidgetsBinding.instance;
+    _binding!.addObserver(this);
+    _routeRefresh = Timer.periodic(const Duration(seconds: 30), (_) {
+      if (_client != null &&
+          _mode == RouteMode.auto &&
+          _binding?.lifecycleState == AppLifecycleState.resumed)
+        _onNetworkChanged();
+    });
+  }
+
+  Timer? _routeRefresh;
   Timer? _debounce;
   Timer? _reachRetry;
   bool _isServerReachable = true;
@@ -332,9 +346,11 @@ class SessionController extends ChangeNotifier {
     );
     final working = results.where((r) => r.isOk).toList();
     if (working.isNotEmpty) {
-      _isOnBackup = true;
+      final url = working.first.url;
+      _isOnBackup = url != _homeUrl && url != _awayUrl;
+      _route = url == _homeUrl ? ActiveRoute.home : ActiveRoute.away;
       _isOnTunnel = false;
-      _build(working.first.url);
+      _build(url);
       return true;
     }
     return _connectThroughTunnel();
@@ -394,7 +410,10 @@ class SessionController extends ChangeNotifier {
   }
 
   Future<ActiveRoute> _chooseRoute() async {
-    if (!hasHomeAddress) return ActiveRoute.away;
+    if (!hasHomeAddress) {
+      if (_mode == RouteMode.auto) unawaited(_healHome());
+      return ActiveRoute.away;
+    }
     return switch (_mode) {
       RouteMode.home => ActiveRoute.home,
       RouteMode.away => ActiveRoute.away,
@@ -438,6 +457,11 @@ class SessionController extends ChangeNotifier {
     } finally {
       _isScanning = false;
     }
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) _onNetworkChanged();
   }
 
   void _onNetworkChanged() {
@@ -540,6 +564,8 @@ class SessionController extends ChangeNotifier {
 
   @override
   void dispose() {
+    _binding?.removeObserver(this);
+    _routeRefresh?.cancel();
     _primaryRetry?.cancel();
     _roleRetry?.cancel();
     _debounce?.cancel();

@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/cover_crop.dart';
+import '../../core/artwork_lookup.dart';
 import '../../core/cover_sizes.dart';
 import '../../state/session.dart';
 import '../theme.dart';
@@ -19,6 +20,9 @@ class CoverArt extends StatelessWidget {
     this.elevated = false,
     this.heroTag,
     this.seed,
+    this.artist,
+    this.album,
+    this.title,
   });
 
   final String? coverArtId;
@@ -29,25 +33,43 @@ class CoverArt extends StatelessWidget {
 
   /// Used to pick the fallback colours when there is no artwork.
   final String? seed;
+  final String? artist, album, title;
 
   @override
   Widget build(BuildContext context) {
     final fallback = _Fallback(size: size, seedText: seed ?? coverArtId ?? '');
     Widget image = fallback;
-    if (coverArtId != null) {
+    if (coverArtId != null || artist != null) {
       final client = context.read<SessionController>().client;
       final pixels = coverPixelsFor(size);
       final service = CoverImageService.instance;
-      final key = coverCacheKey(coverArtId!, pixels);
+      final key = coverCacheKey(
+        coverArtId ?? 'missing-${artist ?? ''}-${album ?? ''}',
+        pixels,
+      );
       // While the big version loads, show the small one we already have instead of a blank.
       final placeholder =
           service.peek(key) ??
-          service.peek(coverCacheKey(coverArtId!, smallCoverPx));
+          service.peek(coverCacheKey(coverArtId ?? '', smallCoverPx));
       image = _TrimmedImage(
-        future: service.load(
-          client.coverArtUri(coverArtId, size: pixels).toString(),
-          key,
-        ),
+        future: () async {
+          if (coverArtId != null) {
+            final image = await service.load(
+              client.coverArtUri(coverArtId, size: pixels).toString(),
+              key,
+            );
+            if (image != null) return image;
+          }
+          if (artist == null) return null;
+          final url = await ArtworkLookup.instance.find(
+            artist!,
+            album ?? '',
+            title ?? '',
+          );
+          return url == null
+              ? null
+              : service.load(url, 'external-$url-$pixels');
+        }(),
         initial: placeholder,
         fallback: fallback,
       );
