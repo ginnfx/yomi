@@ -6,6 +6,7 @@ import 'dart:isolate';
 import 'package:flutter/foundation.dart';
 
 import '../core/models.dart';
+import '../core/search_index.dart';
 import '../core/subsonic_client.dart';
 
 const int _pageSize = 500;
@@ -29,6 +30,17 @@ class CatalogController extends ChangeNotifier {
   int _generation = 0;
 
   List<Song> get songs => _songs;
+
+  /// Search over [songs], rebuilt only after they change.
+  SearchIndex get searchIndex {
+    final built = _index;
+    if (built != null && identical(_indexedSongs, _songs)) return built;
+    _indexedSongs = _songs;
+    return _index = SearchIndex(_songs);
+  }
+
+  SearchIndex? _index;
+  List<Song>? _indexedSongs;
 
   /// Whether [songs] is the whole library, as opposed to nothing having been fetched yet.
   bool get isLoaded => _isLoaded;

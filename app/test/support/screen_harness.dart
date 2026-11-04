@@ -117,6 +117,12 @@ class FakeSession extends ChangeNotifier implements SessionController {
   @override
   String get username => 'demo';
   @override
+  String get serverUrl => 'http://server';
+  @override
+  ActiveRoute get route => ActiveRoute.home;
+  @override
+  bool get hasHomeAddress => true;
+  @override
   SubsonicClient get client =>
       SubsonicClient(baseUrl: 'http://server', username: 'u', password: 'p');
 

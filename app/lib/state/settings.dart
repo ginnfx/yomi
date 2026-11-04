@@ -4,6 +4,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../core/models.dart';
 
 const int _defaultStorageGb = 5;
+const int _maxRecentSearches = 8;
 const List<int> storageLimitChoicesGb = [2, 5, 10, 20];
 
 /// User preferences, saved on the device.
@@ -58,6 +59,21 @@ class SettingsController extends ChangeNotifier {
     await _prefs.remove('lessSongs');
     return true;
   });
+
+  /// What you searched for lately, newest first.
+  List<String> get recentSearches =>
+      _prefs.getStringList('recentSearches') ?? const [];
+  Future<void> addRecentSearch(String text) => _set(
+    () => _prefs.setStringList(
+      'recentSearches',
+      [
+        text,
+        ...recentSearches.where((other) => other != text),
+      ].take(_maxRecentSearches).toList(),
+    ),
+  );
+  Future<void> clearRecentSearches() =>
+      _set(() => _prefs.remove('recentSearches'));
 
   bool get wifiOnlyDownloads => _prefs.getBool('wifiOnlyDownloads') ?? true;
 

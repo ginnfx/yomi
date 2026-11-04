@@ -580,8 +580,14 @@ class _SongSearch extends StatelessWidget {
   Widget build(BuildContext context) {
     final client = context.read<SessionController>().client;
     final player = context.read<PlayerController>();
+    final catalog = context.read<CatalogController>();
     return AsyncSection<List<Song>>(
-      load: () async => (await client.search(query, count: 100)).songs,
+      initialData: catalog.isLoaded
+          ? catalog.searchIndex.search(query).songs
+          : null,
+      load: () async => catalog.isLoaded
+          ? catalog.searchIndex.search(query).songs
+          : (await client.search(query, count: 100)).songs,
       builder: (context, songs) {
         if (songs.isEmpty)
           return Center(

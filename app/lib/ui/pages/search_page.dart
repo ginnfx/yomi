@@ -7,7 +7,10 @@ import '../../core/genres.dart';
 import '../../core/models.dart';
 import '../../state/player_controller.dart';
 import '../../state/session.dart';
+import '../../core/search_index.dart';
+import '../../state/catalog_controller.dart';
 import '../../state/home_controller.dart';
+import '../../state/settings.dart';
 import '../../core/subsonic_client.dart';
 import '../theme.dart';
 import '../widgets/album_card.dart';
@@ -38,6 +41,7 @@ class _SearchPageState extends State<SearchPage> {
   List<Song> _songs = const [];
   Set<String> _selectedGenres = const {};
   bool _hasSearched = false;
+  IndexedResults? _indexed;
   bool _hasMore = false;
   Object? _error;
   bool _isLoading = false;
@@ -75,6 +79,7 @@ class _SearchPageState extends State<SearchPage> {
     if (text.trim().isEmpty) {
       setState(() {
         _hasSearched = false;
+        _indexed = null;
         _artists = const [];
         _songs = const [];
         _selectedGenres = const {};
@@ -83,7 +88,39 @@ class _SearchPageState extends State<SearchPage> {
       });
       return;
     }
+    final catalog = context.read<CatalogController>();
+    if (catalog.isLoaded) {
+      _searchLibrary(catalog, text);
+      return;
+    }
     _timer = Timer(_debounce, () => _search(text));
+  }
+
+  /// Instant, offline, and without results moving once they appear.
+  void _searchLibrary(CatalogController catalog, String text) {
+    final results = catalog.searchIndex.search(text);
+    setState(() {
+      _indexed = results;
+      _artists = const [];
+      _songs = results.songs;
+      _selectedGenres = const {};
+      _hasSearched = true;
+      _hasMore = false;
+      _error = null;
+      _isLoading = false;
+    });
+  }
+
+  void _rememberSearch() {
+    final text = _controller.text.trim();
+    if (text.isNotEmpty) {
+      unawaited(context.read<SettingsController>().addRecentSearch(text));
+    }
+  }
+
+  void _useRecent(String text) {
+    _controller.text = text;
+    _onChanged(text);
   }
 
   Future<void> _search(String text, {bool more = false}) async {
@@ -178,7 +215,12 @@ class _SearchPageState extends State<SearchPage> {
     final client = context.watch<SessionController>().client;
     final player = context.read<PlayerController>();
     final visible = _visibleSongs;
-    final isEmpty = _hasSearched && _artists.isEmpty && _songs.isEmpty;
+    final indexed = _indexed;
+    final isEmpty =
+        _hasSearched &&
+        _artists.isEmpty &&
+        _songs.isEmpty &&
+        (indexed == null || indexed.isEmpty);
     return SafeArea(
       bottom: false,
       child: ListView(
@@ -201,10 +243,11 @@ class _SearchPageState extends State<SearchPage> {
             child: TextField(
               controller: _controller,
               onChanged: _onChanged,
+              onSubmitted: (_) => _rememberSearch(),
               textInputAction: TextInputAction.search,
               style: yomiText(16, weight: FontWeight.w600),
               decoration: InputDecoration(
-                hintText: 'Songs and artists',
+                hintText: 'Songs, artists and albums',
                 prefixIcon: const Icon(
                   Icons.search_rounded,
                   color: YomiColors.textSecondary,
@@ -233,6 +276,7 @@ class _SearchPageState extends State<SearchPage> {
           if (_error != null)
             ErrorView(error: _error!, onRetry: () => _search(_controller.text))
           else if (!_hasSearched) ...[
+            _RecentSearches(onSelected: _useRecent),
             Row(
               children: [
                 const Expanded(child: SectionTitle('Browse')),
@@ -317,6 +361,8 @@ class _SearchPageState extends State<SearchPage> {
               ),
             )
           else ...[
+            if (indexed != null)
+              _LocalResults(results: indexed, onOpened: _rememberSearch),
             if (_artists.isNotEmpty) ...[
               const SectionTitle('Artists'),
               SizedBox(
@@ -381,7 +427,10 @@ class _SearchPageState extends State<SearchPage> {
                 SongTile(
                   key: ValueKey(visible[i].id),
                   song: visible[i],
-                  onTap: () => player.playQueue(visible, startIndex: i),
+                  onTap: () {
+                    _rememberSearch();
+                    player.playQueue(visible, startIndex: i);
+                  },
                 ),
               if (_hasMore)
                 Padding(
@@ -466,6 +515,147 @@ class _BrowseTile extends StatelessWidget {
                 ),
               ],
             ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// The groups only local search can offer: the best match, then artists and albums.
+class _LocalResults extends StatelessWidget {
+  const _LocalResults({required this.results, required this.onOpened});
+
+  final IndexedResults results;
+  final VoidCallback onOpened;
+
+  void _openArtist(BuildContext context, ArtistResult artist) {
+    final songs = context.read<CatalogController>().songs;
+    onOpened();
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => CollectionPage(
+          title: artist.name,
+          subtitle: '${artist.songCount} songs',
+          coverArtId: artist.coverArtId,
+          loadSongs: () async => [
+            for (final song in songs)
+              if (song.artist == artist.name) song,
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _openAlbum(BuildContext context, AlbumResult album) {
+    final client = context.read<SessionController>().client;
+    onOpened();
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => CollectionPage(
+          title: album.name,
+          subtitle: album.artist,
+          coverArtId: album.coverArtId,
+          savedSongs: client.cachedAlbumSongs(album.id),
+          loadSongs: () => client.albumSongs(album.id),
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final top = results.topResult;
+    final player = context.read<PlayerController>();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (top is SongMatch)
+          ListTile(
+            contentPadding: const EdgeInsets.symmetric(
+              horizontal: kPagePadding,
+            ),
+            leading: CoverArt(
+              coverArtId: top.song.coverArtId,
+              size: 64,
+              radius: YomiRadius.art,
+              seed: top.song.album,
+            ),
+            title: Text(
+              top.song.title,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: yomiText(18, weight: FontWeight.w800),
+            ),
+            subtitle: Text(
+              'Top result · ${top.song.artist}',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+            onTap: () {
+              onOpened();
+              player.playQueue(results.songs);
+            },
+          ),
+        for (final artist in results.artists)
+          ListTile(
+            contentPadding: const EdgeInsets.symmetric(
+              horizontal: kPagePadding,
+            ),
+            leading: const Icon(Icons.person_rounded),
+            title: Text(
+              artist.name,
+              style: yomiText(15, weight: FontWeight.w700),
+            ),
+            subtitle: Text('Artist · ${artist.songCount} songs'),
+            onTap: () => _openArtist(context, artist),
+          ),
+        for (final album in results.albums)
+          ListTile(
+            contentPadding: const EdgeInsets.symmetric(
+              horizontal: kPagePadding,
+            ),
+            leading: CoverArt(
+              coverArtId: album.coverArtId,
+              size: 44,
+              radius: YomiRadius.art,
+              seed: album.name,
+            ),
+            title: Text(
+              album.name,
+              style: yomiText(15, weight: FontWeight.w700),
+            ),
+            subtitle: Text('Album · ${album.artist}'),
+            onTap: () => _openAlbum(context, album),
+          ),
+      ],
+    );
+  }
+}
+
+/// What you searched for lately, shown before you type.
+class _RecentSearches extends StatelessWidget {
+  const _RecentSearches({required this.onSelected});
+
+  final ValueChanged<String> onSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    final settings = context.watch<SettingsController>();
+    final recent = settings.recentSearches;
+    if (recent.isEmpty) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(kPagePadding, 12, kPagePadding, 0),
+      child: Wrap(
+        spacing: 8,
+        runSpacing: 4,
+        children: [
+          for (final text in recent)
+            ActionChip(label: Text(text), onPressed: () => onSelected(text)),
+          ActionChip(
+            avatar: const Icon(Icons.close_rounded, size: 16),
+            label: const Text('Clear'),
+            onPressed: settings.clearRecentSearches,
           ),
         ],
       ),
