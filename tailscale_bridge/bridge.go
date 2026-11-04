@@ -10,6 +10,7 @@ import (
 	"io"
 	"log"
 	"net"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -21,6 +22,9 @@ import (
 const (
 	upTimeout   = 45 * time.Second
 	dialTimeout = 15 * time.Second
+
+	logsDirEnv   = "TS_LOGS_DIR"
+	stateDirMode = 0o700
 )
 
 var (
@@ -37,6 +41,9 @@ func Start(stateDir, authKey, hostname string) error {
 	if node != nil {
 		return nil
 	}
+	if err := useLogsDir(stateDir); err != nil {
+		return fmt.Errorf("could not prepare %s: %w", stateDir, err)
+	}
 	server := &tsnet.Server{
 		Dir:      stateDir,
 		AuthKey:  authKey,
@@ -52,6 +59,15 @@ func Start(stateDir, authKey, hostname string) error {
 	}
 	node = server
 	return nil
+}
+
+// useLogsDir gives Tailscale a folder for its logs. Without one it looks in places an
+// Android app doesn't have, then panics, which no caller can catch and closes the app.
+func useLogsDir(stateDir string) error {
+	if err := os.MkdirAll(stateDir, stateDirMode); err != nil {
+		return err
+	}
+	return os.Setenv(logsDirEnv, stateDir)
 }
 
 // Forward opens a loopback port that reaches remote ("host:port") over the tailnet and

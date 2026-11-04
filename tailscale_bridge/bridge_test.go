@@ -7,8 +7,12 @@ import (
 	"errors"
 	"io"
 	"net"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
+
+	"tailscale.com/logpolicy"
 )
 
 func startEchoServer(t *testing.T) net.Listener {
@@ -139,5 +143,27 @@ func TestParseInterfaces(t *testing.T) {
 func TestInviteCodeShape(t *testing.T) {
 	if !IsInviteCode(" tskey-auth-abc ") || IsInviteCode("hello") {
 		t.Fatal("wrong result")
+	}
+}
+
+// Android gives an app no HOME, a working directory of / and no writable temp folder.
+// Tailscale panics when it finds nowhere for logs, which takes the whole app down.
+func TestLogsGoInStateDirWhenTheDeviceOffersNowhereElse(t *testing.T) {
+	stateDir := filepath.Join(t.TempDir(), "tailscale")
+	t.Setenv("TS_LOGS_DIR", "")
+	t.Setenv("HOME", "")
+	t.Setenv("XDG_CACHE_HOME", "")
+	t.Setenv("TMPDIR", filepath.Join(stateDir, "missing"))
+	t.Chdir("/")
+
+	if err := useLogsDir(stateDir); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := logpolicy.LogsDir(t.Logf); got != stateDir {
+		t.Fatalf("logs went to %q, want %q", got, stateDir)
+	}
+	if info, err := os.Stat(stateDir); err != nil || !info.IsDir() {
+		t.Fatalf("state folder missing: %v", err)
 	}
 }
