@@ -1,13 +1,17 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:math';
 
 import 'package:flutter/material.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:just_audio_background/just_audio_background.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'core/apk_installer.dart';
+import 'core/app_update.dart';
 import 'core/cover_palette.dart';
 import 'core/lyrics.dart';
 import 'core/offline/audio_cache.dart';
@@ -22,6 +26,7 @@ import 'state/playback_sync_controller.dart';
 import 'state/profile_controller.dart';
 import 'state/session.dart';
 import 'state/settings.dart';
+import 'state/update_controller.dart';
 import 'ui/pages/login_page.dart';
 import 'ui/pages/shell_page.dart';
 import 'ui/theme.dart';
@@ -101,8 +106,12 @@ Future<void> main() async {
     sync.attach(client);
   });
 
+  final updates = await _buildUpdateController(prefs);
+  AppLifecycleListener(onResume: () => unawaited(updates.check()));
+
   runApp(
     YomiApp(
+      updates: updates,
       sync: sync,
       session: session,
       player: player,
@@ -114,13 +123,38 @@ Future<void> main() async {
       profile: profile,
     ),
   );
+  unawaited(updates.check());
   await session.restore();
   await runDevHooks(session, player);
+}
+
+Future<UpdateController> _buildUpdateController(SharedPreferences prefs) async {
+  final info = await PackageInfo.fromPlatform();
+  final version = AppVersion.tryParse(info.version);
+  // Must stay in step with res/xml/update_paths.xml on Android.
+  final cacheDir = await getApplicationCacheDirectory();
+  return UpdateController(
+    currentVersion: version ?? const AppVersion(0, 0, 0),
+    mode: _updateMode(hasValidVersion: version != null),
+    client: UpdateClient(),
+    prefs: prefs,
+    downloadDir: Directory('${cacheDir.path}/updates'),
+    install: launchApkInstaller,
+    openPage: openReleasePage,
+  );
+}
+
+UpdateMode _updateMode({required bool hasValidVersion}) {
+  if (!hasValidVersion) return UpdateMode.disabled;
+  if (Platform.isAndroid) return UpdateMode.androidInstall;
+  if (Platform.isMacOS) return UpdateMode.openReleasePage;
+  return UpdateMode.disabled;
 }
 
 class YomiApp extends StatelessWidget {
   const YomiApp({
     super.key,
+    required this.updates,
     required this.sync,
     required this.session,
     required this.player,
@@ -132,6 +166,7 @@ class YomiApp extends StatelessWidget {
     required this.profile,
   });
 
+  final UpdateController updates;
   final PlaybackSyncController sync;
   final SessionController session;
   final PlayerController player;
@@ -146,6 +181,7 @@ class YomiApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MultiProvider(
       providers: [
+        ChangeNotifierProvider<UpdateController>.value(value: updates),
         ChangeNotifierProvider<PlaybackSyncController>.value(value: sync),
         ChangeNotifierProvider<SessionController>.value(value: session),
         ChangeNotifierProvider<PlayerController>.value(value: player),

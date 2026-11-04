@@ -13,6 +13,7 @@ import '../widgets/mini_player.dart';
 import '../widgets/desktop_player.dart';
 import '../widgets/nav_bar.dart';
 import '../widgets/offline_banner.dart';
+import '../widgets/update_banner.dart';
 import 'home_page.dart';
 import 'library_page.dart';
 import 'offline_page.dart';
@@ -108,7 +109,13 @@ class _ShellPageState extends State<ShellPage>
                 ),
                 child: Column(
                   children: [
-                    SafeArea(bottom: false, child: const StatusBanner()),
+                    SafeArea(
+                      bottom: false,
+                      child: const Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [StatusBanner(), UpdateBanner()],
+                      ),
+                    ),
                     // The banner's SafeArea already reserved the top inset; pages must not add it again.
                     Expanded(
                       child: MediaQuery.removePadding(
@@ -246,7 +253,13 @@ class _ShellPageState extends State<ShellPage>
                   Expanded(
                     child: Column(
                       children: [
-                        const SafeArea(bottom: false, child: StatusBanner()),
+                        const SafeArea(
+                          bottom: false,
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [StatusBanner(), UpdateBanner()],
+                          ),
+                        ),
                         Expanded(
                           child: MediaQuery(
                             data: media.copyWith(padding: EdgeInsets.zero),

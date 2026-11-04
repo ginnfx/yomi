@@ -100,6 +100,35 @@ locally. Pending warm-ups follow the current queue and run one at a time.
 The menu bar also offers editing, playback, shuffle, repeat, and window commands.
 Closing the last window quits the app; minimizing keeps playback running.
 
+## Releasing
+
+Tagging `vX.Y.Z` runs the tests, builds the signed APK and Mac app, and publishes
+them as a GitHub release. Android and Mac users then see an update banner.
+
+```sh
+git tag v1.0.2 && git push origin v1.0.2
+```
+
+### Android signing
+
+Installed copies only accept updates signed with the same key, so release builds
+refuse to run without `android/key.properties` (gitignored):
+
+```properties
+storeFile=/absolute/path/to/your-release.jks
+storePassword=...
+keyAlias=yomi
+keyPassword=...
+```
+
+`scripts/build_android.sh X.Y.Z` builds locally and checks the APK against the
+public fingerprint in `android/release-cert.sha256`. To publish from your own fork,
+replace that file with your key's fingerprint.
+
+CI reads two secrets from a GitHub environment named `release`:
+`YOMI_KEYSTORE_BASE64` (the `.jks`, base64 encoded) and `YOMI_KEYSTORE_PASSWORD`.
+Limit that environment to `v*` tags, so only release tags can read the key.
+
 ## Checks
 
 ```sh
