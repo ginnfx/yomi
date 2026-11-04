@@ -13,7 +13,14 @@ const String _clientName = 'Yomi';
 const int _saltLength = 10;
 const Duration _requestTimeout = Duration(seconds: 20);
 
-enum ErrorKind { unreachable, badCredentials, notNavidrome, server, other }
+enum ErrorKind {
+  unreachable,
+  badCredentials,
+  notNavidrome,
+  server,
+  readOnly,
+  other,
+}
 
 class SubsonicException implements Exception {
   const SubsonicException(
@@ -40,16 +47,43 @@ class SubsonicClient {
     required String password,
     http.Client? httpClient,
     String Function()? saltGenerator,
+    bool Function()? isReadOnly,
   }) : baseUrl = baseUrl.replaceAll(RegExp(r'/+$'), ''),
        _password = password,
        _http = httpClient ?? http.Client(),
-       _newSalt = saltGenerator ?? _randomSalt;
+       _newSalt = saltGenerator ?? _randomSalt,
+       _isReadOnly = isReadOnly ?? _alwaysWritable;
 
   final String baseUrl;
   final String username;
   final String _password;
   final http.Client _http;
   final String Function() _newSalt;
+  final bool Function() _isReadOnly;
+
+  static bool _alwaysWritable() => false;
+
+  /// True on the backup server, whose database is replaced from the main one, so
+  /// anything written there would be lost.
+  bool get isReadOnly => _isReadOnly();
+
+  void _requireWritable() {
+    if (isReadOnly) {
+      throw const SubsonicException(
+        "You're on the backup server, so changes can't be saved right now.",
+        kind: ErrorKind.readOnly,
+      );
+    }
+  }
+
+  Future<Map<String, dynamic>> _write(
+    String endpoint, [
+    Map<String, Object?> params = const {},
+  ]) async {
+    _requireWritable();
+    return _get(endpoint, params);
+  }
+
   late final String _sessionSalt = _newSalt();
 
   static String _randomSalt() {
@@ -284,7 +318,7 @@ class SubsonicClient {
     String songId, {
     bool submission = true,
     DateTime? time,
-  }) => _get('scrobble', {
+  }) => _write('scrobble', {
     'id': songId,
     'submission': '$submission',
     if (time != null) 'time': '${time.millisecondsSinceEpoch}',
@@ -332,23 +366,24 @@ class SubsonicClient {
   }
 
   Future<void> createPlaylist(String name, {List<String> songIds = const []}) =>
-      _get('createPlaylist', {'name': name, 'songId': songIds});
+      _write('createPlaylist', {'name': name, 'songId': songIds});
 
-  Future<void> addToPlaylist(String playlistId, List<String> songIds) => _get(
+  Future<void> addToPlaylist(String playlistId, List<String> songIds) => _write(
     'updatePlaylist',
     {'playlistId': playlistId, 'songIdToAdd': songIds},
   );
 
-  Future<void> removeFromPlaylist(String playlistId, List<int> indexes) => _get(
-    'updatePlaylist',
-    {'playlistId': playlistId, 'songIndexToRemove': indexes},
-  );
+  Future<void> removeFromPlaylist(String playlistId, List<int> indexes) =>
+      _write('updatePlaylist', {
+        'playlistId': playlistId,
+        'songIndexToRemove': indexes,
+      });
 
   Future<void> renamePlaylist(String playlistId, String name) =>
-      _get('updatePlaylist', {'playlistId': playlistId, 'name': name});
+      _write('updatePlaylist', {'playlistId': playlistId, 'name': name});
 
   Future<void> deletePlaylist(String playlistId) =>
-      _get('deletePlaylist', {'id': playlistId});
+      _write('deletePlaylist', {'id': playlistId});
 
   Future<List<Song>> starredSongs() async {
     final body = await _get('getStarred2');
@@ -358,9 +393,9 @@ class SubsonicClient {
     ).map(Song.fromJson).toList(growable: false);
   }
 
-  Future<void> star(String songId) => _get('star', {'id': songId});
+  Future<void> star(String songId) => _write('star', {'id': songId});
 
-  Future<void> unstar(String songId) => _get('unstar', {'id': songId});
+  Future<void> unstar(String songId) => _write('unstar', {'id': songId});
 
   /// OpenSubsonic lyrics stored with the song; null when there are none.
   Future<Lyrics?> lyricsFor(String songId) async {
@@ -403,7 +438,8 @@ class SubsonicClient {
     required Duration position,
     required String deviceId,
   }) {
-    if (songs.isEmpty || index < 0 || index >= songs.length) {
+    // The handoff position isn't worth a warning on the read-only backup server.
+    if (songs.isEmpty || index < 0 || index >= songs.length || isReadOnly) {
       return Future.value();
     }
     return _get(
@@ -419,7 +455,7 @@ class SubsonicClient {
     );
   }
 
-  Future<void> startScan() => _get('startScan');
+  Future<void> startScan() => _write('startScan');
 
   Uri streamUri(String songId, {int? maxBitRate}) =>
       _uri('stream', {'id': songId, 'maxBitRate': maxBitRate});

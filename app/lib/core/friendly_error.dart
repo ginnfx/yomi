@@ -68,6 +68,8 @@ FriendlyError explainError(
             : 'Check the server address in Settings and that the server is on.',
         action: ErrorAction.openSettings,
       );
+    case ErrorKind.readOnly:
+      return FriendlyError("Changes can't be saved right now", '$error');
     case ErrorKind.other:
       return FriendlyError('Something went wrong', '$error');
   }

@@ -75,6 +75,7 @@ class ScrobbleQueue {
           final isTemporary =
               error.kind == ErrorKind.unreachable ||
               error.kind == ErrorKind.server ||
+              error.kind == ErrorKind.readOnly ||
               error.isBadCredentials;
           if (isTemporary) return;
           debugPrint('Server refused a queued play: $error');

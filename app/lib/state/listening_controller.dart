@@ -80,7 +80,7 @@ class ListeningController {
 
   void _onStarted(Song song) {
     final client = _client;
-    if (client == null || connectivity.isOffline) return;
+    if (client == null || connectivity.isOffline || client.isReadOnly) return;
     unawaited(
       client
           .scrobble(song.id, submission: false)
@@ -102,7 +102,8 @@ class ListeningController {
 
   Future<void> _flush() async {
     final client = _client;
-    if (client == null || connectivity.isOffline) return;
+    // Plays made on the backup server wait for the main one, or they'd be lost.
+    if (client == null || connectivity.isOffline || client.isReadOnly) return;
     await scrobbles.flush(client);
   }
 

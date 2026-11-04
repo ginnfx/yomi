@@ -76,6 +76,10 @@ func (s *Server) handleCheck(w http.ResponseWriter, r *http.Request) {
 // handleBulkUpload stores a file whose hash the client already computed. It is
 // idempotent: uploading content the server has returns the existing file and stores nothing.
 func (s *Server) handleBulkUpload(w http.ResponseWriter, r *http.Request) {
+	if s.isReplica() {
+		writeError(w, http.StatusForbidden, errReadOnly.Error())
+		return
+	}
 	hash := r.PathValue("sha256")
 	if !isSHA256(hash) {
 		writeError(w, http.StatusBadRequest, "hash must be lowercase SHA-256")

@@ -27,6 +27,7 @@ type Server struct {
 	Scan      func(ctx context.Context, query url.Values)
 	Index     *HashIndex
 	Status    *StatusReader
+	Backups   *BackupSource
 	slots     chan struct{}
 	limits    *loginLimiter
 	scans     *scanDebouncer
@@ -49,18 +50,31 @@ func newServer(cfg Config, auth Authenticator, scan func(context.Context, url.Va
 func (s *Server) routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+		body := map[string]string{"status": "ok"}
+		if s.isReplica() {
+			body["role"] = roleReplica
+		}
+		writeJSON(w, http.StatusOK, body)
 	})
 	mux.HandleFunc("/upload", s.handleUpload)
 	mux.HandleFunc("POST /v1/check", s.handleCheck)
 	mux.HandleFunc("GET /v1/status", s.handleStatus)
+	mux.HandleFunc("GET /v1/replica/index", s.handleReplicaIndex)
+	mux.HandleFunc("GET /v1/replica/file/{sha256}", s.handleReplicaFile)
+	mux.HandleFunc("GET /v1/replica/database", s.handleReplicaDatabase)
 	mux.HandleFunc("PUT /v1/upload/{sha256}", s.handleBulkUpload)
 	return mux
 }
 
+func (s *Server) isReplica() bool { return s.Config.Role == roleReplica }
+
 func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeError(w, http.StatusMethodNotAllowed, "use POST")
+		return
+	}
+	if s.isReplica() {
+		writeError(w, http.StatusForbidden, errReadOnly.Error())
 		return
 	}
 	user, ok := s.authenticate(w, r)

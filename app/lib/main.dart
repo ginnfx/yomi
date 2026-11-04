@@ -106,6 +106,7 @@ Future<void> main() async {
     settings: settings,
     connectivity: connectivity,
   );
+  player.onStalled = () => unawaited(session.checkServer());
   final listeningDir = '${supportDir.path}/listening';
   final history = PlayHistory(File('$listeningDir/history.json'));
   final scrobbles = ScrobbleQueue(File('$listeningDir/scrobbles.json'));

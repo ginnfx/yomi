@@ -24,6 +24,13 @@ func main() {
 	go index.Seed()
 	server := newServer(cfg, auth, navidromeScan(cfg.NavidromeURL), index)
 	server.Status = newStatusReader(cfg, index)
+	server.Backups = newBackupSource(cfg)
+	if cfg.Role == roleReplica {
+		if cfg.PrimaryURL == "" || cfg.ReplicaUser == "" || cfg.ReplicaPassword == "" || cfg.ReplicaDatabase == "" {
+			log.Fatal("replica needs YOMI_PRIMARY, YOMI_REPLICA_USER, YOMI_REPLICA_PASSWORD and YOMI_REPLICA_DB")
+		}
+		go newReplicaSync(cfg, index).Run(context.Background())
+	}
 	if cfg.CoversOn {
 		startCovers(cfg)
 	}

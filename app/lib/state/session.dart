@@ -7,6 +7,7 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import '../core/connection_probe.dart';
 import '../core/lan_discovery.dart';
 import '../core/subsonic_client.dart';
+import '../core/server_role.dart';
 import '../core/upload/bulk_upload_api.dart';
 import 'connectivity_controller.dart';
 
@@ -15,6 +16,7 @@ const Duration _homeProbeTimeout = Duration(milliseconds: 1500);
 const Duration _routeDebounce = Duration(milliseconds: 700);
 const Duration _reachTimeout = Duration(seconds: 4);
 const Duration _reachRetryEvery = Duration(seconds: 15);
+const Duration _primaryRetryEvery = Duration(seconds: 60);
 const String _awayKey = 'server_url';
 const String _homeKey = 'home_url';
 const String _extraKey = 'extra_urls';
@@ -71,7 +73,9 @@ class SessionController extends ChangeNotifier {
     LanFinder? lanFinder,
     this.tunnelConnect,
     this.uploadPortFor,
-  }) : _storage =
+    RoleProbe? roleProbe,
+  }) : _roleProbe = roleProbe ?? probeIsReplica,
+       _storage =
            storage ??
            const FlutterSecureStorage(
              // The login Keychain works for locally built Mac apps without a
@@ -96,7 +100,10 @@ class SessionController extends ChangeNotifier {
 
   /// The upload service's port for an address; it differs when going through the tunnel.
   final int Function(String url)? uploadPortFor;
+  final RoleProbe _roleProbe;
   bool _isOnTunnel = false;
+  bool _isOnReplica = false;
+  Timer? _primaryRetry;
   bool _isScanning = false;
   DateTime? _lastScan;
   List<String> _extraUrls = const [];
@@ -125,6 +132,9 @@ class SessionController extends ChangeNotifier {
   List<String> get extraUrls => List.unmodifiable(_extraUrls);
   bool get isOnBackup => _isOnBackup;
   bool get isOnTunnel => _isOnTunnel;
+
+  /// On the read-only backup server: edits are refused and plays wait for the main one.
+  bool get isOnReplica => _isOnReplica;
   int get uploadServicePort => _uploadPort(serverUrl);
 
   int _uploadPort(String url) => uploadPortFor?.call(url) ?? uploadPort;
@@ -149,7 +159,9 @@ class SessionController extends ChangeNotifier {
   bool get isResolving => _isResolving;
   bool get hasHomeAddress => (_homeUrl ?? '').isNotEmpty;
 
-  String get routeLabel => _isOnTunnel
+  String get routeLabel => _isOnReplica
+      ? 'Backup server'
+      : _isOnTunnel
       ? 'Invite tunnel'
       : _isOnBackup
       ? 'Backup address'
@@ -470,7 +482,9 @@ class SessionController extends ChangeNotifier {
       baseUrl: url,
       username: _user,
       password: _password,
+      isReadOnly: () => _isOnReplica,
     );
+    unawaited(_refreshRole(url));
     _uploader = BulkUploadApi(
       serverUrl: url,
       auth: _client!,
@@ -478,8 +492,43 @@ class SessionController extends ChangeNotifier {
     );
   }
 
+  Future<void> _refreshRole(String url) async {
+    final isReplica = await _roleProbe(url, _uploadPort(url));
+    if (url != serverUrl) return; // Moved on while this was being asked.
+    if (isReplica != _isOnReplica) {
+      _isOnReplica = isReplica;
+      notifyListeners();
+    }
+    _primaryRetry?.cancel();
+    if (isReplica) {
+      _primaryRetry = Timer.periodic(_primaryRetryEvery, (_) {
+        unawaited(returnToPrimary());
+      });
+    }
+  }
+
+  /// Moves back once a non-backup address answers again. The player stays on the
+  /// current song until it ends, so nothing audibly changes.
+  Future<void> returnToPrimary() async {
+    if (!_isOnReplica) return;
+    for (final url in candidateUrls) {
+      if (url == serverUrl) continue;
+      final result = await _urlProbe(url, _user, _password);
+      if (!result.isOk || await _roleProbe(url, _uploadPort(url))) continue;
+      _isOnReplica = false;
+      _isOnBackup = url != _awayUrl && url != _homeUrl;
+      _isOnTunnel = false;
+      _route = url == _homeUrl ? ActiveRoute.home : ActiveRoute.away;
+      _primaryRetry?.cancel();
+      _build(url);
+      notifyListeners();
+      return;
+    }
+  }
+
   @override
   void dispose() {
+    _primaryRetry?.cancel();
     _debounce?.cancel();
     _reachRetry?.cancel();
     _connectivity?.removeListener(_onNetworkChanged);
