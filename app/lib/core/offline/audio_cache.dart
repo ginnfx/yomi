@@ -57,7 +57,7 @@ class AudioCache {
   }
 
   /// Deletes least-recently-used songs until the cache fits. Returns how many were removed.
-  Future<int> evict() async {
+  Future<int> evict({Set<String> protect = const {}}) async {
     final items = await _audioFiles();
     var total = items.fold<int>(0, (sum, i) => sum + i.length);
     if (total <= maxBytes) return 0;
@@ -66,6 +66,12 @@ class AudioCache {
     var removed = 0;
     for (final item in items) {
       if (total <= maxBytes) break;
+      if (protect.any(
+        (id) =>
+            baseFor(id).path ==
+            item.file.path.substring(0, item.file.path.lastIndexOf('.')),
+      ))
+        continue;
       if (now.difference(item.modified) < _recentlyTouched)
         continue; // probably playing right now
       await item.file.delete();

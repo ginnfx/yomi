@@ -6,6 +6,7 @@ import 'package:just_audio_background/just_audio_background.dart';
 
 import '../core/models.dart';
 import '../core/offline/audio_cache.dart';
+import '../core/offline/audio_preloader.dart';
 import '../core/offline/file_fetcher.dart';
 import '../core/subsonic_client.dart';
 import 'connectivity_controller.dart';
@@ -22,6 +23,16 @@ class PlayerController extends ChangeNotifier {
     required this.connectivity,
     this.fetcher = const FileFetcher(),
   }) {
+    _preloader = AudioPreloader(
+      cache: cache,
+      fetcher: fetcher,
+      onCached: (song) async {
+        await _switchQueuedToLocal(song);
+        if (!_disposed) notifyListeners();
+      },
+    );
+    settings.addListener(_onCacheSettingsChanged);
+    connectivity.addListener(_onCacheSettingsChanged);
     _subscriptions
       ..add(_player.currentIndexStream.listen(_onIndexChanged))
       ..add(_player.bufferedPositionStream.listen(_onBuffered))
@@ -39,10 +50,10 @@ class PlayerController extends ChangeNotifier {
   final SettingsController settings;
   final ConnectivityController connectivity;
   final FileFetcher fetcher;
-  final List<Song> _cacheQueue = [];
-  final Set<String> _cacheKnown = {};
-  bool _isCaching = false;
+  bool _disposed = false;
+  late final AudioPreloader _preloader;
   String? _retriedSongId;
+  String? _warmCurrentId;
   final List<StreamSubscription<Object?>> _subscriptions = [];
   SubsonicClient? _client;
   List<Song> _queue = const [];
@@ -53,6 +64,7 @@ class PlayerController extends ChangeNotifier {
   void attach(SubsonicClient? client) {
     _client = client;
     if (client == null) {
+      _preloader.stop();
       _player.stop();
       _queue = const [];
       _index = null;
@@ -71,6 +83,10 @@ class PlayerController extends ChangeNotifier {
   bool get isShuffled => _player.shuffleModeEnabled;
   LoopMode get loopMode => _player.loopMode;
   String? get error => _error;
+  bool get isCurrentCached => current != null && _isLocal(current!);
+  double get volume => _player.volume;
+  Future<void> setVolume(double value) => _player.setVolume(value);
+  Duration get position => _player.position;
   Stream<Duration> get positionStream => _player.positionStream;
   Stream<Duration> get bufferedStream => _player.bufferedPositionStream;
   Stream<Duration?> get durationStream => _player.durationStream;
@@ -99,73 +115,61 @@ class PlayerController extends ChangeNotifier {
   bool _isLocal(Song song) =>
       downloads.isDownloaded(song.id) || cache.isCached(song.id);
 
-  /// Once the playing song has fully buffered, save it (for instant replays) and the next
-  /// few. Doing this earlier would make two downloads fight over the little server's
-  /// bandwidth and slow the song you are actually waiting for.
+  /// Start warming once playback has a safe head start, rather than waiting
+  /// for AVPlayer to buffer an entire (possibly very long) song.
   void _onBuffered(Duration buffered) {
     final song = current;
-    final total = _player.duration;
-    if (song == null ||
-        total == null ||
-        _isLocal(song) ||
-        _cacheKnown.contains(song.id))
+    if (song == null) return;
+    final total = _player.duration ?? song.duration;
+    final hasHeadroom =
+        buffered - _player.position >= const Duration(seconds: 10);
+    final fullyBuffered =
+        total > Duration.zero && buffered + const Duration(seconds: 2) >= total;
+    if (_isLocal(song) || hasHeadroom || fullyBuffered) {
+      _scheduleCaching(
+        includeCurrent: settings.cachePlayedSongs && connectivity.isOnWifi,
+      );
+    }
+  }
+
+  void _onCacheSettingsChanged() {
+    cache.maxBytes = settings.cacheLimitBytes;
+    if (connectivity.isOffline ||
+        (!settings.preloadNext && !settings.cachePlayedSongs)) {
+      _preloader.stop();
       return;
-    if (buffered + const Duration(seconds: 2) < total) return;
-    _scheduleCaching(includeCurrent: connectivity.isOnWifi);
+    }
+    _onBuffered(_player.bufferedPosition);
   }
 
   void _scheduleCaching({required bool includeCurrent}) {
-    final current = _index;
-    if (_client == null ||
-        current == null ||
-        !settings.preloadNext ||
-        connectivity.isOffline)
-      return;
+    final index = _index;
+    final client = _client;
+    if (client == null || index == null || connectivity.isOffline) return;
     final order = _player.effectiveIndices;
-    final position = order.indexOf(current);
+    final position = order.indexOf(index);
     if (position < 0) return;
-    final indexes = <int>[
-      if (includeCurrent) current,
-      ...order.skip(position + 1).take(connectivity.isOnWifi ? 2 : 1),
+    final count = settings.preloadNext ? (connectivity.isOnWifi ? 3 : 1) : 0;
+    final indexes = [
+      if (includeCurrent) index,
+      ...order.skip(position + 1).take(count),
     ];
-    for (final i in indexes) {
-      if (i >= _queue.length) continue;
-      final song = _queue[i];
-      if (_isLocal(song) || !_cacheKnown.add(song.id)) continue;
-      _cacheQueue.add(song);
-    }
-    unawaited(_runCacheQueue());
-  }
-
-  /// One at a time, so the server only ever has a single extra download going.
-  Future<void> _runCacheQueue() async {
-    if (_isCaching) return;
-    _isCaching = true;
-    try {
-      while (_cacheQueue.isNotEmpty && _client != null) {
-        final song = _cacheQueue.removeAt(0);
-        try {
-          await fetcher.fetch(
-            _client!.streamUri(song.id),
-            cache.baseFor(song.id),
-          );
-          await cache.evict();
-          await _switchQueuedToLocal(song);
-        } on Object catch (error) {
-          debugPrint('Caching ${song.title} skipped: $error');
-          _cacheKnown.remove(song.id);
-        }
-      }
-    } finally {
-      _isCaching = false;
-    }
+    _preloader.plan(
+      client,
+      [
+        for (final i in indexes)
+          if (i < _queue.length && !downloads.isDownloaded(_queue[i].id))
+            _queue[i],
+      ],
+      protect: {if (current != null) current!.id},
+    );
   }
 
   Future<void> _switchQueuedToLocal(Song song) async {
     for (var i = 0; i < _queue.length; i++) {
       // The playing item is never touched; only songs still waiting in the queue are swapped.
       if (_queue[i].id != song.id ||
-          i == _index ||
+          i <= (_index ?? -1) ||
           _player.audioSources.length != _queue.length)
         continue;
       try {
@@ -190,7 +194,6 @@ class PlayerController extends ChangeNotifier {
     final position = _player.position;
     try {
       await cache.remove(song.id);
-      _cacheKnown.remove(song.id);
       await _player.removeAudioSourceAt(index);
       await _player.insertAudioSource(
         index,
@@ -205,8 +208,14 @@ class PlayerController extends ChangeNotifier {
     }
   }
 
-  Future<void> playQueue(List<Song> songs, {int startIndex = 0}) async {
+  Future<void> playQueue(
+    List<Song> songs, {
+    int startIndex = 0,
+    Duration position = Duration.zero,
+    bool autoplay = true,
+  }) async {
     if (_client == null || songs.isEmpty) return;
+    _preloader.stop();
     _error = null;
     _queue = List.unmodifiable(songs);
     _index = startIndex.clamp(0, songs.length - 1);
@@ -215,8 +224,17 @@ class PlayerController extends ChangeNotifier {
       await _player.setAudioSources(
         songs.map(_sourceFor).toList(),
         initialIndex: _index,
+        initialPosition: position,
       );
-      unawaited(_player.play());
+      if (autoplay) {
+        unawaited(_player.play());
+      } else if (defaultTargetPlatform == TargetPlatform.macOS &&
+          connectivity.isOnWifi) {
+        // Prepare a handoff in the background while the phone keeps playing.
+        _scheduleCaching(
+          includeCurrent: settings.cachePlayedSongs && connectivity.isOnWifi,
+        );
+      }
     } on Object catch (error) {
       _fail(error);
     }
@@ -251,7 +269,13 @@ class PlayerController extends ChangeNotifier {
     return _player.seekToPrevious();
   }
 
-  Future<void> seek(Duration position) => _player.seek(position);
+  Future<void> pause() => _player.pause();
+
+  Future<void> seek(Duration position) async {
+    await _player.seek(position);
+    notifyListeners();
+  }
+
   Future<void> toggleShuffle() =>
       _player.setShuffleModeEnabled(!_player.shuffleModeEnabled);
 
@@ -265,6 +289,10 @@ class PlayerController extends ChangeNotifier {
   void _onIndexChanged(int? index) {
     _index = index;
     final song = current;
+    if (song?.id != _warmCurrentId) {
+      _preloader.stop();
+      _warmCurrentId = song?.id;
+    }
     if (song != null) unawaited(cache.touch(song.id));
     _retriedSongId = song?.id == _retriedSongId ? _retriedSongId : null;
     if (song != null && _isLocal(song)) _scheduleCaching(includeCurrent: false);
@@ -286,6 +314,10 @@ class PlayerController extends ChangeNotifier {
 
   @override
   void dispose() {
+    _disposed = true;
+    settings.removeListener(_onCacheSettingsChanged);
+    connectivity.removeListener(_onCacheSettingsChanged);
+    _preloader.dispose();
     for (final subscription in _subscriptions) {
       subscription.cancel();
     }

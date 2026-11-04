@@ -5,3 +5,4 @@ server/dist/
 *.log
 .idea/
 *.iml
+.serena/

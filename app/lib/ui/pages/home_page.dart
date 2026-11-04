@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
@@ -13,6 +14,8 @@ import '../theme.dart';
 import '../widgets/album_card.dart';
 import '../widgets/async_section.dart';
 import '../widgets/cover_art.dart';
+import '../widgets/continue_listening.dart';
+import '../widgets/compact_music_grid.dart';
 import '../widgets/shimmer.dart';
 import '../widgets/song_tile.dart';
 import 'collection_page.dart';
@@ -66,6 +69,7 @@ class _HomePageState extends State<HomePage> {
               routeLabel: session.routeLabel,
               isHome: session.route == ActiveRoute.home,
             ),
+            const ContinueListening(),
             for (final id in sections) _section(id, session),
             if (sections.isEmpty)
               Padding(
@@ -88,13 +92,29 @@ class _HomePageState extends State<HomePage> {
   }
 
   Widget _section(String id, SessionController session) {
+    final isMac = defaultTargetPlatform == TargetPlatform.macOS;
     final client = session.client;
     final player = context.read<PlayerController>();
     switch (id) {
       case 'shuffle':
         return Padding(
           padding: const EdgeInsets.fromLTRB(kPagePadding, 22, kPagePadding, 0),
-          child: _ShuffleHero(onTap: _shuffleEverything),
+          child: isMac
+              ? Row(
+                  children: [
+                    Text(
+                      'Made for your mood',
+                      style: yomiText(16, weight: FontWeight.w700),
+                    ),
+                    const Spacer(),
+                    FilledButton.tonalIcon(
+                      onPressed: _shuffleEverything,
+                      icon: const Icon(Icons.shuffle_rounded, size: 18),
+                      label: const Text('Shuffle library'),
+                    ),
+                  ],
+                )
+              : _ShuffleHero(onTap: _shuffleEverything),
         );
       case 'quick':
         return AsyncSection<List<_QuickPick>>(
@@ -113,6 +133,7 @@ class _HomePageState extends State<HomePage> {
                 .map(
                   (p) => _QuickPick(
                     p.name,
+                    '${p.songCount} songs · Playlist',
                     p.coverArtId,
                     () => openPlaylist(context, p),
                   ),
@@ -122,6 +143,7 @@ class _HomePageState extends State<HomePage> {
               for (var i = 0; i < songs.length; i++)
                 _QuickPick(
                   songs[i].title,
+                  songs[i].artist,
                   songs[i].coverArtId,
                   () => player.playQueue(songs, startIndex: i),
                 ),
@@ -140,17 +162,29 @@ class _HomePageState extends State<HomePage> {
                     kPagePadding,
                     0,
                   ),
-                  child: GridView.count(
-                    crossAxisCount: 2,
-                    shrinkWrap: true,
-                    physics: const NeverScrollableScrollPhysics(),
-                    mainAxisSpacing: 10,
-                    crossAxisSpacing: 10,
-                    childAspectRatio: 3.1,
-                    children: [
-                      for (final pick in picks) _QuickTile(pick: pick),
-                    ],
-                  ),
+                  child: isMac
+                      ? CompactMusicGrid(
+                          items: [
+                            for (final pick in picks)
+                              MusicShortcut(
+                                title: pick.title,
+                                subtitle: pick.subtitle,
+                                coverArtId: pick.coverArtId,
+                                onTap: pick.onTap,
+                              ),
+                          ],
+                        )
+                      : GridView.count(
+                          crossAxisCount: 2,
+                          shrinkWrap: true,
+                          physics: const NeverScrollableScrollPhysics(),
+                          mainAxisSpacing: 10,
+                          crossAxisSpacing: 10,
+                          childAspectRatio: 3.1,
+                          children: [
+                            for (final pick in picks) _QuickTile(pick: pick),
+                          ],
+                        ),
                 ),
         );
       case 'recent':
@@ -276,9 +310,10 @@ class _Header extends StatelessWidget {
 }
 
 class _QuickPick {
-  const _QuickPick(this.title, this.coverArtId, this.onTap);
+  const _QuickPick(this.title, this.subtitle, this.coverArtId, this.onTap);
 
   final String title;
+  final String subtitle;
   final String? coverArtId;
   final VoidCallback onTap;
 }
