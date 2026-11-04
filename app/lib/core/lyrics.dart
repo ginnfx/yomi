@@ -65,11 +65,13 @@ class Lyrics {
   factory Lyrics.parseLrc(String text) {
     final lines = <LyricLine>[];
     final rawLines = text.split('\n');
-    final offsetMs = rawLines
-        .map((raw) => _offsetTag.firstMatch(raw.trim())?.group(1))
-        .whereType<String>()
-        .map(int.parse)
-        .firstOrNull ?? 0;
+    final offsetMs =
+        rawLines
+            .map((raw) => _offsetTag.firstMatch(raw.trim())?.group(1))
+            .whereType<String>()
+            .map(int.parse)
+            .firstOrNull ??
+        0;
     for (final raw in rawLines) {
       final stamps = _stamp.allMatches(raw).toList();
       if (stamps.isEmpty) continue;
@@ -124,9 +126,8 @@ class LyricsStore {
   final Directory directory;
   final DateTime Function() _now;
 
-  File _fileFor(String songId) => File(
-    '${directory.path}/${sha1.convert(utf8.encode(songId))}.json',
-  );
+  File _fileFor(String songId) =>
+      File('${directory.path}/${sha1.convert(utf8.encode(songId))}.json');
 
   /// Returns the saved answer, or null when there is nothing current to go on.
   Future<LyricsLookup?> read(String songId) async {

@@ -95,8 +95,10 @@ void main() {
       });
       final client = clientReturning(online);
       final first = LyricsService(httpClient: online, store: LyricsStore(dir));
-      expect((await first.forSong(client, song))!.lines.single.text,
-          'saved line');
+      expect(
+        (await first.forSong(client, song))!.lines.single.text,
+        'saved line',
+      );
 
       final offline = MockClient((_) async => throw const SocketException('x'));
       final restarted = LyricsService(

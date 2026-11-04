@@ -54,7 +54,11 @@ void main() {
 
     void listen(int fromSeconds, int toSeconds, {bool isPlaying = true}) {
       for (var s = fromSeconds; s <= toSeconds; s++) {
-        tracker.position(Duration(seconds: s), isPlaying: isPlaying, now: at);
+        tracker.position(
+          Duration(seconds: s),
+          isPlaying: isPlaying,
+          now: at,
+        );
       }
     }
 
@@ -96,17 +100,20 @@ void main() {
       expect(events, ['start:s1']);
     });
 
-    test('leaving early counts as a skip; leaving after 30 seconds does not', () {
-      tracker.trackChanged(song, at);
-      listen(0, 10);
-      tracker.trackChanged(otherSong, at);
-      expect(events, ['start:s1', 'skip:s1', 'start:s2']);
+    test(
+      'leaving early counts as a skip; leaving after 30 seconds does not',
+      () {
+        tracker.trackChanged(song, at);
+        listen(0, 10);
+        tracker.trackChanged(otherSong, at);
+        expect(events, ['start:s1', 'skip:s1', 'start:s2']);
 
-      events.clear();
-      listen(0, 35);
-      tracker.trackChanged(song, at);
-      expect(events, ['start:s1']);
-    });
+        events.clear();
+        listen(0, 35);
+        tracker.trackChanged(song, at);
+        expect(events, ['start:s1']);
+      },
+    );
 
     test('repeat-one counts every loop as its own play', () {
       tracker.trackChanged(song, at);
@@ -184,15 +191,16 @@ void main() {
     });
     tearDown(() => dir.deleteSync(recursive: true));
 
-    SubsonicClient clientWith(http.Response Function() answer) => SubsonicClient(
-      baseUrl: 'http://server',
-      username: 'u',
-      password: 'p',
-      httpClient: MockClient((request) async {
-        requests.add(request.url);
-        return answer();
-      }),
-    );
+    SubsonicClient clientWith(http.Response Function() answer) =>
+        SubsonicClient(
+          baseUrl: 'http://server',
+          username: 'u',
+          password: 'p',
+          httpClient: MockClient((request) async {
+            requests.add(request.url);
+            return answer();
+          }),
+        );
 
     http.Response ok() => http.Response(
       jsonEncode({
@@ -201,23 +209,26 @@ void main() {
       200,
     );
 
-    test('replays offline plays with their original times, oldest first', () async {
-      final queue = ScrobbleQueue(File('${dir.path}/q.json'));
-      final first = DateTime(2026, 1, 1, 8);
-      final second = DateTime(2026, 1, 1, 9);
-      await queue.add(PendingScrobble('a', first));
-      await queue.add(PendingScrobble('b', second));
+    test(
+      'replays offline plays with their original times, oldest first',
+      () async {
+        final queue = ScrobbleQueue(File('${dir.path}/q.json'));
+        final first = DateTime(2026, 1, 1, 8);
+        final second = DateTime(2026, 1, 1, 9);
+        await queue.add(PendingScrobble('a', first));
+        await queue.add(PendingScrobble('b', second));
 
-      await queue.flush(clientWith(ok));
+        await queue.flush(clientWith(ok));
 
-      expect(requests.map((u) => u.queryParameters['id']), ['a', 'b']);
-      expect(
-        requests.first.queryParameters['time'],
-        '${first.millisecondsSinceEpoch}',
-      );
-      expect(requests.first.queryParameters['submission'], 'true');
-      expect(queue.pending, isEmpty);
-    });
+        expect(requests.map((u) => u.queryParameters['id']), ['a', 'b']);
+        expect(
+          requests.first.queryParameters['time'],
+          '${first.millisecondsSinceEpoch}',
+        );
+        expect(requests.first.queryParameters['submission'], 'true');
+        expect(queue.pending, isEmpty);
+      },
+    );
 
     test('keeps plays when the server is down, and across restarts', () async {
       final file = File('${dir.path}/q.json');

@@ -53,11 +53,13 @@ class AutoDownloadLedger {
     _save();
   }
 
-  static Map<String, DateTime> _without(Map<String, DateTime> map, String key) =>
-      {
-        for (final entry in map.entries)
-          if (entry.key != key) entry.key: entry.value,
-      };
+  static Map<String, DateTime> _without(
+    Map<String, DateTime> map,
+    String key,
+  ) => {
+    for (final entry in map.entries)
+      if (entry.key != key) entry.key: entry.value,
+  };
 
   void _load() {
     final raw = _prefs.getString(_prefsKey);
@@ -67,8 +69,7 @@ class AutoDownloadLedger {
       _auto = (json['auto'] as List<dynamic>).cast<String>().toSet();
       _declined = (json['declined'] as List<dynamic>).cast<String>().toSet();
       _evictedAt = {
-        for (final entry
-            in (json['evicted'] as Map<String, dynamic>).entries)
+        for (final entry in (json['evicted'] as Map<String, dynamic>).entries)
           entry.key: DateTime.fromMillisecondsSinceEpoch(
             (entry.value as num).toInt(),
           ),

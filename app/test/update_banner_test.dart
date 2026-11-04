@@ -27,7 +27,10 @@ Future<(UpdateController, List<Uri>)> _controller(
     'body': 'Lyrics are now always visible',
     'html_url': 'https://github.com/ginnfx/yomi/releases/tag/v1.0.2',
     'assets': [
-      {'name': 'Yomi-android.apk', 'browser_download_url': '$base/Yomi-android.apk'},
+      {
+        'name': 'Yomi-android.apk',
+        'browser_download_url': '$base/Yomi-android.apk',
+      },
       {
         'name': 'Yomi-android.apk.sha256',
         'browser_download_url': '$base/Yomi-android.apk.sha256',
@@ -91,7 +94,9 @@ void main() {
     expect(find.textContaining('Yomi'), findsNothing);
   });
 
-  testWidgets('announces the new version with an Update action', (tester) async {
+  testWidgets('announces the new version with an Update action', (
+    tester,
+  ) async {
     final (controller, _) = await _controller(tester);
 
     await _pump(tester, controller);
@@ -143,7 +148,9 @@ void main() {
     expect(find.textContaining("couldn't"), findsOneWidget);
   });
 
-  testWidgets('macOS offers a Download link to the release page', (tester) async {
+  testWidgets('macOS offers a Download link to the release page', (
+    tester,
+  ) async {
     final (controller, opened) = await _controller(
       tester,
       mode: UpdateMode.openReleasePage,

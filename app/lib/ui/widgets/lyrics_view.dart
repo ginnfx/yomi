@@ -2,40 +2,58 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/lyrics.dart';
-import '../../core/models.dart';
 import '../../state/player_controller.dart';
-import '../../state/session.dart';
 import '../theme.dart';
 
-/// Lyrics that follow the song. Synced lyrics highlight the current line and tapping a line jumps to it.
-class LyricsView extends StatefulWidget {
-  const LyricsView({super.key, required this.song});
+const double _lineGap = 18;
 
-  final Song song;
+/// After scrolling by hand, how long the view waits before following the song again.
+const Duration _followResumeAfter = Duration(seconds: 4);
+
+/// Where the active line sits in the viewport, from the top.
+const double _activeLineAnchor = 0.3;
+
+/// The top of each line when laid out at [width]. Lines wrap, so they have to be
+/// measured to know where to scroll.
+List<double> measureLyricTops({
+  required List<String> lines,
+  required double width,
+  required TextStyle style,
+  required TextScaler textScaler,
+  required TextDirection textDirection,
+  double gap = _lineGap,
+}) {
+  final tops = <double>[];
+  var top = 0.0;
+  for (final line in lines) {
+    tops.add(top);
+    final painter = TextPainter(
+      text: TextSpan(text: line, style: style),
+      textDirection: textDirection,
+      textScaler: textScaler,
+    )..layout(maxWidth: width);
+    top += painter.height + gap;
+    painter.dispose();
+  }
+  return List.unmodifiable(tops);
+}
+
+/// Lyrics that follow the song. Synced lyrics highlight the current line and
+/// tapping a line jumps to it.
+class LyricsView extends StatefulWidget {
+  const LyricsView({super.key, required this.lyrics, this.fontSize = 26});
+
+  final Lyrics lyrics;
+  final double fontSize;
 
   @override
   State<LyricsView> createState() => _LyricsViewState();
 }
 
 class _LyricsViewState extends State<LyricsView> {
-  static const double _lineExtent = 54;
   final _scroll = ScrollController();
-  late Future<Lyrics?> _lyrics = _load();
   int _lastActive = -2;
-
-  Future<Lyrics?> _load() => context.read<LyricsService>().forSong(
-    context.read<SessionController>().client,
-    widget.song,
-  );
-
-  @override
-  void didUpdateWidget(LyricsView old) {
-    super.didUpdateWidget(old);
-    if (old.song.id != widget.song.id) {
-      _lastActive = -2;
-      _lyrics = _load();
-    }
-  }
+  DateTime _followPausedUntil = DateTime.fromMillisecondsSinceEpoch(0);
 
   @override
   void dispose() {
@@ -43,106 +61,117 @@ class _LyricsViewState extends State<LyricsView> {
     super.dispose();
   }
 
-  void _follow(int active, double viewport) {
+  String _textOf(LyricLine line) => line.text.isEmpty ? '♪' : line.text;
+
+  TextStyle get _style => yomiText(
+    widget.fontSize,
+    weight: FontWeight.w800,
+    height: 1.2,
+    letterSpacing: -0.3,
+  );
+
+  void _follow(int active, List<double> tops, double viewport) {
     if (active == _lastActive || !_scroll.hasClients) return;
+    if (DateTime.now().isBefore(_followPausedUntil)) return;
     _lastActive = active;
-    final target = (active * _lineExtent - viewport / 2 + _lineExtent / 2)
-        .clamp(0.0, _scroll.position.maxScrollExtent);
+    final lineTop = active < 0 ? 0.0 : tops[active];
+    final target = (lineTop - viewport * _activeLineAnchor).clamp(
+      0.0,
+      _scroll.position.maxScrollExtent,
+    );
     _scroll.animateTo(
       target,
-      duration: const Duration(milliseconds: 450),
-      curve: Curves.easeOutCubic,
+      duration: YomiMotion.standard,
+      curve: YomiMotion.curve,
     );
   }
 
   @override
   Widget build(BuildContext context) {
-    return FutureBuilder<Lyrics?>(
-      future: _lyrics,
-      builder: (context, snapshot) {
-        if (snapshot.connectionState != ConnectionState.done)
-          return const Center(child: CircularProgressIndicator(strokeWidth: 2));
-        final lyrics = snapshot.data;
-        if (lyrics == null)
-          return Center(
-            child: Text(
-              'No lyrics for this one',
-              style: yomiText(
-                15,
-                weight: FontWeight.w600,
-                color: Colors.white60,
-              ),
-            ),
-          );
-        return LayoutBuilder(
-          builder: (context, box) =>
-              lyrics.isSynced ? _synced(lyrics, box.maxHeight) : _plain(lyrics),
-        );
-      },
+    return ShaderMask(
+      blendMode: BlendMode.dstIn,
+      shaderCallback: (bounds) => const LinearGradient(
+        begin: Alignment.topCenter,
+        end: Alignment.bottomCenter,
+        colors: [
+          Colors.transparent,
+          Colors.black,
+          Colors.black,
+          Colors.transparent,
+        ],
+        stops: [0, 0.06, 0.92, 1],
+      ).createShader(bounds),
+      child: LayoutBuilder(
+        builder: (context, box) =>
+            widget.lyrics.isSynced ? _synced(context, box) : _plain(box),
+      ),
     );
   }
 
-  Widget _plain(Lyrics lyrics) => ListView(
+  EdgeInsets _padding(BoxConstraints box) =>
+      EdgeInsets.only(top: YomiSpace.xl, bottom: box.maxHeight * 0.6);
+
+  Widget _plain(BoxConstraints box) => ListView.builder(
     controller: _scroll,
-    padding: const EdgeInsets.symmetric(vertical: 20),
-    children: [
-      for (final l in lyrics.lines)
-        Padding(
-          padding: const EdgeInsets.symmetric(vertical: 5),
-          child: Text(
-            l.text,
-            style: yomiText(
-              20,
-              weight: FontWeight.w700,
-              color: Colors.white.withValues(alpha: 0.85),
-              height: 1.3,
-            ),
-          ),
-        ),
-    ],
+    padding: _padding(box),
+    itemCount: widget.lyrics.lines.length,
+    itemBuilder: (_, i) => Padding(
+      padding: const EdgeInsets.only(bottom: _lineGap),
+      child: Text(_textOf(widget.lyrics.lines[i]), style: _style),
+    ),
   );
 
-  Widget _synced(Lyrics lyrics, double height) {
+  Widget _synced(BuildContext context, BoxConstraints box) {
     final player = context.read<PlayerController>();
-    return StreamBuilder<Duration>(
-      stream: player.positionStream,
-      builder: (context, snapshot) {
-        final active = lyrics.activeIndex(snapshot.data ?? Duration.zero);
-        WidgetsBinding.instance.addPostFrameCallback(
-          (_) => _follow(active, height),
-        );
-        return ListView.builder(
-          controller: _scroll,
-          padding: EdgeInsets.symmetric(vertical: height / 2 - _lineExtent / 2),
-          itemExtent: _lineExtent,
-          itemCount: lyrics.lines.length,
-          itemBuilder: (context, i) {
-            final line = lyrics.lines[i];
-            final distance = (i - active).abs();
-            final alpha = i == active ? 1.0 : (distance == 1 ? 0.5 : 0.3);
-            return InkWell(
-              onTap: () => player.seek(line.start!),
-              child: Align(
-                alignment: Alignment.centerLeft,
+    final lines = widget.lyrics.lines;
+    final tops = measureLyricTops(
+      lines: [for (final line in lines) _textOf(line)],
+      width: box.maxWidth,
+      style: _style,
+      textScaler: MediaQuery.textScalerOf(context),
+      textDirection: Directionality.of(context),
+    );
+    return NotificationListener<UserScrollNotification>(
+      onNotification: (_) {
+        _followPausedUntil = DateTime.now().add(_followResumeAfter);
+        _lastActive = -2;
+        return false;
+      },
+      child: StreamBuilder<Duration>(
+        stream: player.positionStream,
+        builder: (context, snapshot) {
+          final active = widget.lyrics.activeIndex(
+            snapshot.data ?? Duration.zero,
+          );
+          WidgetsBinding.instance.addPostFrameCallback(
+            (_) => _follow(active, tops, box.maxHeight),
+          );
+          return ListView.builder(
+            controller: _scroll,
+            padding: _padding(box),
+            itemCount: lines.length,
+            itemBuilder: (context, i) => GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: () {
+                _followPausedUntil = DateTime.fromMillisecondsSinceEpoch(0);
+                player.seek(lines[i].start!);
+              },
+              child: Padding(
+                padding: const EdgeInsets.only(bottom: _lineGap),
                 child: AnimatedDefaultTextStyle(
-                  duration: const Duration(milliseconds: 250),
-                  style: yomiText(
-                    i == active ? 24 : 21,
-                    weight: FontWeight.w800,
-                    color: Colors.white.withValues(alpha: alpha),
-                    height: 1.15,
+                  duration: YomiMotion.standard,
+                  style: _style.copyWith(
+                    color: Colors.white.withValues(
+                      alpha: i == active ? 1 : 0.38,
+                    ),
                   ),
-                  child: Text(
-                    line.text.isEmpty ? '♪' : line.text,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                  ),
+                  child: Text(_textOf(lines[i])),
                 ),
               ),
-            );
-          },
-        );
-      },
+            ),
+          );
+        },
+      ),
     );
   }
 }

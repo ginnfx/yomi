@@ -1,4 +1,3 @@
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -14,7 +13,7 @@ class ContinueListening extends StatelessWidget {
     final sync = context.watch<PlaybackSyncController>();
     final remote = sync.remote;
     if (!sync.enabled || remote == null) return const SizedBox.shrink();
-    if (defaultTargetPlatform == TargetPlatform.macOS) {
+    if (context.isWideLayout) {
       return Padding(
         padding: const EdgeInsets.fromLTRB(kPagePadding, 18, kPagePadding, 0),
         child: Container(

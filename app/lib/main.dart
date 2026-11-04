@@ -261,7 +261,7 @@ class _Gate extends StatelessWidget {
   Widget build(BuildContext context) {
     final session = context.watch<SessionController>();
     if (session.isRestoring) {
-      return AuroraBackground(
+      return PageBackground(
         child: Scaffold(
           backgroundColor: Colors.transparent,
           body: Center(

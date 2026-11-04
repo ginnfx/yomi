@@ -8,13 +8,12 @@ import '../../state/session.dart';
 import '../pages/now_playing_page.dart';
 import '../theme.dart';
 import 'cover_art.dart';
-import 'glass.dart';
 
-const double kMiniPlayerHeight = 68;
-const double kMiniPlayerGap = 8;
+const double kMiniPlayerHeight = 56;
+const double kMiniPlayerGap = YomiSpace.xs;
 const double _swipeVelocity = 250;
 
-/// Floating now-playing card. Tap to expand, swipe sideways to skip.
+/// Now-playing bar above the navigation. Tap or swipe up to expand, swipe sideways to skip.
 class MiniPlayer extends StatelessWidget {
   const MiniPlayer({super.key});
 
@@ -27,9 +26,19 @@ class MiniPlayer extends StatelessWidget {
     return FutureBuilder<Color?>(
       future: context.read<CoverPalette>().colorFor(client, song.coverArtId),
       builder: (context, snapshot) => Padding(
-        padding: const EdgeInsets.fromLTRB(12, 0, 12, kMiniPlayerGap),
+        padding: const EdgeInsets.fromLTRB(
+          YomiSpace.s,
+          0,
+          YomiSpace.s,
+          kMiniPlayerGap,
+        ),
         child: GestureDetector(
           onTap: () => openNowPlaying(context),
+          onVerticalDragEnd: (details) {
+            if ((details.primaryVelocity ?? 0) < -_swipeVelocity) {
+              openNowPlaying(context);
+            }
+          },
           onHorizontalDragEnd: (details) {
             final v = details.primaryVelocity ?? 0;
             if (v < -_swipeVelocity) {
@@ -40,27 +49,33 @@ class MiniPlayer extends StatelessWidget {
               player.previous();
             }
           },
-          child: Glass(
-            radius: 22,
-            tint: snapshot.data == null
-                ? null
-                : Color.lerp(snapshot.data, Colors.black, 0.3),
+          child: Material(
+            clipBehavior: Clip.antiAlias,
+            borderRadius: BorderRadius.circular(YomiRadius.card),
+            color: snapshot.data == null
+                ? YomiColors.surfaceHigh
+                : Color.lerp(snapshot.data, Colors.black, 0.35),
             child: SizedBox(
               height: kMiniPlayerHeight,
               child: Stack(
                 children: [
                   Padding(
-                    padding: const EdgeInsets.fromLTRB(10, 0, 6, 0),
+                    padding: const EdgeInsets.fromLTRB(
+                      YomiSpace.s,
+                      0,
+                      YomiSpace.xs,
+                      0,
+                    ),
                     child: Row(
                       children: [
                         CoverArt(
                           coverArtId: song.coverArtId,
-                          size: 48,
-                          radius: 10,
+                          size: 40,
+                          radius: YomiRadius.art,
                           heroTag: 'cover-${song.id}',
                           seed: song.album,
                         ),
-                        const SizedBox(width: 12),
+                        const SizedBox(width: YomiSpace.m),
                         Expanded(
                           child: Column(
                             mainAxisAlignment: MainAxisAlignment.center,
@@ -70,14 +85,14 @@ class MiniPlayer extends StatelessWidget {
                                 song.title,
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
-                                style: yomiText(15, weight: FontWeight.w700),
+                                style: yomiText(14, weight: FontWeight.w700),
                               ),
                               Text(
                                 song.artist,
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
                                 style: yomiText(
-                                  12.5,
+                                  12,
                                   weight: FontWeight.w500,
                                   color: Colors.white70,
                                 ),
@@ -93,21 +108,15 @@ class MiniPlayer extends StatelessWidget {
                           ),
                         IconButton(
                           tooltip: player.isPlaying ? 'Pause' : 'Play',
-                          iconSize: 34,
+                          iconSize: 30,
                           onPressed: () {
                             HapticFeedback.lightImpact();
                             player.togglePlay();
                           },
-                          icon: AnimatedSwitcher(
-                            duration: const Duration(milliseconds: 180),
-                            transitionBuilder: (child, anim) =>
-                                ScaleTransition(scale: anim, child: child),
-                            child: Icon(
-                              player.isPlaying
-                                  ? Icons.pause_rounded
-                                  : Icons.play_arrow_rounded,
-                              key: ValueKey(player.isPlaying),
-                            ),
+                          icon: Icon(
+                            player.isPlaying
+                                ? Icons.pause_rounded
+                                : Icons.play_arrow_rounded,
                           ),
                         ),
                         if (MediaQuery.sizeOf(context).width >= 900)
@@ -120,9 +129,9 @@ class MiniPlayer extends StatelessWidget {
                     ),
                   ),
                   Positioned(
-                    left: 16,
-                    right: 16,
-                    bottom: 4,
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
                     child: _ProgressLine(player: player, total: song.duration),
                   ),
                 ],
@@ -150,14 +159,11 @@ class _ProgressLine extends StatelessWidget {
         final fraction = total.inMilliseconds == 0
             ? 0.0
             : (position.inMilliseconds / total.inMilliseconds).clamp(0.0, 1.0);
-        return ClipRRect(
-          borderRadius: BorderRadius.circular(2),
-          child: LinearProgressIndicator(
-            value: fraction,
-            minHeight: 2.5,
-            backgroundColor: Colors.white12,
-            color: YomiColors.textPrimary,
-          ),
+        return LinearProgressIndicator(
+          value: fraction,
+          minHeight: 2,
+          backgroundColor: Colors.white12,
+          color: YomiColors.textPrimary,
         );
       },
     );

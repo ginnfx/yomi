@@ -55,7 +55,7 @@ class _LoginPageState extends State<LoginPage> {
 
   @override
   Widget build(BuildContext context) {
-    return AuroraBackground(
+    return PageBackground(
       child: Scaffold(
         backgroundColor: Colors.transparent,
         body: SafeArea(
@@ -67,18 +67,14 @@ class _LoginPageState extends State<LoginPage> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    ShaderMask(
-                      blendMode: BlendMode.srcIn,
-                      shaderCallback: (rect) =>
-                          context.accentGradient.createShader(rect),
-                      child: Text(
-                        'Yomi',
-                        textAlign: TextAlign.center,
-                        style: yomiText(
-                          68,
-                          weight: FontWeight.w800,
-                          letterSpacing: -3,
-                        ),
+                    Text(
+                      'Yomi',
+                      textAlign: TextAlign.center,
+                      style: yomiText(
+                        56,
+                        weight: FontWeight.w800,
+                        letterSpacing: -2,
+                        color: context.accent,
                       ),
                     ),
                     const SizedBox(height: 4),

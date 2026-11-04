@@ -1,16 +1,17 @@
 import 'dart:math' as math;
-import 'dart:ui';
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/format.dart';
+import '../../core/lyrics.dart';
 import '../../core/models.dart';
 import '../../state/download_manager.dart';
 import '../../state/player_controller.dart';
+import '../../state/session.dart';
+import '../../state/settings.dart';
 import '../theme.dart';
 import '../widgets/cover_art.dart';
 import '../widgets/download_badge.dart';
@@ -18,26 +19,31 @@ import '../widgets/equalizer.dart';
 import '../widgets/lyrics_view.dart';
 import '../widgets/tinted_background.dart';
 
-const double _maxCover = 360;
+const double _maxCover = 460;
+const double _compactCover = 56;
+const double _dismissVelocity = 450;
+const double _dismissDistanceShare = 0.25;
 
 void openNowPlaying(BuildContext context) {
   Navigator.of(context, rootNavigator: true).push(
     PageRouteBuilder<void>(
       fullscreenDialog: true,
-      transitionDuration: const Duration(milliseconds: 340),
-      reverseTransitionDuration: const Duration(milliseconds: 260),
+      transitionDuration: const Duration(milliseconds: 300),
+      reverseTransitionDuration: YomiMotion.standard,
       pageBuilder: (_, _, _) => const NowPlayingPage(),
       transitionsBuilder: (_, animation, _, child) => SlideTransition(
         position: Tween(
           begin: const Offset(0, 1),
           end: Offset.zero,
-        ).chain(CurveTween(curve: Curves.easeOutCubic)).animate(animation),
+        ).chain(CurveTween(curve: YomiMotion.curve)).animate(animation),
         child: child,
       ),
     ),
   );
 }
 
+/// The player. Lyrics show by themselves whenever a song has them: beside the
+/// art on wide screens, and under a small header on phones.
 class NowPlayingPage extends StatefulWidget {
   const NowPlayingPage({super.key});
 
@@ -45,9 +51,57 @@ class NowPlayingPage extends StatefulWidget {
   State<NowPlayingPage> createState() => _NowPlayingPageState();
 }
 
-class _NowPlayingPageState extends State<NowPlayingPage> {
-  static const double _dismissVelocity = 450;
-  bool _showLyrics = false;
+class _NowPlayingPageState extends State<NowPlayingPage>
+    with SingleTickerProviderStateMixin {
+  String? _lyricsSongId;
+  Future<Lyrics?>? _lyrics;
+  late final AnimationController _settle = AnimationController(
+    vsync: this,
+    duration: YomiMotion.standard,
+  );
+  double _dragOffset = 0;
+
+  @override
+  void dispose() {
+    _settle.dispose();
+    super.dispose();
+  }
+
+  Future<Lyrics?> _lyricsFor(Song song) {
+    if (song.id != _lyricsSongId || _lyrics == null) {
+      _lyricsSongId = song.id;
+      _lyrics = context.read<LyricsService>().forSong(
+        context.read<SessionController>().client,
+        song,
+      );
+    }
+    return _lyrics!;
+  }
+
+  void _onDragUpdate(DragUpdateDetails details) {
+    _settle.stop();
+    setState(() => _dragOffset = math.max(0, _dragOffset + details.delta.dy));
+  }
+
+  void _onDragEnd(DragEndDetails details) {
+    final height = MediaQuery.sizeOf(context).height;
+    final shouldClose =
+        (details.primaryVelocity ?? 0) > _dismissVelocity ||
+        _dragOffset > height * _dismissDistanceShare;
+    if (shouldClose) {
+      Navigator.pop(context);
+      return;
+    }
+    final start = _dragOffset;
+    final tween = Tween<double>(
+      begin: start,
+      end: 0,
+    ).chain(CurveTween(curve: YomiMotion.curve));
+    void onTick() => setState(() => _dragOffset = tween.evaluate(_settle));
+    _settle
+      ..addListener(onTick)
+      ..forward(from: 0).whenComplete(() => _settle.removeListener(onTick));
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -55,161 +109,337 @@ class _NowPlayingPageState extends State<NowPlayingPage> {
     final song = player.current;
     if (song == null) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (context.mounted && Navigator.canPop(context))
+        if (context.mounted && Navigator.canPop(context)) {
           Navigator.pop(context);
+        }
       });
       return const Scaffold();
     }
-    final width = MediaQuery.sizeOf(context).width;
-    final height = MediaQuery.sizeOf(context).height;
-    final isMac = defaultTargetPlatform == TargetPlatform.macOS;
-    final coverSize = math.min(
-      (width - kPagePadding * 2).clamp(0.0, _maxCover),
-      isMac ? math.max(100.0, height - 400) : _maxCover,
-    );
-    final horizontalPadding = isMac
-        ? math.max(kPagePadding, (width - 620) / 2)
-        : kPagePadding;
-    return TintedBackground(
-      coverArtId: song.coverArtId,
-      child: Scaffold(
-        backgroundColor: Colors.transparent,
-        body: Stack(
-          fit: StackFit.expand,
-          children: [
-            Opacity(
-              opacity: 0.55,
-              child: ImageFiltered(
-                imageFilter: ImageFilter.blur(sigmaX: 46, sigmaY: 46),
-                child: Transform.scale(
-                  scale: 1.7,
-                  child: CoverArt(
-                    coverArtId: song.coverArtId,
-                    size: width,
-                    radius: 0,
-                    seed: song.album,
-                  ),
-                ),
-              ),
-            ),
-            DecoratedBox(
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                  colors: [
-                    Colors.black.withValues(alpha: 0.2),
-                    YomiColors.background.withValues(alpha: 0.92),
-                  ],
-                ),
-              ),
-            ),
-            SafeArea(
-              child: GestureDetector(
-                behavior: HitTestBehavior.translucent,
-                onVerticalDragEnd: (d) {
-                  if ((d.primaryVelocity ?? 0) > _dismissVelocity)
-                    Navigator.pop(context);
-                },
-                child: Padding(
-                  padding: EdgeInsets.symmetric(horizontal: horizontalPadding),
-                  child: Column(
-                    children: [
-                      Row(
-                        children: [
-                          IconButton(
-                            icon: const Icon(
-                              Icons.keyboard_arrow_down_rounded,
-                              size: 34,
-                            ),
-                            onPressed: () => Navigator.pop(context),
-                          ),
-                          const Spacer(),
-                          IconButton(
-                            tooltip: 'Lyrics',
-                            icon: Icon(
-                              Icons.lyrics_rounded,
-                              color: _showLyrics ? context.accent : null,
-                            ),
-                            onPressed: () =>
-                                setState(() => _showLyrics = !_showLyrics),
-                          ),
-                          IconButton(
-                            icon: const Icon(Icons.queue_music_rounded),
-                            onPressed: () => _showQueue(context),
-                          ),
-                        ],
-                      ),
-                      if (_showLyrics)
-                        Expanded(
-                          child: Padding(
-                            padding: const EdgeInsets.only(top: 6),
-                            child: LyricsView(
-                              key: ValueKey(song.id),
-                              song: song,
-                            ),
-                          ),
+    return Transform.translate(
+      offset: Offset(0, _dragOffset),
+      child: TintedBackground(
+        coverArtId: song.coverArtId,
+        child: Scaffold(
+          backgroundColor: Colors.transparent,
+          body: SafeArea(
+            child: GestureDetector(
+              behavior: HitTestBehavior.translucent,
+              onVerticalDragUpdate: _onDragUpdate,
+              onVerticalDragEnd: _onDragEnd,
+              child: FutureBuilder<Lyrics?>(
+                future: _lyricsFor(song),
+                builder: (context, snapshot) {
+                  final lyrics = snapshot.data;
+                  final hasLyrics = lyrics != null && lyrics.lines.isNotEmpty;
+                  return context.isWideLayout
+                      ? _WideLayout(
+                          player: player,
+                          song: song,
+                          lyrics: hasLyrics ? lyrics : null,
                         )
-                      else ...[
-                        const Spacer(flex: 2),
-                        AnimatedScale(
-                          scale: player.isPlaying ? 1.0 : 0.88,
-                          duration: const Duration(milliseconds: 420),
-                          curve: Curves.easeOutBack,
-                          child: CoverArt(
-                            coverArtId: song.coverArtId,
-                            size: coverSize,
-                            radius: 26,
-                            elevated: true,
-                            heroTag: 'cover-${song.id}',
-                            seed: song.album,
-                          ),
-                        ),
-                        const SizedBox(height: 30),
-                      ],
-                      _TitleRow(song: song),
-                      if (player.error != null)
-                        Padding(
-                          padding: const EdgeInsets.only(top: 8),
-                          child: Text(
-                            player.error!,
-                            style: yomiText(
-                              13,
-                              weight: FontWeight.w600,
-                              color: Colors.redAccent,
-                            ),
-                          ),
-                        ),
-                      const SizedBox(height: 14),
-                      _SeekBar(player: player, fallbackTotal: song.duration),
-                      const SizedBox(height: 6),
-                      _Controls(player: player),
-                      const SizedBox(height: 22),
-                      if (!_showLyrics) const Spacer(),
-                    ],
-                  ),
-                ),
+                      : _PhoneLayout(
+                          player: player,
+                          song: song,
+                          lyrics: hasLyrics ? lyrics : null,
+                        );
+                },
               ),
             ),
-          ],
+          ),
         ),
       ),
     );
   }
+}
 
-  void _showQueue(BuildContext context) {
-    showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      builder: (_) => const _QueueSheet(),
+class _TopBar extends StatelessWidget {
+  const _TopBar({required this.song});
+
+  final Song song;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        IconButton(
+          tooltip: 'Close player',
+          icon: const Icon(Icons.keyboard_arrow_down_rounded, size: 32),
+          onPressed: () => Navigator.pop(context),
+        ),
+        Expanded(
+          child: Text(
+            song.album,
+            textAlign: TextAlign.center,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: yomiText(13, weight: FontWeight.w700),
+          ),
+        ),
+        IconButton(
+          tooltip: 'Queue',
+          icon: const Icon(Icons.queue_music_rounded),
+          onPressed: () => showModalBottomSheet<void>(
+            context: context,
+            isScrollControlled: true,
+            builder: (_) => const _QueueSheet(),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _ErrorLine extends StatelessWidget {
+  const _ErrorLine({required this.message});
+
+  final String message;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.only(top: YomiSpace.s),
+    child: Text(
+      message,
+      style: yomiText(13, weight: FontWeight.w600, color: YomiColors.danger),
+    ),
+  );
+}
+
+/// Art as large as the space allows, without ever overflowing a short screen.
+class _LargeArt extends StatelessWidget {
+  const _LargeArt({required this.song, this.onTap});
+
+  final Song song;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, box) {
+        final size = math.min(_maxCover, math.min(box.maxWidth, box.maxHeight));
+        return Center(
+          child: GestureDetector(
+            onTap: onTap,
+            child: CoverArt(
+              coverArtId: song.coverArtId,
+              size: size,
+              radius: YomiRadius.card,
+              elevated: true,
+              heroTag: 'cover-${song.id}',
+              seed: song.album,
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _PlayerControls extends StatelessWidget {
+  const _PlayerControls({required this.player, required this.song});
+
+  final PlayerController player;
+  final Song song;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        _SeekBar(player: player, fallbackTotal: song.duration),
+        _Controls(player: player),
+        const SizedBox(height: YomiSpace.l),
+      ],
+    );
+  }
+}
+
+class _PhoneLayout extends StatelessWidget {
+  const _PhoneLayout({
+    required this.player,
+    required this.song,
+    required this.lyrics,
+  });
+
+  final PlayerController player;
+  final Song song;
+  final Lyrics? lyrics;
+
+  @override
+  Widget build(BuildContext context) {
+    final settings = context.watch<SettingsController>();
+    final lines = lyrics;
+    final showLyrics = lines != null && !settings.prefersArtOverLyrics;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: kPagePadding),
+      child: Column(
+        children: [
+          _TopBar(song: song),
+          Expanded(
+            child: AnimatedSwitcher(
+              duration: YomiMotion.standard,
+              child: showLyrics
+                  ? _LyricsPane(
+                      key: ValueKey('lyrics-${song.id}'),
+                      song: song,
+                      lyrics: lines,
+                      onTapArt: () => settings.setPrefersArtOverLyrics(true),
+                    )
+                  : _ArtPane(
+                      key: ValueKey('art-${song.id}'),
+                      song: song,
+                      onTapArt: lines == null
+                          ? null
+                          : () => settings.setPrefersArtOverLyrics(false),
+                    ),
+            ),
+          ),
+          if (player.error != null) _ErrorLine(message: player.error!),
+          _PlayerControls(player: player, song: song),
+        ],
+      ),
+    );
+  }
+}
+
+class _ArtPane extends StatelessWidget {
+  const _ArtPane({super.key, required this.song, required this.onTapArt});
+
+  final Song song;
+  final VoidCallback? onTapArt;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        Expanded(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: YomiSpace.l),
+            child: _LargeArt(song: song, onTap: onTapArt),
+          ),
+        ),
+        _TitleRow(song: song),
+        const SizedBox(height: YomiSpace.m),
+      ],
+    );
+  }
+}
+
+class _LyricsPane extends StatelessWidget {
+  const _LyricsPane({
+    super.key,
+    required this.song,
+    required this.lyrics,
+    required this.onTapArt,
+  });
+
+  final Song song;
+  final Lyrics lyrics;
+  final VoidCallback onTapArt;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        Row(
+          children: [
+            Semantics(
+              button: true,
+              label: 'Show large artwork',
+              child: GestureDetector(
+                onTap: onTapArt,
+                child: CoverArt(
+                  coverArtId: song.coverArtId,
+                  size: _compactCover,
+                  radius: YomiRadius.art,
+                  heroTag: 'cover-${song.id}',
+                  seed: song.album,
+                ),
+              ),
+            ),
+            const SizedBox(width: YomiSpace.m),
+            Expanded(child: _TitleRow(song: song, isCompact: true)),
+          ],
+        ),
+        Expanded(child: LyricsView(lyrics: lyrics)),
+      ],
+    );
+  }
+}
+
+class _WideLayout extends StatelessWidget {
+  const _WideLayout({
+    required this.player,
+    required this.song,
+    required this.lyrics,
+  });
+
+  final PlayerController player;
+  final Song song;
+  final Lyrics? lyrics;
+
+  @override
+  Widget build(BuildContext context) {
+    final lines = lyrics;
+    final artColumn = Column(
+      children: [
+        Expanded(
+          child: Padding(
+            padding: const EdgeInsets.only(bottom: YomiSpace.xl),
+            child: _LargeArt(song: song),
+          ),
+        ),
+        ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: _maxCover),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _TitleRow(song: song),
+              if (player.error != null) _ErrorLine(message: player.error!),
+              const SizedBox(height: YomiSpace.m),
+              _PlayerControls(player: player, song: song),
+            ],
+          ),
+        ),
+      ],
+    );
+    return Column(
+      children: [
+        _TopBar(song: song),
+        Expanded(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(
+              YomiSpace.xxl,
+              YomiSpace.s,
+              YomiSpace.xxl,
+              YomiSpace.s,
+            ),
+            child: lines == null
+                ? Center(child: artColumn)
+                : Row(
+                    children: [
+                      Expanded(child: artColumn),
+                      const SizedBox(width: YomiSpace.xxl * 2),
+                      Expanded(
+                        child: LyricsView(
+                          key: ValueKey(song.id),
+                          lyrics: lines,
+                          fontSize: 32,
+                        ),
+                      ),
+                    ],
+                  ),
+          ),
+        ),
+      ],
     );
   }
 }
 
 class _TitleRow extends StatelessWidget {
-  const _TitleRow({required this.song});
+  const _TitleRow({required this.song, this.isCompact = false});
 
   final Song song;
+  final bool isCompact;
 
   @override
   Widget build(BuildContext context) {
@@ -223,23 +453,23 @@ class _TitleRow extends StatelessWidget {
             children: [
               Text(
                 song.title,
-                maxLines: 2,
+                maxLines: isCompact ? 1 : 2,
                 overflow: TextOverflow.ellipsis,
                 style: yomiText(
-                  26,
+                  isCompact ? 17 : 24,
                   weight: FontWeight.w800,
-                  letterSpacing: -0.5,
-                  height: 1.1,
+                  letterSpacing: -0.4,
+                  height: 1.15,
                 ),
               ),
-              const SizedBox(height: 5),
+              const SizedBox(height: 2),
               Text(
                 song.artist,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: yomiText(
-                  16.5,
-                  weight: FontWeight.w600,
+                  isCompact ? 13.5 : 16,
+                  weight: FontWeight.w500,
                   color: Colors.white70,
                 ),
               ),
@@ -303,17 +533,33 @@ class _SeekBarState extends State<_SeekBar> {
                 position.inMilliseconds.clamp(0, totalMs).toDouble();
             return Column(
               children: [
-                Slider(
-                  value: value,
-                  max: totalMs.toDouble(),
-                  onChanged: (v) => setState(() => _dragValue = v),
-                  onChangeEnd: (v) {
-                    widget.player.seek(Duration(milliseconds: v.round()));
-                    setState(() => _dragValue = null);
-                  },
+                SliderTheme(
+                  data: SliderTheme.of(context).copyWith(
+                    trackHeight: 3,
+                    activeTrackColor: YomiColors.textPrimary,
+                    inactiveTrackColor: Colors.white24,
+                    thumbColor: YomiColors.textPrimary,
+                    overlayShape: SliderComponentShape.noOverlay,
+                    thumbShape: const RoundSliderThumbShape(
+                      enabledThumbRadius: 6,
+                    ),
+                    trackShape: const RectangularSliderTrackShape(),
+                  ),
+                  child: SizedBox(
+                    height: 24,
+                    child: Slider(
+                      value: value,
+                      max: totalMs.toDouble(),
+                      onChanged: (v) => setState(() => _dragValue = v),
+                      onChangeEnd: (v) {
+                        widget.player.seek(Duration(milliseconds: v.round()));
+                        setState(() => _dragValue = null);
+                      },
+                    ),
+                  ),
                 ),
                 Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 6),
+                  padding: EdgeInsets.zero,
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
@@ -369,7 +615,7 @@ class _Controls extends StatelessWidget {
           },
         ),
         IconButton(
-          iconSize: 44,
+          iconSize: 38,
           icon: const Icon(Icons.skip_previous_rounded),
           onPressed: () {
             HapticFeedback.lightImpact();
@@ -382,37 +628,31 @@ class _Controls extends StatelessWidget {
             player.togglePlay();
           },
           child: Container(
-            width: 78,
-            height: 78,
+            width: 64,
+            height: 64,
             decoration: const BoxDecoration(
               color: YomiColors.textPrimary,
               shape: BoxShape.circle,
             ),
             child: player.isBuffering
                 ? const Padding(
-                    padding: EdgeInsets.all(24),
+                    padding: EdgeInsets.all(20),
                     child: CircularProgressIndicator(
                       strokeWidth: 3,
                       color: Colors.black,
                     ),
                   )
-                : AnimatedSwitcher(
-                    duration: const Duration(milliseconds: 180),
-                    transitionBuilder: (child, anim) =>
-                        ScaleTransition(scale: anim, child: child),
-                    child: Icon(
-                      player.isPlaying
-                          ? Icons.pause_rounded
-                          : Icons.play_arrow_rounded,
-                      key: ValueKey(player.isPlaying),
-                      color: Colors.black,
-                      size: 46,
-                    ),
+                : Icon(
+                    player.isPlaying
+                        ? Icons.pause_rounded
+                        : Icons.play_arrow_rounded,
+                    color: Colors.black,
+                    size: 38,
                   ),
           ),
         ),
         IconButton(
-          iconSize: 44,
+          iconSize: 38,
           icon: const Icon(Icons.skip_next_rounded),
           onPressed: () {
             HapticFeedback.lightImpact();
@@ -478,8 +718,8 @@ class _QueueSheet extends StatelessWidget {
                     ),
                     leading: CoverArt(
                       coverArtId: song.coverArtId,
-                      size: 48,
-                      radius: 10,
+                      size: 44,
+                      radius: YomiRadius.art,
                       seed: song.album,
                     ),
                     title: Text(

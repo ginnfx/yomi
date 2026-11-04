@@ -19,7 +19,10 @@ Map<String, dynamic> release(String version, {bool withChecksum = true}) {
     'body': 'Notes for $version',
     'html_url': 'https://github.com/ginnfx/yomi/releases/tag/v$version',
     'assets': [
-      {'name': 'Yomi-android.apk', 'browser_download_url': '$base/Yomi-android.apk'},
+      {
+        'name': 'Yomi-android.apk',
+        'browser_download_url': '$base/Yomi-android.apk',
+      },
       if (withChecksum)
         {
           'name': 'Yomi-android.apk.sha256',
@@ -61,7 +64,9 @@ class Harness {
             200,
           );
         }
-        final body = path.endsWith('.sha256') ? utf8.encode(checksum) : apkBytes;
+        final body = path.endsWith('.sha256')
+            ? utf8.encode(checksum)
+            : apkBytes;
         return http.StreamedResponse(Stream.value(body), 200);
       }),
     );
@@ -158,26 +163,32 @@ void main() {
       expect(h.apiCalls, 2);
     });
 
-    test('still shows a known update after a relaunch inside the window', () async {
-      final h = Harness(latest: release('1.0.2'));
-      await (await h.build()).check();
+    test(
+      'still shows a known update after a relaunch inside the window',
+      () async {
+        final h = Harness(latest: release('1.0.2'));
+        await (await h.build()).check();
 
-      final relaunched = await h.controller();
-      await relaunched.check();
+        final relaunched = await h.controller();
+        await relaunched.check();
 
-      expect(h.apiCalls, 1);
-      expect(relaunched.phase, UpdatePhase.available);
-    });
+        expect(h.apiCalls, 1);
+        expect(relaunched.phase, UpdatePhase.available);
+      },
+    );
 
-    test('does not offer the cached release once it has been installed', () async {
-      final h = Harness(latest: release('1.0.2'));
-      await (await h.build()).check();
+    test(
+      'does not offer the cached release once it has been installed',
+      () async {
+        final h = Harness(latest: release('1.0.2'));
+        await (await h.build()).check();
 
-      final updated = await h.controller(current: '1.0.2');
-      await updated.check();
+        final updated = await h.controller(current: '1.0.2');
+        await updated.check();
 
-      expect(updated.phase, UpdatePhase.idle);
-    });
+        expect(updated.phase, UpdatePhase.idle);
+      },
+    );
 
     test('retries on the next check after a failure', () async {
       final h = Harness(latest: release('1.0.2'))..isApiDown = true;
@@ -367,7 +378,10 @@ void main() {
   });
 
   test('macOS opens the release page instead of installing', () async {
-    final h = Harness(latest: release('1.0.2'), mode: UpdateMode.openReleasePage);
+    final h = Harness(
+      latest: release('1.0.2'),
+      mode: UpdateMode.openReleasePage,
+    );
     final c = await h.build();
     await c.check();
 

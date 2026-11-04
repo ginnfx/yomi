@@ -230,7 +230,9 @@ class UpdateClient {
     final sink = target.openWrite();
     var received = 0;
     try {
-      await for (final chunk in response.stream.timeout(_downloadStallTimeout)) {
+      await for (final chunk in response.stream.timeout(
+        _downloadStallTimeout,
+      )) {
         received += chunk.length;
         if (received > maxDownloadBytes) {
           throw const UpdateException('The update was larger than expected.');

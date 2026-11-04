@@ -1,6 +1,5 @@
 import 'dart:async';
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -161,7 +160,7 @@ class _SearchPageState extends State<SearchPage> {
               load: () => client.randomSongs(size: 8),
               builder: (context, songs) => Padding(
                 padding: const EdgeInsets.symmetric(horizontal: kPagePadding),
-                child: defaultTargetPlatform == TargetPlatform.macOS
+                child: context.isWideLayout
                     ? CompactMusicGrid(
                         items: [
                           for (var i = 0; i < songs.length; i++)

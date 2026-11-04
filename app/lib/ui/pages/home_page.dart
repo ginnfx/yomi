@@ -1,4 +1,3 @@
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
@@ -17,9 +16,9 @@ import '../widgets/cover_art.dart';
 import '../widgets/continue_listening.dart';
 import '../widgets/compact_music_grid.dart';
 import '../widgets/shimmer.dart';
+import '../widgets/profile_panel.dart';
 import '../widgets/song_tile.dart';
 import 'collection_page.dart';
-import 'settings_page.dart';
 
 const int _shuffleBatch = 60;
 const int _quickPickCount = 6;
@@ -64,11 +63,7 @@ class _HomePageState extends State<HomePage> {
         },
         child: ListView(
           children: [
-            _Header(
-              name: profile.displayName(session.username),
-              routeLabel: session.routeLabel,
-              isHome: session.route == ActiveRoute.home,
-            ),
+            _Header(name: profile.displayName(session.username)),
             const ContinueListening(),
             for (final id in sections) _section(id, session),
             if (sections.isEmpty)
@@ -92,14 +87,14 @@ class _HomePageState extends State<HomePage> {
   }
 
   Widget _section(String id, SessionController session) {
-    final isMac = defaultTargetPlatform == TargetPlatform.macOS;
+    final isWide = context.isWideLayout;
     final client = session.client;
     final player = context.read<PlayerController>();
     switch (id) {
       case 'shuffle':
         return Padding(
           padding: const EdgeInsets.fromLTRB(kPagePadding, 22, kPagePadding, 0),
-          child: isMac
+          child: isWide
               ? Row(
                   children: [
                     Text(
@@ -162,7 +157,7 @@ class _HomePageState extends State<HomePage> {
                     kPagePadding,
                     0,
                   ),
-                  child: isMac
+                  child: isWide
                       ? CompactMusicGrid(
                           items: [
                             for (final pick in picks)
@@ -178,8 +173,8 @@ class _HomePageState extends State<HomePage> {
                           crossAxisCount: 2,
                           shrinkWrap: true,
                           physics: const NeverScrollableScrollPhysics(),
-                          mainAxisSpacing: 10,
-                          crossAxisSpacing: 10,
+                          mainAxisSpacing: YomiSpace.s,
+                          crossAxisSpacing: YomiSpace.s,
                           childAspectRatio: 3.1,
                           children: [
                             for (final pick in picks) _QuickTile(pick: pick),
@@ -236,72 +231,40 @@ class _HomePageState extends State<HomePage> {
 }
 
 class _Header extends StatelessWidget {
-  const _Header({
-    required this.name,
-    required this.routeLabel,
-    required this.isHome,
-  });
+  const _Header({required this.name});
 
   final String name;
-  final String routeLabel;
-  final bool isHome;
 
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(kPagePadding, 22, kPagePadding, 0),
+      padding: const EdgeInsets.fromLTRB(
+        kPagePadding,
+        YomiSpace.l,
+        kPagePadding,
+        0,
+      ),
       child: Row(
         children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  greetingFor(DateTime.now()),
-                  style: yomiText(
-                    15,
-                    weight: FontWeight.w600,
-                    color: YomiColors.textSecondary,
-                  ),
-                ),
-                Text(
-                  name,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: yomiText(
-                    36,
-                    weight: FontWeight.w800,
-                    letterSpacing: -1,
-                  ),
-                ),
-                const SizedBox(height: 2),
-                Row(
-                  children: [
-                    Container(
-                      width: 7,
-                      height: 7,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        color: isHome ? YomiColors.success : context.accent,
-                      ),
-                    ),
-                    const SizedBox(width: 6),
-                    Text(
-                      routeLabel,
-                      style: yomiText(
-                        12.5,
-                        weight: FontWeight.w600,
-                        color: YomiColors.textSecondary,
-                      ),
-                    ),
-                  ],
-                ),
-              ],
+          if (!context.isWideLayout) ...[
+            Semantics(
+              button: true,
+              label: 'Open profile',
+              child: GestureDetector(
+                onTap: () => openProfilePanel(context),
+                child: const ProfileAvatar(size: 36),
+              ),
             ),
-          ),
-          GestureDetector(
-            onTap: () => openSettings(context),
-            child: const ProfileAvatar(size: 50),
+            const SizedBox(width: YomiSpace.m),
+          ],
+          Expanded(
+            child: Text(
+              greetingFor(DateTime.now()),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              semanticsLabel: '${greetingFor(DateTime.now())}, $name',
+              style: yomiText(24, weight: FontWeight.w800, letterSpacing: -0.5),
+            ),
           ),
         ],
       ),
@@ -327,7 +290,7 @@ class _QuickTile extends StatelessWidget {
   Widget build(BuildContext context) {
     return Material(
       color: YomiColors.surfaceHigh,
-      borderRadius: BorderRadius.circular(14),
+      borderRadius: BorderRadius.circular(YomiRadius.art),
       clipBehavior: Clip.antiAlias,
       child: InkWell(
         onTap: () {
@@ -366,69 +329,12 @@ class _ShuffleHero extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        height: 112,
-        padding: const EdgeInsets.symmetric(horizontal: 22),
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(26),
-          gradient: LinearGradient(
-            colors: [context.accentDeep, context.accentSoft],
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-          ),
-          border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.35),
-              blurRadius: 24,
-              offset: const Offset(0, 12),
-            ),
-          ],
-        ),
-        child: Row(
-          children: [
-            Expanded(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Shuffle everything',
-                    style: yomiText(
-                      23,
-                      weight: FontWeight.w800,
-                      letterSpacing: -0.5,
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    'A fresh mix from the whole library',
-                    style: yomiText(
-                      13.5,
-                      weight: FontWeight.w600,
-                      color: Colors.white.withValues(alpha: 0.72),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            Container(
-              width: 58,
-              height: 58,
-              decoration: const BoxDecoration(
-                color: Colors.white,
-                shape: BoxShape.circle,
-              ),
-              child: const Icon(
-                Icons.shuffle_rounded,
-                color: Colors.black,
-                size: 28,
-              ),
-            ),
-          ],
-        ),
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: FilledButton.icon(
+        onPressed: onTap,
+        icon: const Icon(Icons.shuffle_rounded, size: 18),
+        label: const Text('Shuffle library'),
       ),
     );
   }

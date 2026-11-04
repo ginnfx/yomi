@@ -23,7 +23,7 @@ class SettingsPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return AuroraBackground(
+    return PageBackground(
       child: Scaffold(
         backgroundColor: Colors.transparent,
         appBar: AppBar(

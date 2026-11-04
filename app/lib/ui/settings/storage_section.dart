@@ -140,6 +140,12 @@ class _StorageSectionState extends State<StorageSection> {
               value: settings.wifiOnlyDownloads,
               onChanged: settings.setWifiOnlyDownloads,
             ),
+            SettingsSwitch(
+              title: 'Save songs on repeat',
+              subtitle: 'Keeps songs you play 3 times in 2 weeks offline, on Wi-Fi only. Up to 2 GB, and they make room for each other.',
+              value: settings.autoDownloadRepeats,
+              onChanged: settings.setAutoDownloadRepeats,
+            ),
           ],
         ),
       ],

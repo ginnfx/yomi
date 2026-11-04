@@ -89,13 +89,18 @@ class SectionTitle extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(kPagePadding, 30, kPagePadding, 14),
+      padding: const EdgeInsets.fromLTRB(
+        kPagePadding,
+        YomiSpace.xl,
+        kPagePadding,
+        YomiSpace.m,
+      ),
       child: Row(
         children: [
           Expanded(
             child: Text(
               text,
-              style: yomiText(23, weight: FontWeight.w800, letterSpacing: -0.4),
+              style: yomiText(20, weight: FontWeight.w800, letterSpacing: -0.3),
             ),
           ),
           if (trailing != null) trailing!,

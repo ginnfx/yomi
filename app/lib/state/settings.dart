@@ -19,6 +19,12 @@ class SettingsController extends ChangeNotifier {
   Future<void> setSyncListening(bool value) =>
       _set(() => _prefs.setBool('syncListening', value));
 
+  /// Whether the phone player shows big art instead of lyrics when a song has both.
+  bool get prefersArtOverLyrics =>
+      _prefs.getBool('prefersArtOverLyrics') ?? false;
+  Future<void> setPrefersArtOverLyrics(bool value) =>
+      _set(() => _prefs.setBool('prefersArtOverLyrics', value));
+
   /// Save songs on repeat for offline play. Only ever fetches on Wi-Fi.
   bool get autoDownloadRepeats => _prefs.getBool('autoDownloadRepeats') ?? true;
   Future<void> setAutoDownloadRepeats(bool value) =>
