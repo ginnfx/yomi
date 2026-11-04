@@ -242,14 +242,29 @@ class SubsonicClient {
     return [for (final list in lists) ...list];
   }
 
-  /// The newest songs, newest first.
+  /// The newest songs, newest first. Albums are fetched one at a time and only
+  /// until there are enough songs, so one Home load can't flood a small server.
   Future<List<Song>> recentSongs({int count = 16}) async {
     final albums = await this.albums('newest', size: count);
-    final lists = await Future.wait(albums.map((a) => albumSongs(a.id)));
-    return [for (final list in lists) ...list]
-        .take(count)
-        .toList(growable: false);
+    final found = <Song>[];
+    for (final album in albums) {
+      if (found.length >= count) break;
+      found.addAll(await albumSongs(album.id));
+    }
+    return List.unmodifiable(found.take(count));
   }
+
+  /// Tells the server what is playing. With [submission] the play counts toward
+  /// history at [time]; without it the song only shows as "now playing".
+  Future<void> scrobble(
+    String songId, {
+    bool submission = true,
+    DateTime? time,
+  }) => _get('scrobble', {
+    'id': songId,
+    'submission': '$submission',
+    if (time != null) 'time': '${time.millisecondsSinceEpoch}',
+  });
 
   Future<List<Artist>> artists() async {
     final body = await _get('getArtists');
@@ -338,11 +353,15 @@ class SubsonicClient {
     final lines = jsonList(chosen, 'line');
     final isSynced = chosen['synced'] == true;
     if (lines.isEmpty) return null;
+    final offsetMs = (chosen['offset'] as num?)?.toInt() ?? 0;
     return Lyrics([
       for (final l in lines)
         LyricLine(
           isSynced
-              ? Duration(milliseconds: (l['start'] as num?)?.toInt() ?? 0)
+              ? Lyrics.applyOffset(
+                  Duration(milliseconds: (l['start'] as num?)?.toInt() ?? 0),
+                  offsetMs,
+                )
               : null,
           (l['value'] as String?)?.trim() ?? '',
         ),

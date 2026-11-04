@@ -82,6 +82,8 @@ class DownloadStore {
     return List.unmodifiable(sorted.map((e) => e.song));
   }
 
+  int bytesOf(String songId) => _entries[songId]?.bytes ?? 0;
+
   int get totalBytes => _entries.values.fold(0, (sum, e) => sum + e.bytes);
 
   Future<void> add(Song song, FetchedFile fetched) async {

@@ -19,6 +19,11 @@ class SettingsController extends ChangeNotifier {
   Future<void> setSyncListening(bool value) =>
       _set(() => _prefs.setBool('syncListening', value));
 
+  /// Save songs on repeat for offline play. Only ever fetches on Wi-Fi.
+  bool get autoDownloadRepeats => _prefs.getBool('autoDownloadRepeats') ?? true;
+  Future<void> setAutoDownloadRepeats(bool value) =>
+      _set(() => _prefs.setBool('autoDownloadRepeats', value));
+
   bool get wifiOnlyDownloads => _prefs.getBool('wifiOnlyDownloads') ?? true;
   bool get cachePlayedSongs => _prefs.getBool('cachePlayedSongs') ?? true;
   Future<void> setCachePlayedSongs(bool value) =>

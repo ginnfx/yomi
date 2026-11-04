@@ -50,6 +50,9 @@ class PlayerController extends ChangeNotifier {
   final SettingsController settings;
   final ConnectivityController connectivity;
   final FileFetcher fetcher;
+
+  /// Told about the next song in the queue, so its extras can be ready in time.
+  void Function(SubsonicClient client, Song song)? onUpcomingSong;
   bool _disposed = false;
   late final AudioPreloader _preloader;
   String? _retriedSongId;
@@ -296,7 +299,20 @@ class PlayerController extends ChangeNotifier {
     if (song != null) unawaited(cache.touch(song.id));
     _retriedSongId = song?.id == _retriedSongId ? _retriedSongId : null;
     if (song != null && _isLocal(song)) _scheduleCaching(includeCurrent: false);
+    _announceUpcoming();
     notifyListeners();
+  }
+
+  void _announceUpcoming() {
+    final index = _index;
+    final client = _client;
+    final notify = onUpcomingSong;
+    if (index == null || client == null || notify == null) return;
+    final order = _player.effectiveIndices;
+    final position = order.indexOf(index);
+    if (position < 0 || position + 1 >= order.length) return;
+    final nextIndex = order[position + 1];
+    if (nextIndex < _queue.length) notify(client, _queue[nextIndex]);
   }
 
   void _onPlaybackError(Object error) async {
