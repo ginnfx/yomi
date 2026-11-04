@@ -28,10 +28,10 @@ class _DesktopPlayerState extends State<DesktopPlayer> {
     final canPlay = song != null;
     final remote = sync.remote;
     return Material(
-      color: const Color(0xFF111118),
+      color: YomiColors.surface,
       child: Container(
         decoration: const BoxDecoration(
-          border: Border(top: BorderSide(color: Colors.white10)),
+          border: Border(top: BorderSide(color: YomiColors.hairline)),
         ),
         padding: const EdgeInsets.fromLTRB(24, 10, 24, 10),
         child: Column(

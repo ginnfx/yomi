@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 
+import '../core/listening/auto_download_ledger.dart';
 import '../core/models.dart';
 import '../core/offline/download_store.dart';
 import '../core/offline/file_fetcher.dart';
@@ -21,6 +22,7 @@ class DownloadManager extends ChangeNotifier {
     required this.connectivity,
     this.fetcher = const FileFetcher(),
     this.warmCover,
+    this.ledger,
   }) {
     connectivity.addListener(_pump);
     settings.addListener(_pump);
@@ -31,6 +33,7 @@ class DownloadManager extends ChangeNotifier {
   final ConnectivityController connectivity;
   final FileFetcher fetcher;
   final CoverWarmer? warmCover;
+  final AutoDownloadLedger? ledger;
 
   SubsonicClient? _client;
   final List<Song> _queue = [];
@@ -48,6 +51,7 @@ class DownloadManager extends ChangeNotifier {
 
   List<Song> get downloadedSongs => store.songs;
   int get downloadedBytes => store.totalBytes;
+  int bytesOf(String songId) => store.bytesOf(songId);
   int get pendingCount => _queue.length;
   bool isDownloaded(String songId) => store.contains(songId);
   File? localFile(String songId) => store.fileFor(songId);
@@ -74,8 +78,11 @@ class DownloadManager extends ChangeNotifier {
   int downloadedCountOf(Iterable<Song> songs) =>
       songs.where((s) => store.contains(s.id)).length;
 
-  void enqueue(Iterable<Song> songs) {
+  /// Songs queued with [isAuto] may be evicted later. Everything else was the
+  /// user's own choice, even if Yomi had already saved it automatically.
+  void enqueue(Iterable<Song> songs, {bool isAuto = false}) {
     for (final song in songs) {
+      if (!isAuto) ledger?.markManual(song.id);
       if (store.contains(song.id) ||
           _activeId == song.id ||
           _queue.any((s) => s.id == song.id))
@@ -87,7 +94,15 @@ class DownloadManager extends ChangeNotifier {
     _pump();
   }
 
+  /// Drops an automatic download to make room. Unlike [remove], this isn't the
+  /// user saying they don't want the song.
+  Future<void> evict(String songId) async {
+    await store.remove(songId);
+    notifyListeners();
+  }
+
   Future<void> remove(Song song) async {
+    ledger?.markUserRemoved(song.id);
     _queue.removeWhere((s) => s.id == song.id);
     if (_activeId == song.id) _cancel?.cancel();
     await store.remove(song.id);
@@ -96,6 +111,9 @@ class DownloadManager extends ChangeNotifier {
   }
 
   Future<void> removeAll() async {
+    for (final id in ledger?.autoIds.toList() ?? const <String>[]) {
+      ledger?.markUserRemoved(id);
+    }
     cancelAll();
     await store.removeAll();
     notifyListeners();

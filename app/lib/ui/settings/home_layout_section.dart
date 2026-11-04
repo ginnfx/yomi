@@ -7,8 +7,8 @@ import 'settings_widgets.dart';
 
 const Map<String, (String, String, IconData)> homeSectionInfo = {
   'shuffle': (
-    'Shuffle everything',
-    'The big button at the top',
+    'Shuffle library',
+    'A button that plays everything at random',
     Icons.shuffle_rounded,
   ),
   'quick': (
@@ -16,14 +16,39 @@ const Map<String, (String, String, IconData)> homeSectionInfo = {
     'Your playlists and newest songs as tiles',
     Icons.grid_view_rounded,
   ),
-  'recent': (
+  'jumpBack': (
+    'Jump back in',
+    'What you played most recently',
+    Icons.history_rounded,
+  ),
+  'becauseYouPlayed': (
+    'Because you played',
+    'More like the artist you play most',
+    Icons.auto_awesome_outlined,
+  ),
+  'topGenre': (
+    'Your top genre',
+    'From the genre you play most',
+    Icons.category_outlined,
+  ),
+  'rediscover': (
+    'Rediscover',
+    "Songs you haven't played in a while",
+    Icons.restore_rounded,
+  ),
+  'timeOfDay': (
+    'Time of day mix',
+    'What you tend to play at this hour',
+    Icons.schedule_rounded,
+  ),
+  'recentlyAdded': (
     'Recently added',
-    'The newest songs, as a scrolling row',
+    'The newest songs in the library',
     Icons.new_releases_outlined,
   ),
   'discover': (
-    'Discover',
-    'A random handful from the library',
+    'Something different',
+    "Songs you haven't played yet",
     Icons.explore_outlined,
   ),
 };
@@ -48,7 +73,7 @@ class HomeLayoutSection extends StatelessWidget {
             final next = [...order];
             final item = next.removeAt(from);
             next.insert(to > from ? to - 1 : to, item);
-            settings.setHomeLayout(next, hidden);
+            settings.setHomeOrder(next);
           },
           children: [
             for (var i = 0; i < order.length; i++)
@@ -91,7 +116,7 @@ class HomeLayoutSection extends StatelessWidget {
                         visible
                             ? nextHidden.remove(order[i])
                             : nextHidden.add(order[i]);
-                        settings.setHomeLayout(order, nextHidden);
+                        settings.setHomeHidden(nextHidden);
                       },
                     ),
                     ReorderableDragStartListener(

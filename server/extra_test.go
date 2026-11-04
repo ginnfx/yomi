@@ -31,7 +31,7 @@ func TestLoadConfigUsesDefaultsAndOverrides(t *testing.T) {
 func TestUploadReportsBadGatewayWhenMusicServerIsDown(t *testing.T) {
 	dead := httptest.NewServer(http.NotFoundHandler())
 	dead.Close()
-	srv := newServer(Config{MusicDir: t.TempDir(), MaxFileBytes: 1 << 10}, newNavidromeAuth(dead.URL), nil)
+	srv := newServer(Config{MusicDir: t.TempDir(), MaxFileBytes: 1 << 10}, newNavidromeAuth(dead.URL), nil, nil)
 	ts := httptest.NewServer(srv.routes())
 	defer ts.Close()
 
@@ -51,7 +51,7 @@ func TestSuccessfulUploadTriggersRescan(t *testing.T) {
 				scans.Add(1)
 			}
 			done <- struct{}{}
-		})
+		}, nil)
 	ts := httptest.NewServer(srv.routes())
 	defer ts.Close()
 

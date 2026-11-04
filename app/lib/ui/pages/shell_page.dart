@@ -1,4 +1,3 @@
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 
@@ -7,12 +6,15 @@ import '../../dev_hooks.dart';
 import 'package:provider/provider.dart';
 
 import '../../state/connectivity_controller.dart';
+import '../../state/profile_controller.dart';
 import '../../state/session.dart';
 import '../theme.dart';
 import '../widgets/mini_player.dart';
 import '../widgets/desktop_player.dart';
 import '../widgets/nav_bar.dart';
+import '../settings/profile_section.dart';
 import '../widgets/offline_banner.dart';
+import '../widgets/profile_panel.dart';
 import '../widgets/update_banner.dart';
 import 'home_page.dart';
 import 'library_page.dart';
@@ -23,9 +25,9 @@ import 'settings_page.dart';
 import 'upload_page.dart';
 
 const double _bottomClearance =
-    kMiniPlayerHeight + kMiniPlayerGap + kNavBarHeight + 24;
+    kMiniPlayerHeight + kMiniPlayerGap + kNavBarHeight + YomiSpace.l;
 
-/// Tabs with the floating player and navigation over them. Content scrolls underneath the glass.
+/// Tabs with the player and navigation pinned below on phones, or a sidebar on wide screens.
 class ShellPage extends StatefulWidget {
   const ShellPage({super.key});
 
@@ -90,11 +92,8 @@ class _ShellPageState extends State<ShellPage>
     final isDisconnected =
         context.select<SessionController, bool>((s) => !s.isServerReachable) ||
         context.select<ConnectivityController, bool>((c) => c.isOffline);
-    if (defaultTargetPlatform == TargetPlatform.macOS &&
-        media.size.width >= 900) {
-      return _desktop(context, media, isDisconnected);
-    }
-    return AuroraBackground(
+    if (context.isWideLayout) return _desktop(context, media, isDisconnected);
+    return PageBackground(
       child: Scaffold(
         backgroundColor: Colors.transparent,
         extendBody: true,
@@ -141,19 +140,32 @@ class _ShellPageState extends State<ShellPage>
               left: 0,
               right: 0,
               bottom: 0,
-              child: SafeArea(
-                top: false,
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const MiniPlayer(),
-                    if (!isDisconnected)
-                      YomiNavBar(
-                        items: _items,
-                        index: _index,
-                        onSelected: _select,
-                      ),
-                  ],
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [
+                      context.pageColor.withValues(alpha: 0),
+                      context.pageColor,
+                    ],
+                    stops: const [0, 0.35],
+                  ),
+                ),
+                child: SafeArea(
+                  top: false,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const MiniPlayer(),
+                      if (!isDisconnected)
+                        YomiNavBar(
+                          items: _items,
+                          index: _index,
+                          onSelected: _select,
+                        ),
+                    ],
+                  ),
                 ),
               ),
             ),
@@ -168,7 +180,7 @@ class _ShellPageState extends State<ShellPage>
     MediaQueryData media,
     bool isDisconnected,
   ) {
-    return AuroraBackground(
+    return PageBackground(
       child: Scaffold(
         backgroundColor: Colors.transparent,
         body: Column(
@@ -184,44 +196,20 @@ class _ShellPageState extends State<ShellPage>
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
-                            Padding(
-                              padding: const EdgeInsets.fromLTRB(12, 4, 12, 30),
-                              child: Text(
-                                'Yomi',
-                                style: yomiText(
-                                  30,
-                                  weight: FontWeight.w800,
-                                  color: context.accent,
-                                ),
-                              ),
-                            ),
-                            Padding(
-                              padding: const EdgeInsets.only(
-                                left: 12,
-                                bottom: 12,
-                              ),
-                              child: Text(
-                                'YOUR MUSIC',
-                                style: yomiText(
-                                  10,
-                                  weight: FontWeight.w700,
-                                  color: YomiColors.textSecondary,
-                                  letterSpacing: 1.5,
-                                ),
-                              ),
-                            ),
+                            const _SidebarProfile(),
+                            const SizedBox(height: YomiSpace.xl),
                             for (var i = 0; i < _items.length; i++)
                               Padding(
                                 padding: const EdgeInsets.only(bottom: 5),
                                 child: ListTile(
                                   dense: true,
                                   selected: !isDisconnected && _index == i,
-                                  selectedColor: context.accent,
-                                  selectedTileColor: context.accent.withValues(
-                                    alpha: 0.10,
-                                  ),
+                                  selectedColor: YomiColors.textPrimary,
+                                  selectedTileColor: YomiColors.surfaceHigh,
                                   shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(9),
+                                    borderRadius: BorderRadius.circular(
+                                      YomiRadius.card,
+                                    ),
                                   ),
                                   leading: Icon(_items[i].icon, size: 21),
                                   title: Text(
@@ -249,7 +237,7 @@ class _ShellPageState extends State<ShellPage>
                       ),
                     ),
                   ),
-                  const VerticalDivider(width: 1, color: Colors.white10),
+                  const VerticalDivider(width: 1, color: YomiColors.hairline),
                   Expanded(
                     child: Column(
                       children: [
@@ -282,6 +270,39 @@ class _ShellPageState extends State<ShellPage>
               ),
             ),
             const DesktopPlayer(),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// The user's picture and name at the top-left of the sidebar; opens the profile panel.
+class _SidebarProfile extends StatelessWidget {
+  const _SidebarProfile();
+
+  @override
+  Widget build(BuildContext context) {
+    final name = context.watch<ProfileController>().displayName(
+      context.read<SessionController>().username,
+    );
+    return InkWell(
+      borderRadius: BorderRadius.circular(YomiRadius.card),
+      onTap: () => openProfilePanel(context),
+      child: Padding(
+        padding: const EdgeInsets.all(YomiSpace.s),
+        child: Row(
+          children: [
+            const ProfileAvatar(size: 32),
+            const SizedBox(width: YomiSpace.m),
+            Expanded(
+              child: Text(
+                name,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: yomiText(14, weight: FontWeight.w700),
+              ),
+            ),
           ],
         ),
       ),

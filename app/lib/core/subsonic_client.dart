@@ -13,7 +13,14 @@ const String _clientName = 'Yomi';
 const int _saltLength = 10;
 const Duration _requestTimeout = Duration(seconds: 20);
 
-enum ErrorKind { unreachable, badCredentials, notNavidrome, server, other }
+enum ErrorKind {
+  unreachable,
+  badCredentials,
+  notNavidrome,
+  server,
+  readOnly,
+  other,
+}
 
 class SubsonicException implements Exception {
   const SubsonicException(
@@ -40,16 +47,43 @@ class SubsonicClient {
     required String password,
     http.Client? httpClient,
     String Function()? saltGenerator,
+    bool Function()? isReadOnly,
   }) : baseUrl = baseUrl.replaceAll(RegExp(r'/+$'), ''),
        _password = password,
        _http = httpClient ?? http.Client(),
-       _newSalt = saltGenerator ?? _randomSalt;
+       _newSalt = saltGenerator ?? _randomSalt,
+       _isReadOnly = isReadOnly ?? _alwaysWritable;
 
   final String baseUrl;
   final String username;
   final String _password;
   final http.Client _http;
   final String Function() _newSalt;
+  final bool Function() _isReadOnly;
+
+  static bool _alwaysWritable() => false;
+
+  /// True on the backup server, whose database is replaced from the main one, so
+  /// anything written there would be lost.
+  bool get isReadOnly => _isReadOnly();
+
+  void _requireWritable() {
+    if (isReadOnly) {
+      throw const SubsonicException(
+        "You're on the backup server, so changes can't be saved right now.",
+        kind: ErrorKind.readOnly,
+      );
+    }
+  }
+
+  Future<Map<String, dynamic>> _write(
+    String endpoint, [
+    Map<String, Object?> params = const {},
+  ]) async {
+    _requireWritable();
+    return _get(endpoint, params);
+  }
+
   late final String _sessionSalt = _newSalt();
 
   static String _randomSalt() {
@@ -182,6 +216,39 @@ class SubsonicClient {
     ).map(Album.fromJson).toList(growable: false);
   }
 
+  Future<Song> song(String songId) async {
+    final body = await _get('getSong', {'id': songId});
+    final json = body['song'];
+    if (json is! Map<String, dynamic>) {
+      throw const SubsonicException('That song is not on this server.');
+    }
+    return Song.fromJson(json);
+  }
+
+  Future<List<Genre>> genres() async {
+    final body = await _get('getGenres');
+    return jsonList(
+      body['genres'] as Map<String, dynamic>?,
+      'genre',
+    ).map(Genre.fromJson).toList(growable: false);
+  }
+
+  Future<List<Song>> songsByGenre(
+    String genre, {
+    int offset = 0,
+    int count = 100,
+  }) async {
+    final body = await _get('getSongsByGenre', {
+      'genre': genre,
+      'offset': offset,
+      'count': count,
+    });
+    return jsonList(
+      body['songsByGenre'] as Map<String, dynamic>?,
+      'song',
+    ).map(Song.fromJson).toList(growable: false);
+  }
+
   Future<List<Song>> randomSongs({int size = 20}) async {
     final body = await _get('getRandomSongs', {'size': size});
     return jsonList(
@@ -242,14 +309,29 @@ class SubsonicClient {
     return [for (final list in lists) ...list];
   }
 
-  /// The newest songs, newest first.
+  /// The newest songs, newest first. Albums are fetched one at a time and only
+  /// until there are enough songs, so one Home load can't flood a small server.
   Future<List<Song>> recentSongs({int count = 16}) async {
     final albums = await this.albums('newest', size: count);
-    final lists = await Future.wait(albums.map((a) => albumSongs(a.id)));
-    return [for (final list in lists) ...list]
-        .take(count)
-        .toList(growable: false);
+    final found = <Song>[];
+    for (final album in albums) {
+      if (found.length >= count) break;
+      found.addAll(await albumSongs(album.id));
+    }
+    return List.unmodifiable(found.take(count));
   }
+
+  /// Tells the server what is playing. With [submission] the play counts toward
+  /// history at [time]; without it the song only shows as "now playing".
+  Future<void> scrobble(
+    String songId, {
+    bool submission = true,
+    DateTime? time,
+  }) => _write('scrobble', {
+    'id': songId,
+    'submission': '$submission',
+    if (time != null) 'time': '${time.millisecondsSinceEpoch}',
+  });
 
   Future<List<Artist>> artists() async {
     final body = await _get('getArtists');
@@ -293,23 +375,24 @@ class SubsonicClient {
   }
 
   Future<void> createPlaylist(String name, {List<String> songIds = const []}) =>
-      _get('createPlaylist', {'name': name, 'songId': songIds});
+      _write('createPlaylist', {'name': name, 'songId': songIds});
 
-  Future<void> addToPlaylist(String playlistId, List<String> songIds) => _get(
+  Future<void> addToPlaylist(String playlistId, List<String> songIds) => _write(
     'updatePlaylist',
     {'playlistId': playlistId, 'songIdToAdd': songIds},
   );
 
-  Future<void> removeFromPlaylist(String playlistId, List<int> indexes) => _get(
-    'updatePlaylist',
-    {'playlistId': playlistId, 'songIndexToRemove': indexes},
-  );
+  Future<void> removeFromPlaylist(String playlistId, List<int> indexes) =>
+      _write('updatePlaylist', {
+        'playlistId': playlistId,
+        'songIndexToRemove': indexes,
+      });
 
   Future<void> renamePlaylist(String playlistId, String name) =>
-      _get('updatePlaylist', {'playlistId': playlistId, 'name': name});
+      _write('updatePlaylist', {'playlistId': playlistId, 'name': name});
 
   Future<void> deletePlaylist(String playlistId) =>
-      _get('deletePlaylist', {'id': playlistId});
+      _write('deletePlaylist', {'id': playlistId});
 
   Future<List<Song>> starredSongs() async {
     final body = await _get('getStarred2');
@@ -319,9 +402,9 @@ class SubsonicClient {
     ).map(Song.fromJson).toList(growable: false);
   }
 
-  Future<void> star(String songId) => _get('star', {'id': songId});
+  Future<void> star(String songId) => _write('star', {'id': songId});
 
-  Future<void> unstar(String songId) => _get('unstar', {'id': songId});
+  Future<void> unstar(String songId) => _write('unstar', {'id': songId});
 
   /// OpenSubsonic lyrics stored with the song; null when there are none.
   Future<Lyrics?> lyricsFor(String songId) async {
@@ -338,11 +421,15 @@ class SubsonicClient {
     final lines = jsonList(chosen, 'line');
     final isSynced = chosen['synced'] == true;
     if (lines.isEmpty) return null;
+    final offsetMs = (chosen['offset'] as num?)?.toInt() ?? 0;
     return Lyrics([
       for (final l in lines)
         LyricLine(
           isSynced
-              ? Duration(milliseconds: (l['start'] as num?)?.toInt() ?? 0)
+              ? Lyrics.applyOffset(
+                  Duration(milliseconds: (l['start'] as num?)?.toInt() ?? 0),
+                  offsetMs,
+                )
               : null,
           (l['value'] as String?)?.trim() ?? '',
         ),
@@ -360,7 +447,8 @@ class SubsonicClient {
     required Duration position,
     required String deviceId,
   }) {
-    if (songs.isEmpty || index < 0 || index >= songs.length) {
+    // The handoff position isn't worth a warning on the read-only backup server.
+    if (songs.isEmpty || index < 0 || index >= songs.length || isReadOnly) {
       return Future.value();
     }
     return _get(
@@ -376,7 +464,7 @@ class SubsonicClient {
     );
   }
 
-  Future<void> startScan() => _get('startScan');
+  Future<void> startScan() => _write('startScan');
 
   Uri streamUri(String songId, {int? maxBitRate}) =>
       _uri('stream', {'id': songId, 'maxBitRate': maxBitRate});

@@ -66,7 +66,7 @@ class _ConnectionDoctorPageState extends State<ConnectionDoctorPage> {
   @override
   Widget build(BuildContext context) {
     final session = context.watch<SessionController>();
-    return AuroraBackground(
+    return PageBackground(
       child: Scaffold(
         backgroundColor: Colors.transparent,
         appBar: AppBar(

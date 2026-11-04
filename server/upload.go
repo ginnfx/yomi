@@ -8,6 +8,8 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/url"
+	"path/filepath"
+	"sync"
 	"time"
 )
 
@@ -19,57 +21,77 @@ const (
 
 // Server wires authentication, storage and the post-upload library rescan together.
 type Server struct {
-	Config Config
-	Auth   Authenticator
-	Store  Store
-	Scan   func(ctx context.Context, query url.Values)
-	slots  chan struct{}
-	limits *loginLimiter
+	Config    Config
+	Auth      Authenticator
+	Store     Store
+	Scan      func(ctx context.Context, query url.Values)
+	Index     *HashIndex
+	Status    *StatusReader
+	Backups   *BackupSource
+	Messages  *MessageStore
+	Relay     *PushRelay
+	slots     chan struct{}
+	limits    *loginLimiter
+	scans     *scanDebouncer
+	publishMu sync.Mutex
 }
 
-func newServer(cfg Config, auth Authenticator, scan func(context.Context, url.Values)) *Server {
+func newServer(cfg Config, auth Authenticator, scan func(context.Context, url.Values), index *HashIndex) *Server {
 	return &Server{
 		Config: cfg,
 		Auth:   auth,
 		Store:  Store{Root: cfg.MusicDir},
 		Scan:   scan,
+		Index:  index,
 		slots:  make(chan struct{}, maxConcurrentUploads),
 		limits: newLoginLimiter(),
+		scans:  newScanDebouncer(cfg.ScanDebounce, scan),
 	}
 }
 
 func (s *Server) routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+		body := map[string]string{"status": "ok"}
+		if s.isReplica() {
+			body["role"] = roleReplica
+		}
+		writeJSON(w, http.StatusOK, body)
 	})
 	mux.HandleFunc("/upload", s.handleUpload)
+	mux.HandleFunc("POST /v1/check", s.handleCheck)
+	mux.HandleFunc("GET /v1/status", s.handleStatus)
+	mux.HandleFunc("POST /v1/messages", s.handleSend)
+	mux.HandleFunc("GET /v1/messages", s.handleThread)
+	mux.HandleFunc("POST /v1/messages/read", s.handleMarkRead)
+	mux.HandleFunc("GET /v1/conversations", s.handleConversations)
+	mux.HandleFunc("PUT /v1/profile", s.handleSaveProfile)
+	mux.HandleFunc("GET /v1/profiles", s.handleProfiles)
+	mux.HandleFunc("PUT /v1/profile/avatar", s.handleSaveAvatar)
+	mux.HandleFunc("GET /v1/profiles/{user}/avatar", s.handleAvatar)
+	mux.HandleFunc("POST /v1/devices", s.handleRegisterDevice)
+	mux.HandleFunc("GET /v1/replica/index", s.handleReplicaIndex)
+	mux.HandleFunc("GET /v1/replica/file/{sha256}", s.handleReplicaFile)
+	mux.HandleFunc("GET /v1/replica/database", s.handleReplicaDatabase)
+	mux.HandleFunc("PUT /v1/upload/{sha256}", s.handleBulkUpload)
 	return mux
 }
+
+func (s *Server) isReplica() bool { return s.Config.Role == roleReplica }
 
 func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeError(w, http.StatusMethodNotAllowed, "use POST")
 		return
 	}
-	query := r.URL.Query()
-	if s.limits.Blocked(query.Get("u")) {
-		writeError(w, http.StatusTooManyRequests, "too many wrong passwords, try again in a few minutes")
+	if s.isReplica() {
+		writeError(w, http.StatusForbidden, errReadOnly.Error())
 		return
 	}
-	user, err := s.Auth.Verify(r.Context(), query)
-	switch {
-	case errors.Is(err, errUnauthorized):
-		s.limits.Fail(query.Get("u"))
-		writeError(w, http.StatusUnauthorized, err.Error())
-		return
-	case err != nil:
-		log.Printf("auth backend error: %v", err)
-		writeError(w, http.StatusBadGateway, "music server unavailable")
+	user, ok := s.authenticate(w, r)
+	if !ok {
 		return
 	}
-
-	s.limits.Reset(user)
 	select {
 	case s.slots <- struct{}{}:
 		defer func() { <-s.slots }()
@@ -91,17 +113,12 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	log.Printf("stored %s for %s", stored, user)
-	go s.triggerScan(query)
-	writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "file": stored})
-}
-
-func (s *Server) triggerScan(query url.Values) {
-	if s.Scan == nil {
-		return
+	s.scans.Touch(r.URL.Query())
+	if s.Index != nil {
+		// Older apps still use this route; their songs must count as duplicates too.
+		go s.Index.seedFile(filepath.Join(s.Config.MusicDir, stored), stored)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), scanTimeout)
-	defer cancel()
-	s.Scan(ctx, query)
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "file": stored})
 }
 
 func firstFilePart(r *http.Request) (*multipart.Part, error) {

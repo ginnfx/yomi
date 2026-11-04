@@ -2,191 +2,352 @@ import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'package:provider/provider.dart';
 
-import '../../state/session.dart';
+import '../../state/upload_queue.dart';
 import '../theme.dart';
 
-enum _Status { queued, uploading, done, failed }
+String _pauseMessage(UploadPause pause) => switch (pause) {
+  UploadPause.waitingForServer =>
+    "Can't reach the server. Trying again automatically.",
+  UploadPause.signInAgain =>
+    'Your login was refused. Sign in again to continue.',
+  UploadPause.storageFull => "The server's storage is full.",
+  UploadPause.needsFolderAccess =>
+    'Yomi lost access to these files. Choose the folder again to continue.',
+  UploadPause.onBackupServer =>
+    "You're on the backup server. Uploads continue when the main one is back.",
+  UploadPause.serverNeedsUpdate =>
+    'The server needs updating before it can take bulk uploads.',
+};
 
-class _UploadItem {
-  const _UploadItem({
-    required this.name,
-    required this.path,
-    this.status = _Status.queued,
-    this.progress = 0,
-    this.error,
-  });
-
-  final String name;
-  final String path;
-  final _Status status;
-  final double progress;
-  final String? error;
-
-  _UploadItem copyWith({_Status? status, double? progress, String? error}) =>
-      _UploadItem(
-        name: name,
-        path: path,
-        status: status ?? this.status,
-        progress: progress ?? this.progress,
-        error: error ?? this.error,
-      );
-}
-
-class UploadPage extends StatefulWidget {
+/// Adds music in bulk. Identical files are never sent, and anything that merely
+/// looks like a duplicate waits for a decision. Nothing is ever deleted.
+class UploadPage extends StatelessWidget {
   const UploadPage({super.key});
 
   @override
-  State<UploadPage> createState() => _UploadPageState();
+  Widget build(BuildContext context) {
+    final queue = context.watch<UploadQueue>();
+    final items = queue.items;
+    final likely = [
+      for (final item in items)
+        if (item.state == UploadState.likelyDuplicate) item,
+    ];
+    final bottom = MediaQuery.paddingOf(context).bottom;
+    return SafeArea(
+      bottom: false,
+      child: CustomScrollView(
+        slivers: [
+          SliverPadding(
+            padding: const EdgeInsets.symmetric(horizontal: kPagePadding),
+            sliver: SliverList.list(
+              children: [
+                Padding(
+                  padding: const EdgeInsets.only(
+                    top: YomiSpace.l,
+                    bottom: YomiSpace.l,
+                  ),
+                  child: Text(
+                    'Add songs',
+                    style: yomiText(
+                      24,
+                      weight: FontWeight.w800,
+                      letterSpacing: -0.5,
+                    ),
+                  ),
+                ),
+                const _PickButtons(),
+                if (queue.pause != null) ...[
+                  const SizedBox(height: YomiSpace.l),
+                  _PauseNotice(pause: queue.pause!),
+                ],
+                if (items.isNotEmpty) ...[
+                  const SizedBox(height: YomiSpace.xl),
+                  _Summary(queue: queue),
+                ],
+                if (likely.isNotEmpty) ...[
+                  const SizedBox(height: YomiSpace.xl),
+                  _LikelyHeader(count: likely.length),
+                ],
+              ],
+            ),
+          ),
+          if (likely.isNotEmpty)
+            SliverList.builder(
+              itemCount: likely.length,
+              itemBuilder: (_, i) => _LikelyRow(item: likely[i]),
+            ),
+          if (items.isNotEmpty)
+            SliverPadding(
+              padding: const EdgeInsets.fromLTRB(
+                kPagePadding,
+                YomiSpace.xl,
+                kPagePadding,
+                YomiSpace.s,
+              ),
+              sliver: SliverToBoxAdapter(
+                child: Text(
+                  'All files',
+                  style: yomiText(16, weight: FontWeight.w800),
+                ),
+              ),
+            ),
+          SliverList.builder(
+            itemCount: items.length,
+            itemBuilder: (_, i) => _UploadRow(item: items[i]),
+          ),
+          SliverToBoxAdapter(child: SizedBox(height: bottom + YomiSpace.xl)),
+        ],
+      ),
+    );
+  }
 }
 
-class _UploadPageState extends State<UploadPage> {
-  List<_UploadItem> _items = const [];
-  bool _isRunning = false;
+class _PickButtons extends StatelessWidget {
+  const _PickButtons();
 
-  void _update(int index, _UploadItem Function(_UploadItem) change) {
-    if (!mounted) return;
-    setState(
-      () => _items = [
-        for (var i = 0; i < _items.length; i++)
-          i == index ? change(_items[i]) : _items[i],
-      ],
-    );
-  }
-
-  Future<void> _pickAndUpload() async {
-    final picked = await FilePicker.pickFiles(type: FileType.audio);
-    final fresh = [
-      for (final file in picked)
-        if (file.path != null) _UploadItem(name: file.name, path: file.path!),
-    ];
-    if (fresh.isEmpty || !mounted) return;
-    final firstNew = _items.length;
-    setState(() => _items = [..._items, ...fresh]);
-    if (!_isRunning) await _runQueue(firstNew);
-  }
-
-  Future<void> _runQueue(int from) async {
-    final uploader = context.read<SessionController>().uploader;
-    setState(() => _isRunning = true);
-    for (var i = from; i < _items.length; i++) {
-      if (_items[i].status != _Status.queued) continue;
-      _update(i, (item) => item.copyWith(status: _Status.uploading));
-      try {
-        await uploader.upload(
-          File(_items[i].path),
-          onProgress: (p) => _update(i, (item) => item.copyWith(progress: p)),
+  Future<void> _pickFolder(BuildContext context) async {
+    final queue = context.read<UploadQueue>();
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      if (Platform.isAndroid && !await _requestAudioAccess()) {
+        messenger.showSnackBar(
+          const SnackBar(
+            content: Text('Yomi needs access to your music to read a folder.'),
+          ),
         );
-        _update(i, (item) => item.copyWith(status: _Status.done, progress: 1));
-      } on Exception catch (error) {
-        _update(
-          i,
-          (item) => item.copyWith(status: _Status.failed, error: '$error'),
-        );
+        return;
       }
+      final folder = await FilePicker.getDirectoryPath();
+      if (folder == null) return;
+      final added = await queue.addFolder(folder);
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(
+            added == 0 ? 'No new music in that folder' : 'Added $added files',
+          ),
+        ),
+      );
+    } on FileSystemException catch (error) {
+      messenger.showSnackBar(
+        SnackBar(content: Text('Could not read that folder: ${error.message}')),
+      );
     }
-    if (mounted) setState(() => _isRunning = false);
   }
 
-  Future<void> _retryFailed() async {
-    setState(
-      () => _items = [
-        for (final item in _items)
-          item.status == _Status.failed
-              ? item.copyWith(status: _Status.queued, progress: 0)
-              : item,
-      ],
-    );
-    if (!_isRunning) await _runQueue(0);
+  /// Android 13 replaced the storage permission with one just for audio.
+  Future<bool> _requestAudioAccess() async {
+    if ((await Permission.audio.request()).isGranted) return true;
+    return (await Permission.storage.request()).isGranted;
+  }
+
+  Future<void> _pickFiles(BuildContext context) async {
+    final queue = context.read<UploadQueue>();
+    final picked = await FilePicker.pickFiles(type: FileType.audio);
+    await queue.addFiles([
+      for (final file in picked)
+        if (file.path != null) file.path!,
+    ]);
   }
 
   @override
   Widget build(BuildContext context) {
-    final doneCount = _items.where((i) => i.status == _Status.done).length;
-    final hasFailures = _items.any((i) => i.status == _Status.failed);
-    return SafeArea(
-      bottom: false,
-      child: ListView(
-        padding: EdgeInsets.fromLTRB(
-          kPagePadding,
-          0,
-          kPagePadding,
-          MediaQuery.paddingOf(context).bottom,
+    return Wrap(
+      spacing: YomiSpace.s,
+      runSpacing: YomiSpace.s,
+      children: [
+        FilledButton.icon(
+          onPressed: () => _pickFolder(context),
+          icon: const Icon(Icons.folder_open_rounded, size: 18),
+          label: const Text('Choose a folder'),
         ),
+        OutlinedButton.icon(
+          onPressed: () => _pickFiles(context),
+          icon: const Icon(Icons.library_music_outlined, size: 18),
+          label: const Text('Choose songs'),
+        ),
+      ],
+    );
+  }
+}
+
+class _PauseNotice extends StatelessWidget {
+  const _PauseNotice({required this.pause});
+
+  final UploadPause pause;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(YomiSpace.m),
+      decoration: BoxDecoration(
+        color: YomiColors.surfaceHigh,
+        borderRadius: BorderRadius.circular(YomiRadius.card),
+      ),
+      child: Row(
         children: [
-          Padding(
-            padding: const EdgeInsets.only(top: 22, bottom: 8),
+          const Icon(Icons.pause_circle_outline_rounded),
+          const SizedBox(width: YomiSpace.m),
+          Expanded(
             child: Text(
-              'Add songs',
-              style: yomiText(36, weight: FontWeight.w800, letterSpacing: -1),
+              _pauseMessage(pause),
+              style: yomiText(13.5, weight: FontWeight.w600, height: 1.3),
             ),
           ),
-          const SizedBox(height: 18),
-          GestureDetector(
-            onTap: _pickAndUpload,
-            child: Container(
-              height: 150,
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(26),
-                gradient: LinearGradient(
-                  colors: [
-                    context.accentDeep.withValues(alpha: 0.35),
-                    context.accentSecondary.withValues(alpha: 0.18),
-                  ],
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                ),
-                border: Border.all(
-                  color: context.accent.withValues(alpha: 0.35),
-                ),
-              ),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(Icons.upload_rounded, size: 40, color: context.accent),
-                  const SizedBox(height: 10),
-                  Text(
-                    _isRunning ? 'Add more songs' : 'Choose songs',
-                    style: yomiText(17, weight: FontWeight.w800),
-                  ),
-                  Text(
-                    'mp3, m4a, flac, ogg, opus, wav',
-                    style: yomiText(
-                      12.5,
-                      weight: FontWeight.w500,
-                      color: YomiColors.textSecondary,
-                    ),
-                  ),
-                ],
-              ),
+          if (pause == UploadPause.storageFull ||
+              pause == UploadPause.serverNeedsUpdate)
+            TextButton(
+              onPressed: context.read<UploadQueue>().resume,
+              child: const Text('Try again'),
             ),
+        ],
+      ),
+    );
+  }
+}
+
+class _Summary extends StatelessWidget {
+  const _Summary({required this.queue});
+
+  final UploadQueue queue;
+
+  @override
+  Widget build(BuildContext context) {
+    final done = queue.count(UploadState.done);
+    final duplicates = queue.count(UploadState.duplicate);
+    final failed = queue.count(UploadState.failed);
+    final handled =
+        done +
+        duplicates +
+        failed +
+        queue.count(UploadState.likelyDuplicate) +
+        queue.count(UploadState.skipped);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          '$handled of ${queue.total} handled',
+          style: yomiText(16, weight: FontWeight.w800),
+        ),
+        const SizedBox(height: YomiSpace.s),
+        LinearProgressIndicator(
+          value: queue.total == 0 ? 0 : handled / queue.total,
+          minHeight: 3,
+          color: context.accent,
+          backgroundColor: YomiColors.surfaceHigh,
+        ),
+        const SizedBox(height: YomiSpace.s),
+        Text(
+          [
+            '$done uploaded',
+            '$duplicates already on the server',
+            if (failed > 0) '$failed failed',
+          ].join(' · '),
+          style: yomiText(
+            13,
+            weight: FontWeight.w500,
+            color: YomiColors.textSecondary,
           ),
-          if (_items.isNotEmpty) ...[
-            const SizedBox(height: 20),
-            Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    '$doneCount of ${_items.length} uploaded',
-                    style: yomiText(15, weight: FontWeight.w800),
-                  ),
-                ),
-                if (hasFailures && !_isRunning)
-                  TextButton(
-                    onPressed: _retryFailed,
-                    child: const Text('Retry failed'),
-                  ),
-                if (!_isRunning)
-                  TextButton(
-                    onPressed: () => setState(() => _items = const []),
-                    child: const Text('Clear'),
-                  ),
-              ],
-            ),
-            for (final item in _items) _UploadRow(item: item),
+        ),
+        Row(
+          children: [
+            if (failed > 0)
+              TextButton(
+                onPressed: queue.retryFailed,
+                child: const Text('Retry failed'),
+              ),
+            if (queue.remaining < queue.total)
+              TextButton(
+                onPressed: queue.clearFinished,
+                child: const Text('Clear finished'),
+              ),
           ],
-          const SizedBox(height: 24),
+        ),
+      ],
+    );
+  }
+}
+
+class _LikelyHeader extends StatelessWidget {
+  const _LikelyHeader({required this.count});
+
+  final int count;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                'Might already be on the server ($count)',
+                style: yomiText(16, weight: FontWeight.w800),
+              ),
+            ),
+            TextButton(
+              onPressed: context.read<UploadQueue>().uploadAllLikelyAnyway,
+              child: const Text('Upload all'),
+            ),
+          ],
+        ),
+        Text(
+          'Same artist, title and length as a song you have. A remaster or live '
+          'version can match by mistake, so these wait for you.',
+          style: yomiText(
+            13,
+            weight: FontWeight.w500,
+            height: 1.35,
+            color: YomiColors.textSecondary,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _LikelyRow extends StatelessWidget {
+  const _LikelyRow({required this.item});
+
+  final UploadItem item;
+
+  @override
+  Widget build(BuildContext context) {
+    final queue = context.read<UploadQueue>();
+    return ListTile(
+      contentPadding: const EdgeInsets.symmetric(horizontal: kPagePadding),
+      title: Text(
+        item.name,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: yomiText(14, weight: FontWeight.w600),
+      ),
+      subtitle: item.facts?.artist == null
+          ? null
+          : Text(
+              item.facts!.artist!,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: yomiText(
+                12.5,
+                weight: FontWeight.w500,
+                color: YomiColors.textSecondary,
+              ),
+            ),
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          TextButton(
+            onPressed: () => queue.skipLikely(item.path),
+            child: const Text('Skip'),
+          ),
+          TextButton(
+            onPressed: () => queue.uploadAnyway(item.path),
+            child: const Text('Upload'),
+          ),
         ],
       ),
     );
@@ -196,22 +357,61 @@ class _UploadPageState extends State<UploadPage> {
 class _UploadRow extends StatelessWidget {
   const _UploadRow({required this.item});
 
-  final _UploadItem item;
+  final UploadItem item;
 
   @override
   Widget build(BuildContext context) {
-    final (icon, color) = switch (item.status) {
-      _Status.queued => (Icons.schedule_rounded, YomiColors.textSecondary),
-      _Status.uploading => (Icons.cloud_upload_rounded, context.accent),
-      _Status.done => (Icons.check_circle_rounded, Colors.greenAccent),
-      _Status.failed => (Icons.error_rounded, Colors.redAccent),
+    final (icon, color, label) = switch (item.state) {
+      UploadState.queued => (
+        Icons.schedule_rounded,
+        YomiColors.textSecondary,
+        'Checking',
+      ),
+      UploadState.ready => (
+        Icons.schedule_rounded,
+        YomiColors.textSecondary,
+        'Waiting',
+      ),
+      UploadState.uploading => (
+        Icons.cloud_upload_rounded,
+        context.accent,
+        'Uploading',
+      ),
+      UploadState.done => (
+        Icons.check_circle_rounded,
+        YomiColors.success,
+        'Uploaded',
+      ),
+      UploadState.duplicate => (
+        Icons.check_circle_outline_rounded,
+        YomiColors.textSecondary,
+        'Already on the server',
+      ),
+      UploadState.likelyDuplicate => (
+        Icons.help_outline_rounded,
+        YomiColors.textSecondary,
+        'Needs a decision',
+      ),
+      UploadState.skipped => (
+        Icons.remove_circle_outline_rounded,
+        YomiColors.textSecondary,
+        'Skipped',
+      ),
+      UploadState.failed => (
+        Icons.error_rounded,
+        YomiColors.danger,
+        item.error ?? 'Failed',
+      ),
     };
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8),
+      padding: const EdgeInsets.symmetric(
+        horizontal: kPagePadding,
+        vertical: YomiSpace.s,
+      ),
       child: Row(
         children: [
-          Icon(icon, color: color),
-          const SizedBox(width: 12),
+          Icon(icon, color: color, size: 20),
+          const SizedBox(width: YomiSpace.m),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -220,24 +420,28 @@ class _UploadRow extends StatelessWidget {
                   item.name,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: yomiText(14.5, weight: FontWeight.w600),
+                  style: yomiText(14, weight: FontWeight.w600),
                 ),
-                if (item.status == _Status.uploading)
+                Text(
+                  label,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: yomiText(
+                    12,
+                    weight: FontWeight.w500,
+                    color: item.state == UploadState.failed
+                        ? YomiColors.danger
+                        : YomiColors.textSecondary,
+                  ),
+                ),
+                if (item.state == UploadState.uploading)
                   Padding(
-                    padding: const EdgeInsets.only(top: 6),
+                    padding: const EdgeInsets.only(top: YomiSpace.xs),
                     child: LinearProgressIndicator(
-                      value: item.progress,
-                      minHeight: 3,
+                      value: context.read<UploadQueue>().progressOf(item.path),
+                      minHeight: 2,
                       color: context.accent,
                       backgroundColor: YomiColors.surfaceHigh,
-                    ),
-                  ),
-                if (item.status == _Status.failed)
-                  Text(
-                    item.error ?? 'Failed',
-                    style: const TextStyle(
-                      color: Colors.redAccent,
-                      fontSize: 12,
                     ),
                   ),
               ],

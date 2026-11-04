@@ -16,8 +16,32 @@ const (
 
 func main() {
 	cfg := loadConfig()
-	auth := newNavidromeAuth(cfg.NavidromeURL)
-	server := newServer(cfg, auth, navidromeScan(cfg.NavidromeURL))
+	auth := newCachedAuth(newNavidromeAuth(cfg.NavidromeURL))
+	index, err := openHashIndex(cfg.MusicDir, cfg.IndexFile)
+	if err != nil {
+		log.Fatalf("open index: %v", err)
+	}
+	go index.Seed()
+	server := newServer(cfg, auth, navidromeScan(cfg.NavidromeURL), index)
+	server.Status = newStatusReader(cfg, index)
+	server.Backups = newBackupSource(cfg)
+	messages, err := openMessageStore(cfg.MessagesDir, time.Now)
+	if err != nil {
+		// Music matters more than messages, so the server still starts.
+		log.Printf("messages disabled: %v", err)
+	} else {
+		server.Messages = messages
+		server.Relay = newPushRelay(cfg)
+	}
+	if cfg.Role == roleReplica {
+		if cfg.PrimaryURL == "" || cfg.ReplicaUser == "" || cfg.ReplicaPassword == "" || cfg.ReplicaDatabase == "" {
+			log.Fatal("replica needs YOMI_PRIMARY, YOMI_REPLICA_USER, YOMI_REPLICA_PASSWORD and YOMI_REPLICA_DB")
+		}
+		go newReplicaSync(cfg, index).Run(context.Background())
+	}
+	if cfg.CoversOn {
+		startCovers(cfg)
+	}
 	httpServer := &http.Server{
 		Addr:              cfg.Listen,
 		Handler:           server.routes(),
@@ -26,6 +50,16 @@ func main() {
 	}
 	log.Printf("yomi-upload listening on %s, music dir %s", cfg.Listen, cfg.MusicDir)
 	log.Fatal(httpServer.ListenAndServe())
+}
+
+// startCovers runs in the background; a failure only means art isn't fetched.
+func startCovers(cfg Config) {
+	client, err := newInternetClient()
+	if err != nil {
+		log.Printf("covers disabled: %v", err)
+		return
+	}
+	go newCoverFetcher(cfg.MusicDir, cfg.CoverState, client).Run(context.Background())
 }
 
 // navidromeScan asks Navidrome to rescan using the uploader's own credentials.
@@ -45,7 +79,7 @@ func navidromeScan(baseURL string) func(context.Context, url.Values) {
 		}
 		resp, err := client.Do(req)
 		if err != nil {
-			log.Printf("startScan: %v", err)
+			log.Printf("startScan: %v", redactURL(err))
 			return
 		}
 		resp.Body.Close()

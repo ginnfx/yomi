@@ -2,9 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../theme.dart';
-import 'glass.dart';
 
-const double kNavBarHeight = 64;
+const double kNavBarHeight = 56;
 
 class NavItem {
   const NavItem(this.icon, this.selectedIcon, this.label);
@@ -14,7 +13,7 @@ class NavItem {
   final String label;
 }
 
-/// Floating pill navigation: the selected tab expands to show its name.
+/// Flat bottom navigation with every label always visible.
 class YomiNavBar extends StatelessWidget {
   const YomiNavBar({
     super.key,
@@ -29,27 +28,22 @@ class YomiNavBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
-      child: Glass(
-        radius: 32,
-        child: SizedBox(
-          height: kNavBarHeight,
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-            children: [
-              for (var i = 0; i < items.length; i++)
-                _NavButton(
-                  item: items[i],
-                  isSelected: i == index,
-                  onTap: () {
-                    if (i != index) HapticFeedback.selectionClick();
-                    onSelected(i);
-                  },
-                ),
-            ],
-          ),
-        ),
+    return SizedBox(
+      height: kNavBarHeight,
+      child: Row(
+        children: [
+          for (var i = 0; i < items.length; i++)
+            Expanded(
+              child: _NavButton(
+                item: items[i],
+                isSelected: i == index,
+                onTap: () {
+                  if (i != index) HapticFeedback.selectionClick();
+                  onSelected(i);
+                },
+              ),
+            ),
+        ],
       ),
     );
   }
@@ -68,47 +62,27 @@ class _NavButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onTap: onTap,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 260),
-        curve: Curves.easeOutCubic,
-        padding: EdgeInsets.symmetric(
-          horizontal: isSelected ? 18 : 14,
-          vertical: 12,
-        ),
-        decoration: BoxDecoration(
-          color: isSelected
-              ? context.accent.withValues(alpha: 0.20)
-              : Colors.transparent,
-          borderRadius: BorderRadius.circular(24),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
+    final color = isSelected
+        ? YomiColors.textPrimary
+        : YomiColors.textSecondary;
+    return Semantics(
+      button: true,
+      selected: isSelected,
+      label: item.label,
+      excludeSemantics: true,
+      child: InkResponse(
+        onTap: onTap,
+        radius: 40,
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Icon(
               isSelected ? item.selectedIcon : item.icon,
-              size: 25,
-              color: isSelected ? context.accent : YomiColors.textSecondary,
+              color: color,
+              size: 24,
             ),
-            AnimatedSize(
-              duration: const Duration(milliseconds: 260),
-              curve: Curves.easeOutCubic,
-              child: isSelected
-                  ? Padding(
-                      padding: const EdgeInsets.only(left: 8),
-                      child: Text(
-                        item.label,
-                        style: yomiText(
-                          14,
-                          weight: FontWeight.w700,
-                          color: context.accent,
-                        ),
-                      ),
-                    )
-                  : const SizedBox.shrink(),
-            ),
+            const SizedBox(height: 2),
+            Text(item.label, style: yomiText(11, color: color)),
           ],
         ),
       ),

@@ -106,7 +106,9 @@ void main() {
       expect(ReleaseInfo.tryParse({'tag_name': 'nightly'}), isNull);
       expect(ReleaseInfo.tryParse(releaseJson()..remove('html_url')), isNull);
       expect(
-        ReleaseInfo.tryParse(releaseJson()..['html_url'] = 'https://evil.example/x'),
+        ReleaseInfo.tryParse(
+          releaseJson()..['html_url'] = 'https://evil.example/x',
+        ),
         isNull,
       );
     });
@@ -237,19 +239,22 @@ void main() {
       );
     }
 
-    test('saves the file when the checksum matches and reports progress', () async {
-      final progress = <double?>[];
+    test(
+      'saves the file when the checksum matches and reports progress',
+      () async {
+        final progress = <double?>[];
 
-      final file = await serving(bytes).downloadVerified(
-        uri,
-        expectedSha256: goodHash,
-        destination: target(),
-        onProgress: progress.add,
-      );
+        final file = await serving(bytes).downloadVerified(
+          uri,
+          expectedSha256: goodHash,
+          destination: target(),
+          onProgress: progress.add,
+        );
 
-      expect(await file.readAsBytes(), bytes);
-      expect(progress.last, 1.0);
-    });
+        expect(await file.readAsBytes(), bytes);
+        expect(progress.last, 1.0);
+      },
+    );
 
     test('refuses and removes a file whose checksum does not match', () async {
       await expectLater(
@@ -268,11 +273,10 @@ void main() {
       await target().writeAsBytes(bytes);
       var requests = 0;
 
-      await serving(bytes, onRequest: () => requests++).downloadVerified(
-        uri,
-        expectedSha256: goodHash,
-        destination: target(),
-      );
+      await serving(
+        bytes,
+        onRequest: () => requests++,
+      ).downloadVerified(uri, expectedSha256: goodHash, destination: target());
 
       expect(requests, 0);
     });
@@ -280,11 +284,9 @@ void main() {
     test('replaces an existing file that fails verification', () async {
       await target().writeAsBytes(utf8.encode('corrupt'));
 
-      final file = await serving(bytes).downloadVerified(
-        uri,
-        expectedSha256: goodHash,
-        destination: target(),
-      );
+      final file = await serving(
+        bytes,
+      ).downloadVerified(uri, expectedSha256: goodHash, destination: target());
 
       expect(await file.readAsBytes(), bytes);
     });

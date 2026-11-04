@@ -17,6 +17,8 @@ fi
 BUILD_NUMBER=$((MAJOR * 10000 + MINOR * 100 + PATCH))
 
 APP_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+BRIDGE_DIR="$APP_DIR/../tailscale_bridge"
+[ -f "$BRIDGE_DIR/build/tailscale_bridge.aar" ] || "$BRIDGE_DIR/build.sh" android
 RELEASE_DIR="$APP_DIR/../release"
 APK="$APP_DIR/build/app/outputs/flutter-apk/app-release.apk"
 cd "$APP_DIR"

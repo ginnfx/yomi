@@ -19,6 +19,17 @@ class SettingsController extends ChangeNotifier {
   Future<void> setSyncListening(bool value) =>
       _set(() => _prefs.setBool('syncListening', value));
 
+  /// Whether the phone player shows big art instead of lyrics when a song has both.
+  bool get prefersArtOverLyrics =>
+      _prefs.getBool('prefersArtOverLyrics') ?? false;
+  Future<void> setPrefersArtOverLyrics(bool value) =>
+      _set(() => _prefs.setBool('prefersArtOverLyrics', value));
+
+  /// Save songs on repeat for offline play. Only ever fetches on Wi-Fi.
+  bool get autoDownloadRepeats => _prefs.getBool('autoDownloadRepeats') ?? true;
+  Future<void> setAutoDownloadRepeats(bool value) =>
+      _set(() => _prefs.setBool('autoDownloadRepeats', value));
+
   bool get wifiOnlyDownloads => _prefs.getBool('wifiOnlyDownloads') ?? true;
   bool get cachePlayedSongs => _prefs.getBool('cachePlayedSongs') ?? true;
   Future<void> setCachePlayedSongs(bool value) =>
@@ -28,7 +39,20 @@ class SettingsController extends ChangeNotifier {
   int get cacheLimitBytes => cacheLimitMb * 1024 * 1024;
 
   /// Home screen sections, in the order shown. Unknown or missing ids are repaired.
-  static const homeSectionIds = ['shuffle', 'quick', 'recent', 'discover'];
+  static const homeSectionIds = [
+    'shuffle',
+    'quick',
+    'jumpBack',
+    'becauseYouPlayed',
+    'topGenre',
+    'rediscover',
+    'timeOfDay',
+    'recentlyAdded',
+    'discover',
+  ];
+
+  /// Set once the user arranges Home by hand; until then shelves rotate by themselves.
+  bool get hasCustomHomeOrder => _prefs.containsKey('homeOrder');
 
   List<String> get homeOrder {
     final saved = (_prefs.getStringList('homeOrder') ?? const <String>[])
@@ -43,11 +67,13 @@ class SettingsController extends ChangeNotifier {
   List<String> get visibleHomeSections =>
       homeOrder.where((id) => !hiddenHomeSections.contains(id)).toList();
 
-  Future<void> setHomeLayout(List<String> order, Set<String> hidden) async {
-    await _prefs.setStringList('homeOrder', order);
-    await _prefs.setStringList('homeHidden', hidden.toList());
-    notifyListeners();
-  }
+  Future<void> setHomeOrder(List<String> order) =>
+      _set(() => _prefs.setStringList('homeOrder', order));
+
+  Future<void> clearHomeOrder() => _set(() => _prefs.remove('homeOrder'));
+
+  Future<void> setHomeHidden(Set<String> hidden) =>
+      _set(() => _prefs.setStringList('homeHidden', hidden.toList()));
 
   /// Playlist ids in the user's own order (like dragging playlists around in Spotify).
   List<String> get playlistOrder =>

@@ -395,8 +395,17 @@ void main() {
       );
     }
 
-    Future<void> settle() =>
-        Future<void>.delayed(const Duration(milliseconds: 50));
+    /// Gives the manager time to act, then waits for what it started. A fixed wait
+    /// alone can be too short on a busy machine.
+    Future<void> settle() async {
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      final deadline = DateTime.now().add(const Duration(seconds: 10));
+      while (manager.pendingCount > 0 &&
+          manager.pausedReason == null &&
+          DateTime.now().isBefore(deadline)) {
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+      }
+    }
 
     test('downloads queued songs one at a time and marks them done', () async {
       await build(initial: [ConnectivityResult.wifi]);

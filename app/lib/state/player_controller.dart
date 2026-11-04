@@ -8,10 +8,13 @@ import '../core/models.dart';
 import '../core/offline/audio_cache.dart';
 import '../core/offline/audio_preloader.dart';
 import '../core/offline/file_fetcher.dart';
+import '../core/stall_detector.dart';
 import '../core/subsonic_client.dart';
 import 'connectivity_controller.dart';
 import 'download_manager.dart';
 import 'settings.dart';
+
+const Duration _stallCheckEvery = Duration(seconds: 1);
 
 /// Owns the audio player and the play queue; the UI listens to this.
 class PlayerController extends ChangeNotifier {
@@ -22,7 +25,9 @@ class PlayerController extends ChangeNotifier {
     required this.settings,
     required this.connectivity,
     this.fetcher = const FileFetcher(),
-  }) {
+    DateTime Function()? now,
+  }) : _now = now ?? DateTime.now {
+    _stallTimer = Timer.periodic(_stallCheckEvery, (_) => checkForStall());
     _preloader = AudioPreloader(
       cache: cache,
       fetcher: fetcher,
@@ -50,6 +55,17 @@ class PlayerController extends ChangeNotifier {
   final SettingsController settings;
   final ConnectivityController connectivity;
   final FileFetcher fetcher;
+
+  /// Called when audio stops arriving, so the session can look for another server.
+  void Function()? onStalled;
+
+  final DateTime Function() _now;
+  final StallDetector _stalls = StallDetector();
+  late final Timer _stallTimer;
+  bool _needsNewSources = false;
+
+  /// Told about the next song in the queue, so its extras can be ready in time.
+  void Function(SubsonicClient client, Song song)? onUpcomingSong;
   bool _disposed = false;
   late final AudioPreloader _preloader;
   String? _retriedSongId;
@@ -62,14 +78,67 @@ class PlayerController extends ChangeNotifier {
 
   /// Called after sign-in/out so stream and cover URLs use the right credentials.
   void attach(SubsonicClient? client) {
+    final previous = _client;
     _client = client;
     if (client == null) {
       _preloader.stop();
       _player.stop();
       _queue = const [];
       _index = null;
+      _needsNewSources = false;
       notifyListeners();
+      return;
     }
+    final hasMoved = previous != null && previous.baseUrl != client.baseUrl;
+    if (!hasMoved || _queue.isEmpty) return;
+    // Queued songs still point at the old address. If music is flowing, the switch waits
+    // for the next song so nothing is heard; if not, it happens now.
+    if (_isFlowing) {
+      _needsNewSources = true;
+    } else {
+      unawaited(_reloadSources());
+    }
+  }
+
+  bool get _isFlowing =>
+      _player.playing &&
+      _player.processingState == ProcessingState.ready &&
+      !_stalls.isStalled &&
+      _error == null;
+
+  /// Reloads the queue from the current address, keeping the song and position.
+  Future<void> _reloadSources({bool fromStart = false}) async {
+    final index = _index;
+    if (_client == null || index == null || _queue.isEmpty) return;
+    _needsNewSources = false;
+    final wasPlaying = _player.playing;
+    final position = fromStart ? Duration.zero : _player.position;
+    _error = null;
+    _stalls.reset();
+    try {
+      await _player.setAudioSources(
+        _queue.map(_sourceFor).toList(),
+        initialIndex: index,
+        initialPosition: position,
+      );
+      if (wasPlaying) unawaited(_player.play());
+    } on Object catch (error) {
+      _fail(error);
+    }
+    if (!_disposed) notifyListeners();
+  }
+
+  /// Runs on a timer. Public so tests can drive it.
+  void checkForStall() {
+    final didStall = _stalls.update(
+      isPlaying: _player.playing,
+      position: _player.position,
+      now: _now(),
+    );
+    if (!didStall) return;
+    debugPrint('Playback stalled');
+    if (_needsNewSources) unawaited(_reloadSources());
+    onStalled?.call();
   }
 
   List<Song> get queue => _queue;
@@ -287,7 +356,11 @@ class PlayerController extends ChangeNotifier {
   }
 
   void _onIndexChanged(int? index) {
+    final didChangeSong = index != _index;
     _index = index;
+    if (_needsNewSources && didChangeSong && index != null) {
+      unawaited(_reloadSources(fromStart: true));
+    }
     final song = current;
     if (song?.id != _warmCurrentId) {
       _preloader.stop();
@@ -296,12 +369,26 @@ class PlayerController extends ChangeNotifier {
     if (song != null) unawaited(cache.touch(song.id));
     _retriedSongId = song?.id == _retriedSongId ? _retriedSongId : null;
     if (song != null && _isLocal(song)) _scheduleCaching(includeCurrent: false);
+    _announceUpcoming();
     notifyListeners();
+  }
+
+  void _announceUpcoming() {
+    final index = _index;
+    final client = _client;
+    final notify = onUpcomingSong;
+    if (index == null || client == null || notify == null) return;
+    final order = _player.effectiveIndices;
+    final position = order.indexOf(index);
+    if (position < 0 || position + 1 >= order.length) return;
+    final nextIndex = order[position + 1];
+    if (nextIndex < _queue.length) notify(client, _queue[nextIndex]);
   }
 
   void _onPlaybackError(Object error) async {
     if (await _retryOverNetwork()) return;
     _fail(error);
+    onStalled?.call();
   }
 
   void _fail(Object error) {
@@ -315,6 +402,7 @@ class PlayerController extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
+    _stallTimer.cancel();
     settings.removeListener(_onCacheSettingsChanged);
     connectivity.removeListener(_onCacheSettingsChanged);
     _preloader.dispose();

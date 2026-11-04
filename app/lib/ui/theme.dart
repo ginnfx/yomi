@@ -1,17 +1,48 @@
 import 'package:flutter/cupertino.dart' show CupertinoPageTransitionsBuilder;
 import 'package:flutter/material.dart';
 
-/// Yomi's look: deep ink background with a soft coloured glow, expressive type, big rounded art.
-/// Neutral colours live here; the accent comes from the chosen [AccentPalette] via `context.accent`.
+/// Yomi's look: flat neutral surfaces, strong type and the album art doing the
+/// colour work. Neutrals live here; the accent comes from the chosen
+/// [AccentPalette] via `context.accent`.
 abstract final class YomiColors {
-  static const background = Color(0xFF0A0A10);
+  static const background = Color(0xFF101012);
   static const trueBlack = Color(0xFF000000);
-  static const surface = Color(0xFF14141D);
-  static const surfaceHigh = Color(0xFF1F1F2B);
-  static const textPrimary = Color(0xFFF6F5FB);
-  static const textSecondary = Color(0xFF9D9BB0);
-  static const success = Color(0xFF6EE7B7);
+  static const surface = Color(0xFF1A1A1D);
+  static const surfaceHigh = Color(0xFF28282C);
+  static const hairline = Color(0x1AFFFFFF);
+  static const textPrimary = Color(0xFFFFFFFF);
+  static const textSecondary = Color(0xFFA6A6AC);
+  static const success = Color(0xFF3FD694);
+  static const danger = Color(0xFFFF6B6B);
 }
+
+/// Spacing scale. Anything off this scale should have a reason.
+abstract final class YomiSpace {
+  static const double xs = 4;
+  static const double s = 8;
+  static const double m = 12;
+  static const double l = 16;
+  static const double xl = 24;
+  static const double xxl = 32;
+}
+
+/// Corner radii. Art stays nearly square; only people get circles.
+abstract final class YomiRadius {
+  static const double art = 6;
+  static const double card = 8;
+  static const double sheet = 16;
+  static const double pill = 999;
+}
+
+/// Motion is quick and never overshoots.
+abstract final class YomiMotion {
+  static const quick = Duration(milliseconds: 140);
+  static const standard = Duration(milliseconds: 240);
+  static const Curve curve = Curves.easeOutCubic;
+}
+
+/// From this width up, pages use the sidebar and side-by-side layouts.
+const double kWideLayoutWidth = 900;
 
 /// One selectable colour scheme. Green is the default.
 class AccentPalette {
@@ -94,6 +125,7 @@ class YomiTheme extends InheritedWidget {
 }
 
 extension YomiContext on BuildContext {
+  bool get isWideLayout => MediaQuery.sizeOf(this).width >= kWideLayoutWidth;
   Color get accent => YomiTheme.of(this).palette.accent;
   Color get accentDeep => YomiTheme.of(this).palette.deep;
   Color get accentSecondary => YomiTheme.of(this).palette.secondary;
@@ -107,19 +139,10 @@ extension YomiContext on BuildContext {
   Color get pageColor => YomiTheme.of(this).isTrueBlack
       ? YomiColors.trueBlack
       : YomiColors.background;
-
-  LinearGradient get accentGradient {
-    final p = YomiTheme.of(this).palette;
-    return LinearGradient(
-      colors: [p.deep, p.accent, p.secondary],
-      begin: Alignment.topLeft,
-      end: Alignment.bottomRight,
-    );
-  }
 }
 
 const double kPagePadding = 20;
-const double kCardRadius = 16;
+const double kCardRadius = YomiRadius.card;
 const String kFontFamily = 'Jakarta';
 
 TextStyle yomiText(
@@ -156,7 +179,7 @@ ThemeData buildYomiTheme(AccentPalette palette, {bool trueBlack = false}) {
     textTheme: base,
     scaffoldBackgroundColor: page,
     canvasColor: page,
-    splashFactory: InkSparkle.splashFactory,
+    splashFactory: InkRipple.splashFactory,
     appBarTheme: const AppBarTheme(
       backgroundColor: Colors.transparent,
       surfaceTintColor: Colors.transparent,
@@ -168,13 +191,17 @@ ThemeData buildYomiTheme(AccentPalette palette, {bool trueBlack = false}) {
       showDragHandle: true,
       dragHandleColor: Color(0x33FFFFFF),
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+        borderRadius: BorderRadius.vertical(
+          top: Radius.circular(YomiRadius.sheet),
+        ),
       ),
     ),
     dialogTheme: DialogThemeData(
       backgroundColor: YomiColors.surface,
       surfaceTintColor: Colors.transparent,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(YomiRadius.sheet),
+      ),
     ),
     filledButtonTheme: FilledButtonThemeData(
       style: FilledButton.styleFrom(
@@ -219,52 +246,37 @@ ThemeData buildYomiTheme(AccentPalette palette, {bool trueBlack = false}) {
   );
 }
 
-/// The soft colour wash behind a page: a smooth vertical fade, never a visible blob.
-/// Ordinary pages get a whisper of the accent; album and player pages pass a stronger tint.
-class AuroraBackground extends StatelessWidget {
-  const AuroraBackground({
+/// A flat page colour, or a vertical fade from [tint] when a page is about one album.
+class PageBackground extends StatelessWidget {
+  const PageBackground({
     super.key,
     required this.child,
     this.tint,
-    this.strength,
+    this.strength = 0.6,
   });
 
   final Widget child;
+
+  /// A colour washing down from the top, used only behind the player.
   final Color? tint;
-  final double? strength;
+  final double strength;
 
   @override
   Widget build(BuildContext context) {
-    final wash = tint ?? context.accentDeep;
-    final amount = strength ?? (tint == null ? 0.22 : 0.55);
-    return Stack(
-      children: [
-        Positioned.fill(child: ColoredBox(color: context.pageColor)),
-        Positioned(
-          top: 0,
-          left: 0,
-          right: 0,
-          height: 520,
-          child: IgnorePointer(
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                  colors: [
-                    wash.withValues(alpha: amount),
-                    wash.withValues(alpha: amount * 0.38),
-                    wash.withValues(alpha: amount * 0.1),
-                    wash.withValues(alpha: 0),
-                  ],
-                  stops: const [0, 0.35, 0.7, 1],
-                ),
+    final page = context.pageColor;
+    final color = tint;
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: page,
+        gradient: color == null
+            ? null
+            : LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [Color.lerp(page, color, strength)!, page],
               ),
-            ),
-          ),
-        ),
-        child,
-      ],
+      ),
+      child: child,
     );
   }
 }

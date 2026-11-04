@@ -244,18 +244,11 @@ class _CollectionPageState extends State<CollectionPage> {
                                 player.playQueue(songs);
                               },
                         child: Container(
-                          width: 66,
-                          height: 66,
+                          width: 56,
+                          height: 56,
                           decoration: BoxDecoration(
                             shape: BoxShape.circle,
-                            gradient: context.accentGradient,
-                            boxShadow: [
-                              BoxShadow(
-                                color: Colors.black.withValues(alpha: 0.4),
-                                blurRadius: 18,
-                                offset: const Offset(0, 8),
-                              ),
-                            ],
+                            color: context.accent,
                           ),
                           child: const Icon(
                             Icons.play_arrow_rounded,

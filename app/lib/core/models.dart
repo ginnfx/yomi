@@ -21,6 +21,7 @@ class Song {
     this.coverArtId,
     this.track,
     this.isStarred = false,
+    this.genre,
   });
 
   /// Untagged files arrive with the file name as the title and no artist. Files named
@@ -54,6 +55,7 @@ class Song {
         coverArtId: json['coverArt']?.toString(),
         track: (json['track'] as num?)?.toInt(),
         isStarred: json['starred'] != null,
+        genre: (json['genre'] as String?)?.trim(),
       );
 
   final String id;
@@ -65,6 +67,8 @@ class Song {
   final String? coverArtId;
   final int? track;
   final bool isStarred;
+
+  final String? genre;
 
   Duration get duration => Duration(seconds: durationSeconds);
 
@@ -78,6 +82,7 @@ class Song {
     'coverArt': coverArtId,
     'track': track,
     'starred': isStarred ? 'yes' : null,
+    'genre': genre,
   };
 
   Song copyWith({bool? isStarred}) => Song(
@@ -90,6 +95,7 @@ class Song {
     coverArtId: coverArtId,
     track: track,
     isStarred: isStarred ?? this.isStarred,
+    genre: genre,
   );
 }
 
@@ -175,6 +181,18 @@ class Playlist {
 }
 
 @immutable
+class Genre {
+  const Genre(this.name, this.songCount);
+
+  factory Genre.fromJson(Map<String, dynamic> json) => Genre(
+    (json['value'] as String?) ?? '',
+    (json['songCount'] as num?)?.toInt() ?? 0,
+  );
+
+  final String name;
+  final int songCount;
+}
+
 class SearchResults {
   const SearchResults({
     this.songs = const [],

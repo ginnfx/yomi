@@ -5,6 +5,7 @@ import '../../core/friendly_error.dart';
 import '../../core/server_defaults.dart';
 import '../../state/session.dart';
 import '../widgets/error_view.dart';
+import '../settings/invite_section.dart';
 import '../theme.dart';
 
 class LoginPage extends StatefulWidget {
@@ -32,6 +33,16 @@ class _LoginPageState extends State<LoginPage> {
     super.dispose();
   }
 
+  Future<void> _useInvite() async {
+    final messenger = ScaffoldMessenger.of(context);
+    final host = Uri.tryParse(normalizeServerUrl(_server.text))?.host ?? '';
+    if (await showInviteDialog(context, host)) {
+      messenger.showSnackBar(
+        const SnackBar(content: Text('Connected. Now sign in.')),
+      );
+    }
+  }
+
   Future<void> _submit() async {
     if (_isBusy) return;
     final session = context.read<SessionController>();
@@ -55,7 +66,7 @@ class _LoginPageState extends State<LoginPage> {
 
   @override
   Widget build(BuildContext context) {
-    return AuroraBackground(
+    return PageBackground(
       child: Scaffold(
         backgroundColor: Colors.transparent,
         body: SafeArea(
@@ -67,18 +78,14 @@ class _LoginPageState extends State<LoginPage> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    ShaderMask(
-                      blendMode: BlendMode.srcIn,
-                      shaderCallback: (rect) =>
-                          context.accentGradient.createShader(rect),
-                      child: Text(
-                        'Yomi',
-                        textAlign: TextAlign.center,
-                        style: yomiText(
-                          68,
-                          weight: FontWeight.w800,
-                          letterSpacing: -3,
-                        ),
+                    Text(
+                      'Yomi',
+                      textAlign: TextAlign.center,
+                      style: yomiText(
+                        56,
+                        weight: FontWeight.w800,
+                        letterSpacing: -2,
+                        color: context.accent,
                       ),
                     ),
                     const SizedBox(height: 4),
@@ -214,6 +221,11 @@ class _LoginPageState extends State<LoginPage> {
                                 color: Colors.black,
                               ),
                             ),
+                    ),
+                    const SizedBox(height: YomiSpace.s),
+                    TextButton(
+                      onPressed: _isBusy ? null : _useInvite,
+                      child: const Text('Have an invite code?'),
                     ),
                   ],
                 ),

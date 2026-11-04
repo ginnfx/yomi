@@ -7,7 +7,7 @@ import '../theme.dart';
 
 const Color _neutral = Color(0xFF202020);
 
-/// Page background that glows in the colour of the given cover art.
+/// Page background washed in the colour of the given cover art.
 class TintedBackground extends StatelessWidget {
   const TintedBackground({
     super.key,
@@ -33,9 +33,9 @@ class TintedBackground extends StatelessWidget {
         duration: known == null
             ? const Duration(milliseconds: 600)
             : Duration.zero,
-        builder: (context, color, _) => AuroraBackground(
+        builder: (context, color, _) => PageBackground(
           tint: color,
-          strength: snapshot.data == null && coverArtId == null ? 0.22 : 0.6,
+          strength: snapshot.data == null ? 0.2 : 0.75,
           child: child,
         ),
       ),

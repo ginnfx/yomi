@@ -54,8 +54,7 @@ class UpdateController extends ChangeNotifier {
   String? get errorMessage => _errorMessage;
 
   bool get _isBusy =>
-      _phase == UpdatePhase.downloading ||
-      _phase == UpdatePhase.readyToInstall;
+      _phase == UpdatePhase.downloading || _phase == UpdatePhase.readyToInstall;
 
   /// Safe to call often: GitHub is contacted at most every [kUpdateCheckInterval].
   Future<void> check() async {
@@ -105,7 +104,8 @@ class UpdateController extends ChangeNotifier {
       final age = now().difference(
         DateTime.fromMillisecondsSinceEpoch(lastCheck),
       );
-      if (!age.isNegative && age < kUpdateCheckInterval) return _cachedRelease();
+      if (!age.isNegative && age < kUpdateCheckInterval)
+        return _cachedRelease();
     }
     try {
       final latest = await client.fetchLatest();

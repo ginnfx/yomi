@@ -1,10 +1,11 @@
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/format.dart';
 import '../../core/models.dart';
+import '../../state/home_controller.dart';
+import '../../state/messages_controller.dart';
 import '../../state/player_controller.dart';
 import '../../state/profile_controller.dart';
 import '../../state/session.dart';
@@ -14,19 +15,22 @@ import '../theme.dart';
 import '../widgets/album_card.dart';
 import '../widgets/async_section.dart';
 import '../widgets/cover_art.dart';
+import '../widgets/error_view.dart';
 import '../widgets/continue_listening.dart';
 import '../widgets/compact_music_grid.dart';
 import '../widgets/shimmer.dart';
-import '../widgets/song_tile.dart';
+import '../widgets/profile_panel.dart';
 import 'collection_page.dart';
-import 'settings_page.dart';
+import 'messages_page.dart';
 
 const int _shuffleBatch = 60;
 const int _quickPickCount = 6;
-const int _recentCount = 16;
 
 class HomePage extends StatefulWidget {
-  const HomePage({super.key});
+  const HomePage({super.key, this.greetingTime});
+
+  /// Fixes the greeting's time, for screenshots that shouldn't change by the hour.
+  final DateTime? greetingTime;
 
   @override
   State<HomePage> createState() => _HomePageState();
@@ -53,6 +57,7 @@ class _HomePageState extends State<HomePage> {
     final session = context.watch<SessionController>();
     final profile = context.watch<ProfileController>();
     final sections = context.watch<SettingsController>().visibleHomeSections;
+    final home = context.watch<HomeController>();
     return SafeArea(
       bottom: false,
       child: RefreshIndicator(
@@ -60,18 +65,18 @@ class _HomePageState extends State<HomePage> {
         backgroundColor: YomiColors.surfaceHigh,
         onRefresh: () async {
           setState(() => _refresh++);
-          await Future<void>.delayed(const Duration(milliseconds: 500));
+          await context.read<HomeController>().refresh();
         },
         child: ListView(
           children: [
             _Header(
               name: profile.displayName(session.username),
-              routeLabel: session.routeLabel,
-              isHome: session.route == ActiveRoute.home,
+              greetingTime: widget.greetingTime,
             ),
             const ContinueListening(),
             for (final id in sections) _section(id, session),
-            if (sections.isEmpty)
+            const _Shelves(),
+            if (sections.isEmpty && home.shelves.isEmpty && !home.isLoading)
               Padding(
                 padding: const EdgeInsets.all(48),
                 child: Text(
@@ -92,14 +97,14 @@ class _HomePageState extends State<HomePage> {
   }
 
   Widget _section(String id, SessionController session) {
-    final isMac = defaultTargetPlatform == TargetPlatform.macOS;
+    final isWide = context.isWideLayout;
     final client = session.client;
     final player = context.read<PlayerController>();
     switch (id) {
       case 'shuffle':
         return Padding(
           padding: const EdgeInsets.fromLTRB(kPagePadding, 22, kPagePadding, 0),
-          child: isMac
+          child: isWide
               ? Row(
                   children: [
                     Text(
@@ -162,7 +167,7 @@ class _HomePageState extends State<HomePage> {
                     kPagePadding,
                     0,
                   ),
-                  child: isMac
+                  child: isWide
                       ? CompactMusicGrid(
                           items: [
                             for (final pick in picks)
@@ -178,8 +183,8 @@ class _HomePageState extends State<HomePage> {
                           crossAxisCount: 2,
                           shrinkWrap: true,
                           physics: const NeverScrollableScrollPhysics(),
-                          mainAxisSpacing: 10,
-                          crossAxisSpacing: 10,
+                          mainAxisSpacing: YomiSpace.s,
+                          crossAxisSpacing: YomiSpace.s,
                           childAspectRatio: 3.1,
                           children: [
                             for (final pick in picks) _QuickTile(pick: pick),
@@ -187,123 +192,114 @@ class _HomePageState extends State<HomePage> {
                         ),
                 ),
         );
-      case 'recent':
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const SectionTitle('Recently added'),
-            AsyncSection<List<Song>>(
-              key: ValueKey('recent-$_refresh'),
-              skeleton: const CardRowSkeleton(),
-              load: () => client.recentSongs(count: _recentCount),
-              builder: (context, songs) => songs.isEmpty
-                  ? const _Empty('Nothing yet')
-                  : CardRow(
-                      children: [
-                        for (var i = 0; i < songs.length; i++)
-                          AlbumCard.song(
-                            songs[i],
-                            () => player.playQueue(songs, startIndex: i),
-                          ),
-                      ],
-                    ),
-            ),
-          ],
-        );
-      case 'discover':
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const SectionTitle('Discover'),
-            AsyncSection<List<Song>>(
-              key: ValueKey('discover-$_refresh'),
-              load: () => client.randomSongs(size: 8),
-              builder: (context, songs) => Column(
-                children: [
-                  for (var i = 0; i < songs.length; i++)
-                    SongTile(
-                      song: songs[i],
-                      onTap: () => player.playQueue(songs, startIndex: i),
-                    ),
-                ],
-              ),
-            ),
-          ],
-        );
     }
     return const SizedBox.shrink();
   }
 }
 
-class _Header extends StatelessWidget {
-  const _Header({
-    required this.name,
-    required this.routeLabel,
-    required this.isHome,
-  });
-
-  final String name;
-  final String routeLabel;
-  final bool isHome;
+/// The shelves that change with listening. See [HomeController].
+class _Shelves extends StatelessWidget {
+  const _Shelves();
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(kPagePadding, 22, kPagePadding, 0),
-      child: Row(
-        children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  greetingFor(DateTime.now()),
-                  style: yomiText(
-                    15,
-                    weight: FontWeight.w600,
-                    color: YomiColors.textSecondary,
-                  ),
+    final home = context.watch<HomeController>();
+    final player = context.read<PlayerController>();
+    final shelves = home.shelves;
+    if (shelves.isEmpty) {
+      if (home.isLoading) {
+        return const Padding(
+          padding: EdgeInsets.only(top: YomiSpace.xl),
+          child: CardRowSkeleton(),
+        );
+      }
+      final error = home.error;
+      return error == null
+          ? const SizedBox.shrink()
+          : ErrorView(error: error, onRetry: home.refresh);
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        for (final shelf in shelves) ...[
+          SectionTitle(shelf.title),
+          CardRow(
+            children: [
+              for (var i = 0; i < shelf.songs.length; i++)
+                AlbumCard.song(
+                  shelf.songs[i],
+                  () => player.playQueue(shelf.songs, startIndex: i),
                 ),
-                Text(
-                  name,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: yomiText(
-                    36,
-                    weight: FontWeight.w800,
-                    letterSpacing: -1,
-                  ),
-                ),
-                const SizedBox(height: 2),
-                Row(
-                  children: [
-                    Container(
-                      width: 7,
-                      height: 7,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        color: isHome ? YomiColors.success : context.accent,
-                      ),
-                    ),
-                    const SizedBox(width: 6),
-                    Text(
-                      routeLabel,
-                      style: yomiText(
-                        12.5,
-                        weight: FontWeight.w600,
-                        color: YomiColors.textSecondary,
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-          GestureDetector(
-            onTap: () => openSettings(context),
-            child: const ProfileAvatar(size: 50),
+            ],
           ),
         ],
+      ],
+    );
+  }
+}
+
+class _Header extends StatelessWidget {
+  const _Header({required this.name, this.greetingTime});
+
+  final String name;
+  final DateTime? greetingTime;
+
+  @override
+  Widget build(BuildContext context) {
+    final greeting = greetingFor(greetingTime ?? DateTime.now());
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(
+        kPagePadding,
+        YomiSpace.l,
+        kPagePadding,
+        0,
+      ),
+      child: Row(
+        children: [
+          if (!context.isWideLayout) ...[
+            Semantics(
+              button: true,
+              label: 'Open profile',
+              child: GestureDetector(
+                onTap: () => openProfilePanel(context),
+                child: const ProfileAvatar(size: 36),
+              ),
+            ),
+            const SizedBox(width: YomiSpace.m),
+          ],
+          Expanded(
+            child: Text(
+              greeting,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              semanticsLabel: '$greeting, $name',
+              style: yomiText(24, weight: FontWeight.w800, letterSpacing: -0.5),
+            ),
+          ),
+          const _MessagesButton(),
+        ],
+      ),
+    );
+  }
+}
+
+class _MessagesButton extends StatelessWidget {
+  const _MessagesButton();
+
+  @override
+  Widget build(BuildContext context) {
+    final unread = context.select<MessagesController, int>(
+      (messages) => messages.unreadTotal,
+    );
+    return IconButton(
+      tooltip: unread > 0 ? 'Messages, $unread unread' : 'Messages',
+      onPressed: () => openMessages(context),
+      icon: Badge(
+        isLabelVisible: unread > 0,
+        backgroundColor: context.accent,
+        textColor: Colors.black,
+        label: Text('$unread'),
+        child: const Icon(Icons.chat_bubble_outline_rounded),
       ),
     );
   }
@@ -327,7 +323,7 @@ class _QuickTile extends StatelessWidget {
   Widget build(BuildContext context) {
     return Material(
       color: YomiColors.surfaceHigh,
-      borderRadius: BorderRadius.circular(14),
+      borderRadius: BorderRadius.circular(YomiRadius.art),
       clipBehavior: Clip.antiAlias,
       child: InkWell(
         onTap: () {
@@ -366,89 +362,13 @@ class _ShuffleHero extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        height: 112,
-        padding: const EdgeInsets.symmetric(horizontal: 22),
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(26),
-          gradient: LinearGradient(
-            colors: [context.accentDeep, context.accentSoft],
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-          ),
-          border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.35),
-              blurRadius: 24,
-              offset: const Offset(0, 12),
-            ),
-          ],
-        ),
-        child: Row(
-          children: [
-            Expanded(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Shuffle everything',
-                    style: yomiText(
-                      23,
-                      weight: FontWeight.w800,
-                      letterSpacing: -0.5,
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    'A fresh mix from the whole library',
-                    style: yomiText(
-                      13.5,
-                      weight: FontWeight.w600,
-                      color: Colors.white.withValues(alpha: 0.72),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            Container(
-              width: 58,
-              height: 58,
-              decoration: const BoxDecoration(
-                color: Colors.white,
-                shape: BoxShape.circle,
-              ),
-              child: const Icon(
-                Icons.shuffle_rounded,
-                color: Colors.black,
-                size: 28,
-              ),
-            ),
-          ],
-        ),
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: FilledButton.icon(
+        onPressed: onTap,
+        icon: const Icon(Icons.shuffle_rounded, size: 18),
+        label: const Text('Shuffle library'),
       ),
     );
   }
-}
-
-class _Empty extends StatelessWidget {
-  const _Empty(this.message);
-
-  final String message;
-
-  @override
-  Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.symmetric(horizontal: kPagePadding, vertical: 8),
-    child: Text(
-      message,
-      style: yomiText(
-        14,
-        weight: FontWeight.w500,
-        color: YomiColors.textSecondary,
-      ),
-    ),
-  );
 }

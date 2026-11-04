@@ -7,7 +7,9 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import '../core/connection_probe.dart';
 import '../core/lan_discovery.dart';
 import '../core/subsonic_client.dart';
-import '../core/upload_client.dart';
+import '../core/messaging/messaging_api.dart';
+import '../core/server_role.dart';
+import '../core/upload/bulk_upload_api.dart';
 import 'connectivity_controller.dart';
 
 const int _defaultNavidromePort = 4533;
@@ -15,6 +17,8 @@ const Duration _homeProbeTimeout = Duration(milliseconds: 1500);
 const Duration _routeDebounce = Duration(milliseconds: 700);
 const Duration _reachTimeout = Duration(seconds: 4);
 const Duration _reachRetryEvery = Duration(seconds: 15);
+const Duration _primaryRetryEvery = Duration(seconds: 60);
+const Duration _roleRetryAfter = Duration(seconds: 15);
 const String _awayKey = 'server_url';
 const String _homeKey = 'home_url';
 const String _extraKey = 'extra_urls';
@@ -69,7 +73,11 @@ class SessionController extends ChangeNotifier {
     HomeProbe? probe,
     UrlProbe? urlProbe,
     LanFinder? lanFinder,
-  }) : _storage =
+    this.tunnelConnect,
+    this.uploadPortFor,
+    RoleProbe? roleProbe,
+  }) : _roleProbe = roleProbe ?? probeIsReplica,
+       _storage =
            storage ??
            const FlutterSecureStorage(
              // The login Keychain works for locally built Mac apps without a
@@ -88,13 +96,24 @@ class SessionController extends ChangeNotifier {
   final HomeProbe _probe;
   final UrlProbe _urlProbe;
   final LanFinder _lanFinder;
+
+  /// Starts the embedded tunnel and returns its address, if this device has joined.
+  final Future<String?> Function()? tunnelConnect;
+
+  /// The upload service's port for an address; it differs when going through the tunnel.
+  final int Function(String url)? uploadPortFor;
+  final RoleProbe _roleProbe;
+  bool _isOnTunnel = false;
+  bool _isOnReplica = false;
+  Timer? _primaryRetry;
+  Timer? _roleRetry;
   bool _isScanning = false;
   DateTime? _lastScan;
   List<String> _extraUrls = const [];
   bool _isOnBackup = false;
 
   SubsonicClient? _client;
-  UploadClient? _uploader;
+  UploadTransport? _uploader;
   String? _awayUrl;
   String? _homeUrl;
   String _user = '';
@@ -115,6 +134,13 @@ class SessionController extends ChangeNotifier {
   /// Extra addresses tried, in order, when the main ones don't answer.
   List<String> get extraUrls => List.unmodifiable(_extraUrls);
   bool get isOnBackup => _isOnBackup;
+  bool get isOnTunnel => _isOnTunnel;
+
+  /// On the read-only backup server: edits are refused and plays wait for the main one.
+  bool get isOnReplica => _isOnReplica;
+  int get uploadServicePort => _uploadPort(serverUrl);
+
+  int _uploadPort(String url) => uploadPortFor?.call(url) ?? uploadPort;
 
   /// Every address Yomi knows, best first, without repeats.
   List<String> get candidateUrls => {
@@ -126,7 +152,9 @@ class SessionController extends ChangeNotifier {
   bool get isRestoring => _isRestoring;
   bool get isSignedIn => _client != null;
   SubsonicClient get client => _client!;
-  UploadClient get uploader => _uploader!;
+  UploadTransport get uploader => _uploader!;
+  MessagingTransport get messaging =>
+      MessagingApi(serverUrl: serverUrl, auth: client, port: uploadServicePort);
   String get username => _user;
   String get serverUrl => _client?.baseUrl ?? '';
   String get awayUrl => _awayUrl ?? '';
@@ -136,7 +164,11 @@ class SessionController extends ChangeNotifier {
   bool get isResolving => _isResolving;
   bool get hasHomeAddress => (_homeUrl ?? '').isNotEmpty;
 
-  String get routeLabel => _isOnBackup
+  String get routeLabel => _isOnReplica
+      ? 'Backup server'
+      : _isOnTunnel
+      ? 'Invite tunnel'
+      : _isOnBackup
       ? 'Backup address'
       : switch (_route) {
           ActiveRoute.home => 'Home network',
@@ -192,12 +224,24 @@ class SessionController extends ChangeNotifier {
         home.isNotEmpty &&
         (_connectivity == null || _connectivity.isOnWifi) &&
         await _probe(home, user.trim(), password);
+    String? tunnelUrl;
     if (!homeWorks) {
-      await SubsonicClient(
-        baseUrl: away,
-        username: user.trim(),
-        password: password,
-      ).ping();
+      try {
+        await SubsonicClient(
+          baseUrl: away,
+          username: user.trim(),
+          password: password,
+        ).ping();
+      } on SubsonicException catch (error) {
+        if (error.kind != ErrorKind.unreachable) rethrow;
+        tunnelUrl = await tunnelConnect?.call();
+        if (tunnelUrl == null) rethrow;
+        await SubsonicClient(
+          baseUrl: tunnelUrl,
+          username: user.trim(),
+          password: password,
+        ).ping();
+      }
     }
     _awayUrl = away;
     _homeUrl = home.isEmpty ? null : home;
@@ -206,7 +250,8 @@ class SessionController extends ChangeNotifier {
     _password = password;
     await _remember();
     _route = homeWorks ? ActiveRoute.home : ActiveRoute.away;
-    _build(homeWorks ? home : away);
+    _isOnTunnel = tunnelUrl != null;
+    _build(homeWorks ? home : (tunnelUrl ?? away));
     notifyListeners();
     await refreshRoute();
   }
@@ -236,6 +281,10 @@ class SessionController extends ChangeNotifier {
     notifyListeners();
     try {
       final chosen = await _chooseRoute();
+      // The tunnel exists because the away address failed, so it isn't undone by
+      // merely choosing "away" again. Only home, or a failed check, moves off it.
+      if (_isOnTunnel && chosen == ActiveRoute.away) return;
+      _isOnTunnel = false;
       final url = chosen == ActiveRoute.home
           ? _homeUrl!
           : (_awayUrl ?? _homeUrl!);
@@ -278,14 +327,29 @@ class SessionController extends ChangeNotifier {
   /// first one (in priority order) that answers.
   Future<bool> _failOver(String deadUrl) async {
     final others = candidateUrls.where((u) => u != deadUrl).toList();
-    if (others.isEmpty) return false;
     final results = await Future.wait(
       others.map((u) => _urlProbe(u, _user, _password)),
     );
     final working = results.where((r) => r.isOk).toList();
-    if (working.isEmpty) return false;
-    _isOnBackup = true;
-    _build(working.first.url);
+    if (working.isNotEmpty) {
+      _isOnBackup = true;
+      _isOnTunnel = false;
+      _build(working.first.url);
+      return true;
+    }
+    return _connectThroughTunnel();
+  }
+
+  /// Last resort after every direct address failed, so a device that can reach the
+  /// server by LAN or the Tailscale app never pays for a second network stack.
+  Future<bool> _connectThroughTunnel() async {
+    final url = await tunnelConnect?.call();
+    if (url == null) return false;
+    final result = await _urlProbe(url, _user, _password);
+    if (!result.isOk) return false;
+    _isOnBackup = false;
+    _isOnTunnel = true;
+    _build(url);
     return true;
   }
 
@@ -297,6 +361,7 @@ class SessionController extends ChangeNotifier {
   void useUrl(String url) {
     if (_client == null) return;
     _isOnBackup = url != _awayUrl && url != _homeUrl;
+    _isOnTunnel = false;
     _route = url == _homeUrl ? ActiveRoute.home : ActiveRoute.away;
     _build(url);
     _isServerReachable = true;
@@ -422,12 +487,61 @@ class SessionController extends ChangeNotifier {
       baseUrl: url,
       username: _user,
       password: _password,
+      isReadOnly: () => _isOnReplica,
     );
-    _uploader = UploadClient(serverUrl: url, auth: _client!);
+    unawaited(_refreshRole(url));
+    _uploader = BulkUploadApi(
+      serverUrl: url,
+      auth: _client!,
+      port: _uploadPort(url),
+    );
+  }
+
+  Future<void> _refreshRole(String url) async {
+    final isReplica = await _roleProbe(url, _uploadPort(url));
+    if (url != serverUrl) return; // Moved on while this was being asked.
+    _roleRetry?.cancel();
+    if (isReplica == null) {
+      // Couldn't tell, so keep what was known and ask again shortly.
+      _roleRetry = Timer(_roleRetryAfter, () => unawaited(_refreshRole(url)));
+      return;
+    }
+    if (isReplica != _isOnReplica) {
+      _isOnReplica = isReplica;
+      notifyListeners();
+    }
+    _primaryRetry?.cancel();
+    if (isReplica) {
+      _primaryRetry = Timer.periodic(_primaryRetryEvery, (_) {
+        unawaited(returnToPrimary());
+      });
+    }
+  }
+
+  /// Moves back once a non-backup address answers again. The player stays on the
+  /// current song until it ends, so nothing audibly changes.
+  Future<void> returnToPrimary() async {
+    if (!_isOnReplica) return;
+    for (final url in candidateUrls) {
+      if (url == serverUrl) continue;
+      final result = await _urlProbe(url, _user, _password);
+      if (!result.isOk) continue;
+      if (await _roleProbe(url, _uploadPort(url)) != false) continue;
+      _isOnReplica = false;
+      _isOnBackup = url != _awayUrl && url != _homeUrl;
+      _isOnTunnel = false;
+      _route = url == _homeUrl ? ActiveRoute.home : ActiveRoute.away;
+      _primaryRetry?.cancel();
+      _build(url);
+      notifyListeners();
+      return;
+    }
   }
 
   @override
   void dispose() {
+    _primaryRetry?.cancel();
+    _roleRetry?.cancel();
     _debounce?.cancel();
     _reachRetry?.cancel();
     _connectivity?.removeListener(_onNetworkChanged);

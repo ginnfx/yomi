@@ -13,20 +13,29 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'core/apk_installer.dart';
 import 'core/app_update.dart';
 import 'core/cover_palette.dart';
+import 'core/listening/auto_download_ledger.dart';
+import 'core/listening/play_history.dart';
+import 'core/listening/scrobble_queue.dart';
 import 'core/lyrics.dart';
 import 'core/offline/audio_cache.dart';
 import 'core/offline/cover_warmer.dart';
 import 'core/offline/download_store.dart';
+import 'core/tunnel/tunnel_bridge.dart';
 import 'dev_hooks.dart';
 import 'state/appearance_controller.dart';
 import 'state/connectivity_controller.dart';
 import 'state/download_manager.dart';
+import 'state/home_controller.dart';
+import 'state/listening_controller.dart';
+import 'state/messages_controller.dart';
 import 'state/player_controller.dart';
 import 'state/playback_sync_controller.dart';
 import 'state/profile_controller.dart';
 import 'state/session.dart';
 import 'state/settings.dart';
+import 'state/tunnel_controller.dart';
 import 'state/update_controller.dart';
+import 'state/upload_queue.dart';
 import 'ui/pages/login_page.dart';
 import 'ui/pages/shell_page.dart';
 import 'ui/theme.dart';
@@ -72,13 +81,25 @@ Future<void> main() async {
   await cache.purgeLegacy();
   await cache.evict();
   final connectivity = ConnectivityController();
+  final prefs = await SharedPreferences.getInstance();
+  final ledger = AutoDownloadLedger(prefs);
   final downloads = DownloadManager(
     store: store,
     settings: settings,
     connectivity: connectivity,
     warmCover: warmCovers,
+    ledger: ledger,
   );
-  final session = SessionController(connectivity: connectivity);
+  final tunnel = TunnelController(
+    bridge: const MethodChannelTunnelBridge(),
+    prefs: prefs,
+    stateDir: Directory('${supportDir.path}/tailscale'),
+  );
+  final session = SessionController(
+    connectivity: connectivity,
+    tunnelConnect: tunnel.connect,
+    uploadPortFor: tunnel.uploadPortFor,
+  );
   final player = PlayerController(
     AudioPlayer(),
     cache: cache,
@@ -86,7 +107,42 @@ Future<void> main() async {
     settings: settings,
     connectivity: connectivity,
   );
-  final prefs = await SharedPreferences.getInstance();
+  player.onStalled = () => unawaited(session.checkServer());
+  final listeningDir = '${supportDir.path}/listening';
+  final history = PlayHistory(File('$listeningDir/history.json'));
+  final scrobbles = ScrobbleQueue(File('$listeningDir/scrobbles.json'));
+  await history.load();
+  await scrobbles.load();
+  final listening = ListeningController(
+    history: history,
+    scrobbles: scrobbles,
+    ledger: ledger,
+    downloads: downloads,
+    settings: settings,
+    connectivity: connectivity,
+    trackChanges: player,
+    currentSong: () => player.current,
+    isPlaying: () => player.isPlaying,
+    positions: player.positionStream,
+  );
+  final lyrics = LyricsService(
+    store: LyricsStore(Directory('${supportDir.path}/lyrics')),
+  );
+  player.onUpcomingSong = (client, song) {
+    unawaited(lyrics.forSong(client, song));
+  };
+  final home = HomeController(
+    history: history,
+    settings: settings,
+    cacheFile: File('$listeningDir/home.json'),
+  );
+  await home.loadCache();
+  final uploadsDir = '${supportDir.path}/uploads';
+  final uploads = UploadQueue(
+    queueFile: File('$uploadsDir/queue.json'),
+    hashCacheFile: File('$uploadsDir/hashes.json'),
+  );
+  await uploads.load();
   var deviceId = prefs.getString('playbackDeviceId');
   if (deviceId == null) {
     deviceId =
@@ -99,15 +155,44 @@ Future<void> main() async {
     deviceId: deviceId,
     pollInterval: Duration(seconds: Platform.isMacOS ? 2 : 5),
   );
+  final messages = MessagesController();
+  String? messagingUrl;
+  void publishProfile() => unawaited(
+    messages.publishProfile(
+      displayName: profile.nickname,
+      bio: profile.bio,
+      avatar: profile.avatarFile,
+    ),
+  );
+  profile.addListener(publishProfile);
   session.addListener(() {
     final client = session.isSignedIn ? session.client : null;
     player.attach(client);
     downloads.attach(client);
+    listening.attach(client);
+    home.attach(client);
+    if (client == null) {
+      messages.attach(null);
+    } else if (client.baseUrl != messagingUrl) {
+      messagingUrl = client.baseUrl;
+      messages.attach(session.messaging);
+      publishProfile();
+    }
+    uploads.attach(
+      client == null ? null : session.uploader,
+      loadSnapshot: client == null ? null : snapshotLoaderFor(client),
+    );
     sync.attach(client);
   });
 
   final updates = await _buildUpdateController(prefs);
-  AppLifecycleListener(onResume: () => unawaited(updates.check()));
+  AppLifecycleListener(
+    onResume: () {
+      unawaited(updates.check());
+      unawaited(home.refreshIfDue());
+      unawaited(messages.refresh());
+    },
+  );
 
   runApp(
     YomiApp(
@@ -121,6 +206,12 @@ Future<void> main() async {
       cache: cache,
       appearance: appearance,
       profile: profile,
+      lyrics: lyrics,
+      history: history,
+      uploads: uploads,
+      home: home,
+      tunnel: tunnel,
+      messages: messages,
     ),
   );
   unawaited(updates.check());
@@ -164,6 +255,12 @@ class YomiApp extends StatelessWidget {
     required this.cache,
     required this.appearance,
     required this.profile,
+    required this.lyrics,
+    required this.history,
+    required this.uploads,
+    required this.home,
+    required this.tunnel,
+    required this.messages,
   });
 
   final UpdateController updates;
@@ -176,12 +273,22 @@ class YomiApp extends StatelessWidget {
   final AudioCache cache;
   final AppearanceController appearance;
   final ProfileController profile;
+  final LyricsService lyrics;
+  final PlayHistory history;
+  final UploadQueue uploads;
+  final HomeController home;
+  final TunnelController tunnel;
+  final MessagesController messages;
 
   @override
   Widget build(BuildContext context) {
     return MultiProvider(
       providers: [
         ChangeNotifierProvider<UpdateController>.value(value: updates),
+        ChangeNotifierProvider<UploadQueue>.value(value: uploads),
+        ChangeNotifierProvider<MessagesController>.value(value: messages),
+        ChangeNotifierProvider<TunnelController>.value(value: tunnel),
+        ChangeNotifierProvider<HomeController>.value(value: home),
         ChangeNotifierProvider<PlaybackSyncController>.value(value: sync),
         ChangeNotifierProvider<SessionController>.value(value: session),
         ChangeNotifierProvider<PlayerController>.value(value: player),
@@ -194,7 +301,8 @@ class YomiApp extends StatelessWidget {
         ChangeNotifierProvider<ProfileController>.value(value: profile),
         Provider<AudioCache>.value(value: cache),
         Provider<CoverPalette>(create: (_) => CoverPalette()),
-        Provider<LyricsService>(create: (_) => LyricsService()),
+        Provider<LyricsService>.value(value: lyrics),
+        Provider<PlayHistory>.value(value: history),
       ],
       child: Consumer<AppearanceController>(
         builder: (context, look, _) => MaterialApp(
@@ -224,7 +332,7 @@ class _Gate extends StatelessWidget {
   Widget build(BuildContext context) {
     final session = context.watch<SessionController>();
     if (session.isRestoring) {
-      return AuroraBackground(
+      return PageBackground(
         child: Scaffold(
           backgroundColor: Colors.transparent,
           body: Center(

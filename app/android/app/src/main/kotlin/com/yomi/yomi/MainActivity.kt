@@ -17,6 +17,7 @@ class MainActivity : AudioServiceActivity() {
         super.configureFlutterEngine(flutterEngine)
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, INSTALLER_CHANNEL)
             .setMethodCallHandler(::handleInstallerCall)
+        TunnelChannel(flutterEngine.dartExecutor.binaryMessenger)
     }
 
     private fun handleInstallerCall(call: MethodCall, result: MethodChannel.Result) {

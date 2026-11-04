@@ -64,5 +64,6 @@ String _describe(SubsonicException error) => switch (error.kind) {
   ErrorKind.notNavidrome => 'Answered, but not Navidrome',
   ErrorKind.server => 'Server error',
   ErrorKind.unreachable => 'No answer',
+  ErrorKind.readOnly => 'Backup server, read-only',
   ErrorKind.other => error.message,
 };

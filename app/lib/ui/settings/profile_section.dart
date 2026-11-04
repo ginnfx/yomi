@@ -27,10 +27,7 @@ class ProfileAvatar extends StatelessWidget {
       height: size,
       alignment: Alignment.center,
       clipBehavior: Clip.antiAlias,
-      decoration: BoxDecoration(
-        shape: BoxShape.circle,
-        gradient: context.accentGradient,
-      ),
+      decoration: BoxDecoration(shape: BoxShape.circle, color: context.accent),
       child: file != null
           ? Image.file(
               file,
@@ -70,21 +67,30 @@ class _ProfileSectionState extends State<ProfileSection> {
   late final TextEditingController _nickname = TextEditingController(
     text: context.read<ProfileController>().nickname,
   );
+  late final TextEditingController _bio = TextEditingController(
+    text: context.read<ProfileController>().bio,
+  );
 
   @override
   void dispose() {
     _nickname.dispose();
+    _bio.dispose();
     super.dispose();
   }
 
-  Future<void> _pickPhoto() async {
-    final profile = context.read<ProfileController>();
+  Future<void> _pickPhoto() =>
+      _pickImage(context.read<ProfileController>().setAvatar);
+
+  Future<void> _pickBanner() =>
+      _pickImage(context.read<ProfileController>().setBanner);
+
+  Future<void> _pickImage(Future<void> Function(File) use) async {
     final messenger = ScaffoldMessenger.of(context);
     try {
       final picked = await FilePicker.pickFiles(type: FileType.image);
       final path = picked.isEmpty ? null : picked.first.path;
       if (path == null) return;
-      await profile.setAvatar(File(path));
+      await use(File(path));
     } on Object catch (error) {
       messenger.showSnackBar(
         SnackBar(content: Text('Could not use that photo: $error')),
@@ -170,6 +176,36 @@ class _ProfileSectionState extends State<ProfileSection> {
             ),
             onChanged: profile.setNickname,
           ),
+        ),
+        Padding(
+          padding: const EdgeInsets.only(bottom: 12),
+          child: TextField(
+            controller: _bio,
+            maxLength: kMaxBioLength,
+            maxLines: 3,
+            minLines: 1,
+            style: yomiText(15, weight: FontWeight.w500),
+            decoration: const InputDecoration(
+              labelText: 'Bio',
+              hintText: 'A line about you and your music',
+            ),
+            onChanged: profile.setBio,
+          ),
+        ),
+        ListTile(
+          contentPadding: EdgeInsets.zero,
+          leading: const Icon(Icons.image_outlined),
+          title: Text(
+            profile.bannerFile == null ? 'Add banner' : 'Change banner',
+            style: yomiText(15, weight: FontWeight.w700),
+          ),
+          trailing: profile.bannerFile == null
+              ? null
+              : TextButton(
+                  onPressed: profile.clearBanner,
+                  child: const Text('Remove'),
+                ),
+          onTap: _pickBanner,
         ),
       ],
     );

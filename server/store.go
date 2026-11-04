@@ -12,6 +12,7 @@ import (
 	"sync"
 	"syscall"
 	"unicode"
+	"unicode/utf8"
 )
 
 const (
@@ -19,6 +20,10 @@ const (
 	maxNameBytes     = 150
 	maxUserLength    = 40
 	maxDuplicateTry  = 1000
+	maxFolderBytes   = 80
+	tempFilePrefix   = ".upload-"
+	tempFileSuffix   = ".tmp"
+	fat32Illegal     = `*?<>|":`
 )
 
 var (
@@ -44,17 +49,44 @@ func sanitizeUser(user string) (string, error) {
 func sanitizeName(name string) (string, error) {
 	base := filepath.Base(strings.ReplaceAll(name, "\\", "/"))
 	cleaned := strings.Map(func(r rune) rune {
-		if unicode.IsControl(r) || r == '/' || r == '\\' || r == ':' {
+		if isIllegalInName(r) {
 			return -1
 		}
 		return r
 	}, base)
 	cleaned = strings.TrimSpace(strings.TrimLeft(cleaned, "."))
-	ext := strings.ToLower(filepath.Ext(cleaned))
-	if cleaned == "" || len(cleaned) > maxNameBytes || !allowedExt[ext] {
+	ext := filepath.Ext(cleaned)
+	if !allowedExt[strings.ToLower(ext)] {
+		return "", errBadName
+	}
+	// FAT32 silently drops dots and spaces before an extension's end of a name.
+	stem := strings.TrimRight(strings.TrimSuffix(cleaned, ext), ". ")
+	cleaned = stem + ext
+	if stem == "" || len(cleaned) > maxNameBytes {
 		return "", errBadName
 	}
 	return cleaned, nil
+}
+
+func isIllegalInName(r rune) bool {
+	return unicode.IsControl(r) || r == '/' || r == '\\' || strings.ContainsRune(fat32Illegal, r)
+}
+
+// sanitizeFolder makes a tag value usable as a folder name, or returns "" if nothing
+// usable is left. Dots are trimmed so a tag can never mean "." or "..".
+func sanitizeFolder(value string) string {
+	cleaned := strings.Map(func(r rune) rune {
+		if isIllegalInName(r) {
+			return -1
+		}
+		return r
+	}, value)
+	cleaned = strings.Trim(cleaned, ". ")
+	for len(cleaned) > maxFolderBytes {
+		_, size := utf8.DecodeLastRuneInString(cleaned)
+		cleaned = cleaned[:len(cleaned)-size]
+	}
+	return strings.TrimRight(cleaned, ". ")
 }
 
 // looksLikeAudio checks the file's magic bytes against its claimed extension.
@@ -107,7 +139,7 @@ func (s Store) Save(user, name string, r io.Reader) (string, error) {
 	if err := os.MkdirAll(dir, 0o777); err != nil {
 		return "", err
 	}
-	tmp, err := os.CreateTemp(dir, ".upload-*.tmp")
+	tmp, err := os.CreateTemp(dir, tempFilePrefix+"*"+tempFileSuffix)
 	if err != nil {
 		return "", err
 	}
