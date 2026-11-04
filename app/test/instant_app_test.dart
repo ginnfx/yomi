@@ -1,10 +1,12 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
+import 'package:yomi/core/catalog_cache.dart';
 import 'package:yomi/core/connection_probe.dart';
 import 'package:yomi/state/session.dart';
 import 'package:yomi/ui/widgets/async_section.dart';
@@ -117,6 +119,33 @@ void main() {
       final first = await restore();
       expect(first, isNotNull);
       expect(await restore(), first);
+    });
+  });
+
+  group('signing in', () {
+    test('opens the account right away, with no restart needed', () async {
+      FlutterSecureStorage.setMockInitialValues({});
+      final opened = <String>[];
+      final dir = await Directory.systemTemp.createTemp('signin');
+      addTearDown(() => dir.delete(recursive: true));
+      final session = SessionController(
+        httpClient: MockClient((_) async => _pong()),
+        urlProbe: (url, _, _) async =>
+            ProbeResult(url: url, isOk: true, elapsed: Duration.zero),
+        roleProbe: (_, _) async => false,
+        catalogCacheFor: (account) {
+          opened.add(account);
+          return CatalogCache(file: File('${dir.path}/$account.json'));
+        },
+      );
+
+      await session.signIn('http://away.test', 'u', 'p');
+
+      expect(session.accountId, isNotNull);
+      expect(opened, [session.accountId]);
+      await session.signOut();
+      expect(session.accountId, isNull);
+      session.dispose();
     });
   });
 

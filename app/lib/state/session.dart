@@ -305,6 +305,7 @@ class SessionController extends ChangeNotifier with WidgetsBindingObserver {
           baseUrl: away,
           username: user.trim(),
           password: password,
+          httpClient: _httpClient,
         ).ping();
       } on SubsonicException catch (error) {
         if (error.kind != ErrorKind.unreachable) rethrow;
@@ -314,6 +315,7 @@ class SessionController extends ChangeNotifier with WidgetsBindingObserver {
           baseUrl: tunnelUrl,
           username: user.trim(),
           password: password,
+          httpClient: _httpClient,
         ).ping();
       }
     }
@@ -323,6 +325,7 @@ class SessionController extends ChangeNotifier with WidgetsBindingObserver {
     _user = user.trim();
     _password = password;
     await _remember();
+    await _openAccount();
     _route = homeWorks ? ActiveRoute.home : ActiveRoute.away;
     _isOnTunnel = tunnelUrl != null;
     _build(homeWorks ? home : (tunnelUrl ?? away));

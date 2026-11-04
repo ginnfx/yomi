@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -155,6 +156,48 @@ void main() {
 
     expect(catalog.songs, isEmpty);
     expect(dir.listSync(), isEmpty);
+  });
+
+  test('signing out during a sync neither blocks the next one nor leaves a file', () async {
+    final gate = Completer<void>();
+    var firstSearch = true;
+    final slow = SubsonicClient(
+      baseUrl: 'http://music.test',
+      username: 'one',
+      password: 'pw',
+      httpClient: MockClient((request) async {
+        final path = request.url.path;
+        if (path.endsWith('getScanStatus')) {
+          return _ok({
+            'scanStatus': {'count': 1, 'scanning': false, 'lastScan': 'x'},
+          });
+        }
+        if (path.endsWith('getStarred2')) return _ok({'starred2': {}});
+        if (firstSearch) {
+          firstSearch = false;
+          await gate.future;
+        }
+        return _ok({
+          'searchResult3': {
+            'song': [_song(1)],
+          },
+        });
+      }),
+    );
+    final catalog = CatalogController(directory: dir);
+    await catalog.attach(slow, 'old');
+    final running = catalog.sync();
+    await Future<void>.delayed(Duration.zero);
+
+    await catalog.attach(null, null);
+    gate.complete();
+    await running;
+    expect(File('${dir.path}/old.json').existsSync(), isFalse);
+
+    await catalog.attach(slow, 'new');
+    await catalog.sync();
+    expect(catalog.songs, hasLength(1));
+    expect(catalog.isSyncing, isFalse);
   });
 
   test('a different account never sees the previous songs', () async {

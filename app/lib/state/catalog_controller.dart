@@ -115,12 +115,12 @@ class CatalogController extends ChangeNotifier {
       ]);
       _lastScan = status.lastScan;
       _isLoaded = true;
-      await _save(account);
+      await _save(account, generation);
     } on Object catch (error) {
       if (generation == _generation) _error = error;
       debugPrint('Could not update the song list: $error');
     } finally {
-      if (generation == _generation) _isSyncing = false;
+      _isSyncing = false;
       notifyListeners();
     }
   }
@@ -138,7 +138,7 @@ class CatalogController extends ChangeNotifier {
     }
   }
 
-  Future<void> _save(String account) async {
+  Future<void> _save(String account, int generation) async {
     final songs = _songs;
     final lastScan = _lastScan;
     try {
@@ -148,10 +148,16 @@ class CatalogController extends ChangeNotifier {
           'songs': [for (final song in songs) song.toJson()],
         }),
       );
+      // Signed out while encoding: this account's songs must not reappear on disk.
+      if (generation != _generation) return;
       final file = _fileFor(account);
       final temp = File('${file.path}.tmp');
       await file.parent.create(recursive: true);
       await temp.writeAsString(text);
+      if (generation != _generation) {
+        await temp.delete();
+        return;
+      }
       await temp.rename(file.path);
     } on Object catch (error) {
       debugPrint('Could not save the song list: $error');
