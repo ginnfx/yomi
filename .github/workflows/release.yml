@@ -29,6 +29,10 @@ jobs:
           flutter-version: 3.47.9
           channel: stable
           cache: true
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: tailscale_bridge/go.mod
+          cache: false
       - name: Restore signing key
         env:
           KEYSTORE_BASE64: ${{ secrets.YOMI_KEYSTORE_BASE64 }}
@@ -63,6 +67,10 @@ jobs:
           flutter-version: 3.47.9
           channel: stable
           cache: true
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: tailscale_bridge/go.mod
+          cache: false
       - name: Build Mac app
         env:
           TAG: ${{ github.ref_name }}

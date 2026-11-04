@@ -69,6 +69,8 @@ class SessionController extends ChangeNotifier {
     HomeProbe? probe,
     UrlProbe? urlProbe,
     LanFinder? lanFinder,
+    this.tunnelConnect,
+    this.uploadPortFor,
   }) : _storage =
            storage ??
            const FlutterSecureStorage(
@@ -88,6 +90,13 @@ class SessionController extends ChangeNotifier {
   final HomeProbe _probe;
   final UrlProbe _urlProbe;
   final LanFinder _lanFinder;
+
+  /// Starts the embedded tunnel and returns its address, if this device has joined.
+  final Future<String?> Function()? tunnelConnect;
+
+  /// The upload service's port for an address; it differs when going through the tunnel.
+  final int Function(String url)? uploadPortFor;
+  bool _isOnTunnel = false;
   bool _isScanning = false;
   DateTime? _lastScan;
   List<String> _extraUrls = const [];
@@ -115,6 +124,10 @@ class SessionController extends ChangeNotifier {
   /// Extra addresses tried, in order, when the main ones don't answer.
   List<String> get extraUrls => List.unmodifiable(_extraUrls);
   bool get isOnBackup => _isOnBackup;
+  bool get isOnTunnel => _isOnTunnel;
+  int get uploadServicePort => _uploadPort(serverUrl);
+
+  int _uploadPort(String url) => uploadPortFor?.call(url) ?? uploadPort;
 
   /// Every address Yomi knows, best first, without repeats.
   List<String> get candidateUrls => {
@@ -136,7 +149,9 @@ class SessionController extends ChangeNotifier {
   bool get isResolving => _isResolving;
   bool get hasHomeAddress => (_homeUrl ?? '').isNotEmpty;
 
-  String get routeLabel => _isOnBackup
+  String get routeLabel => _isOnTunnel
+      ? 'Invite tunnel'
+      : _isOnBackup
       ? 'Backup address'
       : switch (_route) {
           ActiveRoute.home => 'Home network',
@@ -192,12 +207,24 @@ class SessionController extends ChangeNotifier {
         home.isNotEmpty &&
         (_connectivity == null || _connectivity.isOnWifi) &&
         await _probe(home, user.trim(), password);
+    String? tunnelUrl;
     if (!homeWorks) {
-      await SubsonicClient(
-        baseUrl: away,
-        username: user.trim(),
-        password: password,
-      ).ping();
+      try {
+        await SubsonicClient(
+          baseUrl: away,
+          username: user.trim(),
+          password: password,
+        ).ping();
+      } on SubsonicException catch (error) {
+        if (error.kind != ErrorKind.unreachable) rethrow;
+        tunnelUrl = await tunnelConnect?.call();
+        if (tunnelUrl == null) rethrow;
+        await SubsonicClient(
+          baseUrl: tunnelUrl,
+          username: user.trim(),
+          password: password,
+        ).ping();
+      }
     }
     _awayUrl = away;
     _homeUrl = home.isEmpty ? null : home;
@@ -206,7 +233,8 @@ class SessionController extends ChangeNotifier {
     _password = password;
     await _remember();
     _route = homeWorks ? ActiveRoute.home : ActiveRoute.away;
-    _build(homeWorks ? home : away);
+    _isOnTunnel = tunnelUrl != null;
+    _build(homeWorks ? home : (tunnelUrl ?? away));
     notifyListeners();
     await refreshRoute();
   }
@@ -236,6 +264,10 @@ class SessionController extends ChangeNotifier {
     notifyListeners();
     try {
       final chosen = await _chooseRoute();
+      // The tunnel exists because the away address failed, so it isn't undone by
+      // merely choosing "away" again. Only home, or a failed check, moves off it.
+      if (_isOnTunnel && chosen == ActiveRoute.away) return;
+      _isOnTunnel = false;
       final url = chosen == ActiveRoute.home
           ? _homeUrl!
           : (_awayUrl ?? _homeUrl!);
@@ -278,14 +310,29 @@ class SessionController extends ChangeNotifier {
   /// first one (in priority order) that answers.
   Future<bool> _failOver(String deadUrl) async {
     final others = candidateUrls.where((u) => u != deadUrl).toList();
-    if (others.isEmpty) return false;
     final results = await Future.wait(
       others.map((u) => _urlProbe(u, _user, _password)),
     );
     final working = results.where((r) => r.isOk).toList();
-    if (working.isEmpty) return false;
-    _isOnBackup = true;
-    _build(working.first.url);
+    if (working.isNotEmpty) {
+      _isOnBackup = true;
+      _isOnTunnel = false;
+      _build(working.first.url);
+      return true;
+    }
+    return _connectThroughTunnel();
+  }
+
+  /// Last resort after every direct address failed, so a device that can reach the
+  /// server by LAN or the Tailscale app never pays for a second network stack.
+  Future<bool> _connectThroughTunnel() async {
+    final url = await tunnelConnect?.call();
+    if (url == null) return false;
+    final result = await _urlProbe(url, _user, _password);
+    if (!result.isOk) return false;
+    _isOnBackup = false;
+    _isOnTunnel = true;
+    _build(url);
     return true;
   }
 
@@ -297,6 +344,7 @@ class SessionController extends ChangeNotifier {
   void useUrl(String url) {
     if (_client == null) return;
     _isOnBackup = url != _awayUrl && url != _homeUrl;
+    _isOnTunnel = false;
     _route = url == _homeUrl ? ActiveRoute.home : ActiveRoute.away;
     _build(url);
     _isServerReachable = true;
@@ -423,7 +471,11 @@ class SessionController extends ChangeNotifier {
       username: _user,
       password: _password,
     );
-    _uploader = BulkUploadApi(serverUrl: url, auth: _client!);
+    _uploader = BulkUploadApi(
+      serverUrl: url,
+      auth: _client!,
+      port: _uploadPort(url),
+    );
   }
 
   @override

@@ -2,6 +2,8 @@ import Cocoa
 import FlutterMacOS
 
 class MainFlutterWindow: NSWindow {
+  private var tunnel: TunnelChannel?
+
   override func awakeFromNib() {
     let flutterViewController = FlutterViewController()
     let windowFrame = self.frame
@@ -14,6 +16,7 @@ class MainFlutterWindow: NSWindow {
     self.setFrameAutosaveName("YomiMainWindow")
 
     RegisterGeneratedPlugins(registry: flutterViewController)
+    tunnel = TunnelChannel(messenger: flutterViewController.engine.binaryMessenger)
 
     super.awakeFromNib()
   }

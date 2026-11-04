@@ -5,6 +5,7 @@ import '../../state/player_controller.dart';
 import '../../state/session.dart';
 import '../settings/appearance_section.dart';
 import '../settings/connection_section.dart';
+import '../settings/invite_section.dart';
 import '../settings/home_layout_section.dart';
 import '../settings/listening_sync_section.dart';
 import '../settings/profile_section.dart';
@@ -37,6 +38,7 @@ class SettingsPage extends StatelessWidget {
             const ProfileSection(),
             const ListeningSyncSection(),
             const ConnectionSection(),
+            const InviteSection(),
             const AppearanceSection(),
             const HomeLayoutSection(),
             const StorageSection(),

@@ -15,6 +15,7 @@ void openDashboard(BuildContext context) {
           final statusClient = ServerStatusClient(
             serverUrl: session.serverUrl,
             auth: session.client,
+            port: session.uploadServicePort,
           );
           return DashboardController(
             fetchStatus: statusClient.fetch,
@@ -268,7 +269,7 @@ class _Group extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(width: YomiSpace.l),
-                Flexible(
+                Expanded(
                   flex: 2,
                   child: Text(
                     row.value,

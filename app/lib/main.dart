@@ -20,6 +20,7 @@ import 'core/lyrics.dart';
 import 'core/offline/audio_cache.dart';
 import 'core/offline/cover_warmer.dart';
 import 'core/offline/download_store.dart';
+import 'core/tunnel/tunnel_bridge.dart';
 import 'dev_hooks.dart';
 import 'state/appearance_controller.dart';
 import 'state/connectivity_controller.dart';
@@ -31,6 +32,7 @@ import 'state/playback_sync_controller.dart';
 import 'state/profile_controller.dart';
 import 'state/session.dart';
 import 'state/settings.dart';
+import 'state/tunnel_controller.dart';
 import 'state/update_controller.dart';
 import 'state/upload_queue.dart';
 import 'ui/pages/login_page.dart';
@@ -87,7 +89,16 @@ Future<void> main() async {
     warmCover: warmCovers,
     ledger: ledger,
   );
-  final session = SessionController(connectivity: connectivity);
+  final tunnel = TunnelController(
+    bridge: const MethodChannelTunnelBridge(),
+    prefs: prefs,
+    stateDir: Directory('${supportDir.path}/tailscale'),
+  );
+  final session = SessionController(
+    connectivity: connectivity,
+    tunnelConnect: tunnel.connect,
+    uploadPortFor: tunnel.uploadPortFor,
+  );
   final player = PlayerController(
     AudioPlayer(),
     cache: cache,
@@ -179,6 +190,7 @@ Future<void> main() async {
       history: history,
       uploads: uploads,
       home: home,
+      tunnel: tunnel,
     ),
   );
   unawaited(updates.check());
@@ -226,6 +238,7 @@ class YomiApp extends StatelessWidget {
     required this.history,
     required this.uploads,
     required this.home,
+    required this.tunnel,
   });
 
   final UpdateController updates;
@@ -242,6 +255,7 @@ class YomiApp extends StatelessWidget {
   final PlayHistory history;
   final UploadQueue uploads;
   final HomeController home;
+  final TunnelController tunnel;
 
   @override
   Widget build(BuildContext context) {
@@ -249,6 +263,7 @@ class YomiApp extends StatelessWidget {
       providers: [
         ChangeNotifierProvider<UpdateController>.value(value: updates),
         ChangeNotifierProvider<UploadQueue>.value(value: uploads),
+        ChangeNotifierProvider<TunnelController>.value(value: tunnel),
         ChangeNotifierProvider<HomeController>.value(value: home),
         ChangeNotifierProvider<PlaybackSyncController>.value(value: sync),
         ChangeNotifierProvider<SessionController>.value(value: session),

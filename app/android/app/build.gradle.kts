@@ -73,4 +73,6 @@ flutter {
 
 dependencies {
     implementation("androidx.core:core:1.16.0")
+    // Built by tailscale_bridge/build.sh; not committed because of its size.
+    implementation(files("../../../tailscale_bridge/build/tailscale_bridge.aar"))
 }

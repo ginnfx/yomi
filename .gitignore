@@ -6,3 +6,4 @@ server/dist/
 .idea/
 *.iml
 .serena/
+tailscale_bridge/build/
