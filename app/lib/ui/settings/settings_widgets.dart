@@ -40,7 +40,10 @@ class SettingsGroup extends StatelessWidget {
               borderRadius: BorderRadius.circular(22),
             ),
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-            child: Column(children: children),
+            child: Material(
+              type: MaterialType.transparency,
+              child: Column(children: children),
+            ),
           ),
           if (footer != null)
             Padding(

@@ -10,6 +10,7 @@ import '../../state/profile_controller.dart';
 import '../../state/session.dart';
 import '../../state/settings.dart';
 import '../settings/profile_section.dart';
+import '../settings/home_layout_section.dart';
 import '../theme.dart';
 import '../widgets/album_card.dart';
 import '../widgets/cover_art.dart';
@@ -71,6 +72,17 @@ class _HomePageState extends State<HomePage> {
             const ContinueListening(),
             for (final id in sections) _section(id, session),
             const _Shelves(),
+            Center(
+              child: TextButton.icon(
+                onPressed: () => Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    builder: (_) => const _EditHomePage(),
+                  ),
+                ),
+                icon: const Icon(Icons.tune_rounded, size: 18),
+                label: const Text('Edit Home'),
+              ),
+            ),
             if (sections.isEmpty && home.shelves.isEmpty && !home.isLoading)
               Padding(
                 padding: const EdgeInsets.all(48),
@@ -173,6 +185,21 @@ class _HomePageState extends State<HomePage> {
             ),
     );
   }
+}
+
+class _EditHomePage extends StatelessWidget {
+  const _EditHomePage();
+
+  @override
+  Widget build(BuildContext context) => PageBackground(
+    child: Scaffold(
+      backgroundColor: Colors.transparent,
+      appBar: AppBar(
+        title: Text('Edit Home', style: yomiText(20, weight: FontWeight.w800)),
+      ),
+      body: const SingleChildScrollView(child: HomeLayoutSection()),
+    ),
+  );
 }
 
 /// The shelves that change with listening. See [HomeController].

@@ -3,10 +3,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../core/models.dart';
 
-const int _defaultCacheMb = 1024;
 const int _defaultStorageGb = 5;
 const List<int> storageLimitChoicesGb = [2, 5, 10, 20];
-const List<int> cacheLimitChoicesMb = [256, 512, 1024, 2048, 4096];
 
 /// User preferences, saved on the device.
 class SettingsController extends ChangeNotifier {
@@ -26,11 +24,6 @@ class SettingsController extends ChangeNotifier {
       _prefs.getBool('prefersArtOverLyrics') ?? false;
   Future<void> setPrefersArtOverLyrics(bool value) =>
       _set(() => _prefs.setBool('prefersArtOverLyrics', value));
-
-  /// Save songs on repeat for offline play. Only ever fetches on Wi-Fi.
-  bool get autoDownloadRepeats => _prefs.getBool('autoDownloadRepeats') ?? true;
-  Future<void> setAutoDownloadRepeats(bool value) =>
-      _set(() => _prefs.setBool('autoDownloadRepeats', value));
 
   /// How much Yomi may use by itself. Downloads you choose yourself don't count.
   int get storageLimitGb =>
@@ -52,12 +45,6 @@ class SettingsController extends ChangeNotifier {
       _set(() => _prefs.setBool('keepPlaylist.$playlistId', value));
 
   bool get wifiOnlyDownloads => _prefs.getBool('wifiOnlyDownloads') ?? true;
-  bool get cachePlayedSongs => _prefs.getBool('cachePlayedSongs') ?? true;
-  Future<void> setCachePlayedSongs(bool value) =>
-      _set(() => _prefs.setBool('cachePlayedSongs', value));
-  bool get preloadNext => _prefs.getBool('preloadNext') ?? true;
-  int get cacheLimitMb => _prefs.getInt('cacheLimitMb') ?? _defaultCacheMb;
-  int get cacheLimitBytes => cacheLimitMb * 1024 * 1024;
 
   /// Home screen sections, in the order shown. Unknown or missing ids are repaired.
   static const homeSectionIds = [
@@ -115,10 +102,6 @@ class SettingsController extends ChangeNotifier {
 
   Future<void> setWifiOnlyDownloads(bool value) =>
       _set(() => _prefs.setBool('wifiOnlyDownloads', value));
-  Future<void> setPreloadNext(bool value) =>
-      _set(() => _prefs.setBool('preloadNext', value));
-  Future<void> setCacheLimitMb(int value) =>
-      _set(() => _prefs.setInt('cacheLimitMb', value));
 
   Future<void> _set(Future<bool> Function() write) async {
     await write();

@@ -78,7 +78,7 @@ Future<void> main() async {
   final store = DownloadStore(downloadsDir);
   await store.load();
 
-  final cache = AudioCache(cacheDir, maxBytes: settings.cacheLimitBytes);
+  final cache = AudioCache(cacheDir, maxBytes: settings.storageLimitBytes);
   await cache.purgeLegacy();
   await cache.evict();
   final connectivity = ConnectivityController();

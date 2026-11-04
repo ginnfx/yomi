@@ -63,7 +63,7 @@ class OfflineKeeper extends ChangeNotifier {
   StreamSubscription<String>? _updates;
   Map<String, List<Song>> _kept = const {};
   bool _isLimited = false;
-  bool _isRunning = false;
+  Future<void>? _active;
   bool _runAgain = false;
 
   void attach(SubsonicClient? client, String username) {
@@ -110,12 +110,16 @@ class OfflineKeeper extends ChangeNotifier {
 
   /// Brings the saved copies in line with your playlists and the limit. Safe to call any
   /// time: conditions that aren't right simply leave everything as it is.
-  Future<void> run() async {
-    if (_isRunning) {
+  Future<void> run() {
+    final active = _active;
+    if (active != null) {
       _runAgain = true;
-      return;
+      return active;
     }
-    _isRunning = true;
+    return _active = _runUntilDone().whenComplete(() => _active = null);
+  }
+
+  Future<void> _runUntilDone() async {
     try {
       do {
         _runAgain = false;
@@ -123,8 +127,6 @@ class OfflineKeeper extends ChangeNotifier {
       } while (_runAgain);
     } on Object catch (error) {
       debugPrint('Could not update offline playlists: $error');
-    } finally {
-      _isRunning = false;
     }
   }
 

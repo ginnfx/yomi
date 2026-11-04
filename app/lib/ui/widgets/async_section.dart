@@ -73,9 +73,8 @@ class _AsyncSectionState<T> extends State<AsyncSection<T>> {
   Future<void> _load() async {
     final generation = ++_generation;
     try {
-      final data = await Future<T>.sync(
-        widget.load,
-      ).timeout(const Duration(seconds: 20));
+      final data = await Future<T>.sync(widget.load)
+          .timeout(const Duration(seconds: 20));
       if (!mounted || generation != _generation) return;
       setState(() {
         _data = data;

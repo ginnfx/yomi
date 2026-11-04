@@ -340,15 +340,12 @@ class PlayerController extends ChangeNotifier implements TransportCommands {
     final fullyBuffered =
         total > Duration.zero && buffered + const Duration(seconds: 2) >= total;
     if (_isLocal(song) || hasHeadroom || fullyBuffered) {
-      _scheduleCaching(
-        includeCurrent: settings.cachePlayedSongs && connectivity.isOnWifi,
-      );
+      _scheduleCaching(includeCurrent: connectivity.isOnWifi);
     }
   }
 
   void _onCacheSettingsChanged() {
-    if (connectivity.isOffline ||
-        (!settings.preloadNext && !settings.cachePlayedSongs)) {
+    if (connectivity.isOffline) {
       _preloader.stop();
       return;
     }
@@ -362,7 +359,7 @@ class PlayerController extends ChangeNotifier implements TransportCommands {
     final order = _player.effectiveIndices;
     final position = order.indexOf(index);
     if (position < 0) return;
-    final count = settings.preloadNext ? (connectivity.isOnWifi ? 3 : 1) : 0;
+    final count = connectivity.isOnWifi ? 3 : 1;
     final indexes = [
       if (includeCurrent) index,
       ...order.skip(position + 1).take(count),
@@ -466,9 +463,7 @@ class PlayerController extends ChangeNotifier implements TransportCommands {
         defaultTargetPlatform == TargetPlatform.macOS &&
         connectivity.isOnWifi) {
       // Prepare a handoff in the background while the phone keeps playing.
-      _scheduleCaching(
-        includeCurrent: settings.cachePlayedSongs && connectivity.isOnWifi,
-      );
+      _scheduleCaching(includeCurrent: connectivity.isOnWifi);
     }
   }
 

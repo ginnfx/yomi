@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../../core/format.dart';
 import '../../core/offline/audio_cache.dart';
 import '../../state/download_manager.dart';
+import '../../state/offline_keeper.dart';
 import '../../state/settings.dart';
 import '../theme.dart';
 import 'settings_widgets.dart';
@@ -70,81 +71,63 @@ class _StorageSectionState extends State<StorageSection> {
     final settings = context.watch<SettingsController>();
     final downloads = context.watch<DownloadManager>();
     final cache = context.read<AudioCache>();
+    final used = downloads.downloadedBytes + _cacheBytes;
     return Column(
       children: [
         SettingsGroup(
-          title: 'Playback',
+          title: 'Storage',
+          footer:
+              'Yomi saves your playlists, songs on repeat and songs you play '
+              'within this limit, keeping what you played most recently. Songs '
+              "you download yourself don't count and are never removed.",
           children: [
-            SettingsSwitch(
-              title: 'Cache songs as you listen',
-              value: settings.cachePlayedSongs,
-              onChanged: settings.setCachePlayedSongs,
-            ),
-            SettingsSwitch(
-              title: 'Preload next songs',
-              value: settings.preloadNext,
-              onChanged: settings.setPreloadNext,
-            ),
             SettingsInfoRow(
-              icon: Icons.bolt_rounded,
-              title: 'Song cache',
-              detail:
-                  '${formatBytes(_cacheBytes)} of ${formatBytes(settings.cacheLimitBytes)}',
-              action: TextButton(
-                onPressed: _cacheBytes == 0
-                    ? null
-                    : () => _confirm(
-                        'Clear the cache?',
-                        'Songs you replay will be fetched from the server again.',
-                        cache.clear,
-                      ),
-                child: const Text('Clear'),
-              ),
+              icon: Icons.sd_storage_rounded,
+              title: '${formatBytes(used)} used',
+              detail: 'Limit ${settings.storageLimitGb} GB',
             ),
             Padding(
               padding: const EdgeInsets.only(bottom: 12),
               child: ChoicePills<int>(
-                values: cacheLimitChoicesMb,
-                selected: settings.cacheLimitMb,
-                label: (mb) => mb >= 1024 ? '${mb ~/ 1024} GB' : '$mb MB',
-                onSelected: (mb) async {
-                  await settings.setCacheLimitMb(mb);
-                  cache.maxBytes = settings.cacheLimitBytes;
+                values: storageLimitChoicesGb,
+                selected: settings.storageLimitGb,
+                label: (gb) => '$gb GB',
+                onSelected: (gb) async {
+                  await settings.setStorageLimitGb(gb);
+                  await context.read<OfflineKeeper>().run();
                   await cache.evict();
                   await _refreshCacheSize();
                 },
               ),
             ),
-          ],
-        ),
-        SettingsGroup(
-          title: 'Downloads',
-          children: [
-            SettingsInfoRow(
-              icon: Icons.arrow_circle_down_rounded,
-              title: '${downloads.downloadedSongs.length} downloaded songs',
-              detail: formatBytes(downloads.downloadedBytes),
-              action: downloads.downloadedSongs.isEmpty
-                  ? null
-                  : TextButton(
-                      onPressed: () => _confirm(
-                        'Remove all downloads?',
-                        'They stay on the server; you can download them again.',
-                        downloads.removeAll,
-                      ),
-                      child: const Text('Remove all'),
-                    ),
+            SettingsSwitch(
+              title: 'Keep my playlists offline',
+              value: settings.keepPlaylistsOffline,
+              onChanged: settings.setKeepPlaylistsOffline,
             ),
             SettingsSwitch(
               title: 'Download on Wi-Fi only',
               value: settings.wifiOnlyDownloads,
               onChanged: settings.setWifiOnlyDownloads,
             ),
-            SettingsSwitch(
-              title: 'Save songs on repeat',
-              subtitle: 'Keeps songs you play 3 times in 2 weeks offline, on Wi-Fi only. Up to 2 GB, and they make room for each other.',
-              value: settings.autoDownloadRepeats,
-              onChanged: settings.setAutoDownloadRepeats,
+            SettingsInfoRow(
+              icon: Icons.delete_outline_rounded,
+              title: '${downloads.downloadedSongs.length} saved songs',
+              detail: formatBytes(downloads.downloadedBytes),
+              action: TextButton(
+                onPressed: used == 0
+                    ? null
+                    : () => _confirm(
+                        'Remove everything saved?',
+                        'Songs will play from the server again. Your library is '
+                            'not affected.',
+                        () async {
+                          await downloads.removeAll();
+                          await cache.clear();
+                        },
+                      ),
+                child: const Text('Remove all'),
+              ),
             ),
           ],
         ),

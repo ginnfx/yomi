@@ -120,10 +120,7 @@ class _ShellPageState extends State<ShellPage>
                             parent: _fade,
                             curve: Curves.easeOut,
                           ),
-                          child: IndexedStack(
-                            index: _index,
-                            children: _pages,
-                          ),
+                          child: IndexedStack(index: _index, children: _pages),
                         ),
                       ),
                     ),
@@ -153,11 +150,11 @@ class _ShellPageState extends State<ShellPage>
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       const MiniPlayer(),
-                        YomiNavBar(
-                          items: _items,
-                          index: _index,
-                          onSelected: _select,
-                        ),
+                      YomiNavBar(
+                        items: _items,
+                        index: _index,
+                        onSelected: _select,
+                      ),
                     ],
                   ),
                 ),

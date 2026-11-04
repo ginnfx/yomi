@@ -139,7 +139,7 @@ class ListeningController {
   /// Runs after each play and when Wi-Fi returns, so a song that qualified on
   /// mobile data is fetched the next time it's cheap.
   void _queueRepeats() {
-    if (!settings.autoDownloadRepeats || !connectivity.isOnWifi) return;
+    if (!connectivity.isOnWifi) return;
     if (_client == null) return;
     final due = history.songs.where(_qualifies).toList();
     if (due.isEmpty) return;
