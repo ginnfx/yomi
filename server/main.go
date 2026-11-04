@@ -23,6 +23,10 @@ func main() {
 	}
 	go index.Seed()
 	server := newServer(cfg, auth, navidromeScan(cfg.NavidromeURL), index)
+	server.Status = newStatusReader(cfg, index)
+	if cfg.CoversOn {
+		startCovers(cfg)
+	}
 	httpServer := &http.Server{
 		Addr:              cfg.Listen,
 		Handler:           server.routes(),
@@ -31,6 +35,16 @@ func main() {
 	}
 	log.Printf("yomi-upload listening on %s, music dir %s", cfg.Listen, cfg.MusicDir)
 	log.Fatal(httpServer.ListenAndServe())
+}
+
+// startCovers runs in the background; a failure only means art isn't fetched.
+func startCovers(cfg Config) {
+	client, err := newInternetClient()
+	if err != nil {
+		log.Printf("covers disabled: %v", err)
+		return
+	}
+	go newCoverFetcher(cfg.MusicDir, cfg.CoverState, client).Run(context.Background())
 }
 
 // navidromeScan asks Navidrome to rescan using the uploader's own credentials.

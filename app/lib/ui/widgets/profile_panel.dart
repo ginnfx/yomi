@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 
 import '../../state/profile_controller.dart';
 import '../../state/session.dart';
+import '../pages/dashboard_page.dart';
 import '../pages/settings_page.dart';
 import '../settings/profile_section.dart';
 import '../theme.dart';
@@ -122,6 +123,18 @@ class _ProfilePanel extends StatelessWidget {
                 style: yomiText(15, weight: FontWeight.w600),
               ),
               onTap: () => _openSettings(context),
+            ),
+            ListTile(
+              leading: const Icon(Icons.monitor_heart_outlined),
+              title: Text(
+                'Server status',
+                style: yomiText(15, weight: FontWeight.w600),
+              ),
+              onTap: () {
+                final navigator = Navigator.of(context);
+                navigator.pop();
+                openDashboard(navigator.context);
+              },
             ),
             ListTile(
               leading: const Icon(Icons.settings_outlined),

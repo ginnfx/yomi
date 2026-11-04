@@ -26,6 +26,7 @@ type Server struct {
 	Store     Store
 	Scan      func(ctx context.Context, query url.Values)
 	Index     *HashIndex
+	Status    *StatusReader
 	slots     chan struct{}
 	limits    *loginLimiter
 	scans     *scanDebouncer
@@ -52,6 +53,7 @@ func (s *Server) routes() http.Handler {
 	})
 	mux.HandleFunc("/upload", s.handleUpload)
 	mux.HandleFunc("POST /v1/check", s.handleCheck)
+	mux.HandleFunc("GET /v1/status", s.handleStatus)
 	mux.HandleFunc("PUT /v1/upload/{sha256}", s.handleBulkUpload)
 	return mux
 }
