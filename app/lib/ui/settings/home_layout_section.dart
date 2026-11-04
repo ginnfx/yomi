@@ -56,6 +56,11 @@ const Map<String, (String, String, IconData)> homeSectionInfo = {
     "One song each from artists you haven't played",
     Icons.travel_explore_rounded,
   ),
+  'mood': (
+    'Mood mixes',
+    'Shelves for a feeling, when AI is set up on your server',
+    Icons.mood_rounded,
+  ),
   'discover': (
     'Something different',
     "Songs you haven't played yet",

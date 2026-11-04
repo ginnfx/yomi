@@ -246,6 +246,71 @@ void main() {
     );
   });
 
+  group('with AI labels', () {
+    List<HomeShelf> shelvesWith(
+      Map<String, List<String>> moods, {
+      Map<String, List<String>> similar = const {},
+    }) => HomeBuilder(
+      events: oneArtistHeavy,
+      pool: library,
+      recentlyAdded: library.take(60).toList(),
+      now: now,
+      moodsById: moods,
+      similarArtists: similar,
+    ).build();
+
+    test('Home gets mood shelves', () {
+      final moods = {
+        for (final song in library)
+          song.id: [song.artist.hashCode.isEven ? 'calm' : 'uplifting'],
+      };
+      final shelves = shelvesWith(moods);
+      expect(shelves.map((s) => s.kind), contains(ShelfKind.mood));
+    });
+
+    test('no labels means no mood shelves', () {
+      expect(
+        shelvesWith(const {}).map((s) => s.kind),
+        isNot(contains(ShelfKind.mood)),
+      );
+    });
+
+    test('sad songs can no longer take over a shelf', () {
+      final allSad = {
+        for (final song in library) song.id: const ['sad'],
+      };
+      final moods = {
+        ...allSad,
+        for (var a = 0; a < 6; a++)
+          for (var b = 0; b < 3; b++)
+            for (var s = 0; s < 6; s++) '$a-$b-$s': const ['happy'],
+      };
+      final recent = shelvesWith(moods).firstWhere(
+        (shelf) => shelf.kind == ShelfKind.recentlyAdded,
+      );
+      final heavy = recent.songs.where((s) => moods[s.id]!.contains('sad'));
+      expect(heavy.length, lessThanOrEqualTo(3));
+    });
+
+    test('similar artists replace the genre guess', () {
+      final shelves = shelvesWith(const {}, similar: {
+        for (var a = 0; a < 12; a++) 'Artist $a': const ['Artist 11'],
+      });
+      final because = shelves.where(
+        (shelf) =>
+            shelf.kind == ShelfKind.becauseYouPlayed &&
+            !shelf.title.contains('Artist 11'),
+      );
+      expect(because, isNotEmpty);
+      for (final shelf in because) {
+        final seed = shelf.title.replaceFirst('Because you played ', '');
+        for (final song in shelf.songs) {
+          expect(['Artist 11', seed], contains(song.artist));
+        }
+      }
+    });
+  });
+
   test('a pinned order applies to families and keeps each in order', () {
     final shelves = builder().build(
       keepOrder: const [

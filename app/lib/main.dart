@@ -10,6 +10,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'core/ai/ai_api.dart';
 import 'core/apk_installer.dart';
 import 'core/app_update.dart';
 import 'core/audio/yomi_audio_handler.dart';
@@ -29,6 +30,7 @@ import 'dev_hooks.dart';
 import 'state/appearance_controller.dart';
 import 'state/connectivity_controller.dart';
 import 'state/download_manager.dart';
+import 'state/ai_controller.dart';
 import 'state/catalog_controller.dart';
 import 'state/home_controller.dart';
 import 'state/offline_keeper.dart';
@@ -159,6 +161,8 @@ Future<void> main() async {
   player.onUpcomingSong = (client, song) {
     unawaited(lyrics.forSong(client, song));
   };
+  final ai = AiController(file: File('$listeningDir/ai-labels.json'));
+  await ai.load();
   final keeper = OfflineKeeper(
     downloads: downloads,
     ledger: ledger,
@@ -176,6 +180,11 @@ Future<void> main() async {
     settings: settings,
     cacheFile: File('$listeningDir/home.json'),
     catalogSongs: () => catalog.songs,
+    moodsFor: (songs) => {
+      for (final entry in ai.tagsById(songs).entries)
+        entry.key: entry.value.moods,
+    },
+    similarArtists: () => ai.similarArtists,
   );
   await home.loadCache();
   player.suggestNext = () =>
@@ -211,6 +220,7 @@ Future<void> main() async {
   );
   profile.addListener(publishProfile);
   var wasReachable = false;
+  String? aiUrl;
   void followSession() {
     final client = session.isSignedIn ? session.client : null;
     player.attach(client);
@@ -232,6 +242,18 @@ Future<void> main() async {
     home.attach(client);
     unawaited(_followCatalog(catalog, client, session.accountId));
     keeper.attach(client, session.username);
+    if (client == null) {
+      ai.attach(null);
+    } else if (client.baseUrl != aiUrl) {
+      ai.attach(
+        AiApi(
+          serverUrl: client.baseUrl,
+          auth: client,
+          port: session.uploadServicePort,
+        ),
+      );
+    }
+    aiUrl = client?.baseUrl;
     final isReachable = session.isServerReachable;
     player.isServerDown = !isReachable;
     if (client != null && isReachable && !wasReachable) {
@@ -252,6 +274,9 @@ Future<void> main() async {
     sync.attach(client);
   }
 
+  catalog.addListener(() {
+    if (catalog.isLoaded) unawaited(ai.queueMissing(catalog.songs));
+  });
   session.addListener(followSession);
   followSession();
 
@@ -275,6 +300,7 @@ Future<void> main() async {
       unawaited(home.refreshIfDue());
       unawaited(catalog.sync());
       unawaited(keeper.run());
+      unawaited(ai.refresh());
       unawaited(messages.refresh());
     },
   );
@@ -297,6 +323,7 @@ Future<void> main() async {
       home: home,
       catalog: catalog,
       keeper: keeper,
+      ai: ai,
       tunnel: tunnel,
       messages: messages,
     ),
@@ -363,6 +390,7 @@ class YomiApp extends StatelessWidget {
     required this.home,
     required this.catalog,
     required this.keeper,
+    required this.ai,
     required this.tunnel,
     required this.messages,
   });
@@ -383,6 +411,7 @@ class YomiApp extends StatelessWidget {
   final HomeController home;
   final CatalogController catalog;
   final OfflineKeeper keeper;
+  final AiController ai;
   final TunnelController tunnel;
   final MessagesController messages;
 
@@ -397,6 +426,7 @@ class YomiApp extends StatelessWidget {
         ChangeNotifierProvider<HomeController>.value(value: home),
         ChangeNotifierProvider<CatalogController>.value(value: catalog),
         ChangeNotifierProvider<OfflineKeeper>.value(value: keeper),
+        ChangeNotifierProvider<AiController>.value(value: ai),
         ChangeNotifierProvider<PlaybackSyncController>.value(value: sync),
         ChangeNotifierProvider<SessionController>.value(value: session),
         ChangeNotifierProvider<PlayerController>.value(value: player),

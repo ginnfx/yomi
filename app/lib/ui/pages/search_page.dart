@@ -7,7 +7,9 @@ import '../../core/genres.dart';
 import '../../core/models.dart';
 import '../../state/player_controller.dart';
 import '../../state/session.dart';
+import '../../core/ai/ai_api.dart';
 import '../../core/search_index.dart';
+import '../../state/ai_controller.dart';
 import '../../state/catalog_controller.dart';
 import '../../state/home_controller.dart';
 import '../../state/settings.dart';
@@ -34,6 +36,14 @@ class SearchPage extends StatefulWidget {
   State<SearchPage> createState() => _SearchPageState();
 }
 
+/// A search this many words long may be a description rather than a name.
+const int _minWordsForDescription = 3;
+
+/// With this few matches, a description is more likely than a title.
+const int _fewResults = 3;
+const Duration _describeDebounce = Duration(milliseconds: 700);
+const int _maxDescribedSongs = 100;
+
 class _SearchPageState extends State<SearchPage> {
   final _controller = TextEditingController();
   Timer? _timer;
@@ -42,6 +52,7 @@ class _SearchPageState extends State<SearchPage> {
   Set<String> _selectedGenres = const {};
   bool _hasSearched = false;
   IndexedResults? _indexed;
+  SearchFilters? _filters;
   bool _hasMore = false;
   Object? _error;
   bool _isLoading = false;
@@ -80,6 +91,7 @@ class _SearchPageState extends State<SearchPage> {
       setState(() {
         _hasSearched = false;
         _indexed = null;
+        _filters = null;
         _artists = const [];
         _songs = const [];
         _selectedGenres = const {};
@@ -100,6 +112,7 @@ class _SearchPageState extends State<SearchPage> {
   void _searchLibrary(CatalogController catalog, String text) {
     final results = catalog.searchIndex.search(text);
     setState(() {
+      _filters = null;
       _indexed = results;
       _artists = const [];
       _songs = results.songs;
@@ -108,6 +121,36 @@ class _SearchPageState extends State<SearchPage> {
       _hasMore = false;
       _error = null;
       _isLoading = false;
+    });
+    // A description rather than a name: nothing matches well, so ask what it means.
+    final wordCount = text.trim().split(RegExp(r'\s+')).length;
+    if (wordCount >= _minWordsForDescription &&
+        results.songs.length < _fewResults &&
+        context.read<AiController>().isAvailable) {
+      _timer = Timer(_describeDebounce, () => _interpret(catalog, text));
+    }
+  }
+
+  Future<void> _interpret(CatalogController catalog, String text) async {
+    final generation = _generation;
+    setState(() => _isLoading = true);
+    final filters = await context.read<AiController>().interpret(text.trim());
+    if (!mounted || generation != _generation) return;
+    setState(() => _isLoading = false);
+    if (filters != null) _applyFilters(catalog, filters);
+  }
+
+  void _applyFilters(CatalogController catalog, SearchFilters filters) {
+    final ai = context.read<AiController>();
+    setState(() {
+      _filters = filters;
+      _indexed = null;
+      _songs = filters.isEmpty
+          ? const []
+          : ([
+              for (final song in catalog.songs)
+                if (filters.matches(song, ai.tagFor(song))) song,
+            ]..shuffle()).take(_maxDescribedSongs).toList();
     });
   }
 
@@ -361,6 +404,12 @@ class _SearchPageState extends State<SearchPage> {
               ),
             )
           else ...[
+            if (_filters case final filters?)
+              _FilterChips(
+                filters: filters,
+                onChanged: (next) =>
+                    _applyFilters(context.read<CatalogController>(), next),
+              ),
             if (indexed != null)
               _LocalResults(results: indexed, onOpened: _rememberSearch),
             if (_artists.isNotEmpty) ...[
@@ -657,6 +706,40 @@ class _RecentSearches extends StatelessWidget {
             label: const Text('Clear'),
             onPressed: settings.clearRecentSearches,
           ),
+        ],
+      ),
+    );
+  }
+}
+
+/// What a description was understood to mean, each part removable.
+class _FilterChips extends StatelessWidget {
+  const _FilterChips({required this.filters, required this.onChanged});
+
+  final SearchFilters filters;
+  final ValueChanged<SearchFilters> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    Widget chip(String label, SearchFilters next) =>
+        InputChip(label: Text(label), onDeleted: () => onChanged(next));
+    final energy = filters.energy;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(kPagePadding, 12, kPagePadding, 0),
+      child: Wrap(
+        spacing: 8,
+        runSpacing: 4,
+        children: [
+          for (final mood in filters.moods)
+            chip(mood, filters.without(mood: mood)),
+          if (energy != null)
+            chip('$energy energy', filters.without(energy: true)),
+          for (final genre in filters.genres)
+            chip(genre, filters.without(genre: genre)),
+          for (final artist in filters.artists)
+            chip(artist, filters.without(artist: artist)),
+          for (final mood in filters.excludeMoods)
+            chip('not $mood', filters.without(excludeMood: mood)),
         ],
       ),
     );

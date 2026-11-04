@@ -37,6 +37,26 @@ const int _topCandidates = 10;
 /// Songs played within this long are counted as "recent", not as fresh.
 const Duration _recentPlay = Duration(days: 14);
 
+/// Moods that weigh on a shelf when there are too many of them.
+const Set<String> _heavyMoods = {'sad', 'dark', 'angry'};
+
+/// A shelf that isn't about a mood holds at most this many songs with a heavy one.
+const int _maxHeavySongs = 3;
+
+/// The moods given a shelf of their own, and what those shelves are called.
+const Map<String, String> _moodTitles = {
+  'happy': 'Feel good',
+  'uplifting': 'Lift your mood',
+  'calm': 'Take it easy',
+  'energetic': 'Keep moving',
+  'romantic': 'Close to you',
+  'nostalgic': 'Way back',
+  'dreamy': 'Drift away',
+  'party': 'Turn it up',
+  'focus': 'Get in the zone',
+  'sad': 'In your feelings',
+};
+
 /// A server play count is older and vaguer than a play on this device.
 const double _serverPlayWeight = 0.2;
 
@@ -60,6 +80,7 @@ enum ShelfKind {
   discover,
   artistsYouLove,
   newToYou,
+  mood,
 }
 
 @immutable
@@ -116,6 +137,8 @@ class HomeBuilder {
     this.shown = const {},
     this.lessArtists = const {},
     this.lessSongs = const {},
+    this.moodsById = const {},
+    this.similarArtists = const {},
   }) : pool = [
          for (final song in pool)
            if (!lessSongs.contains(song.id) &&
@@ -157,6 +180,12 @@ class HomeBuilder {
   /// What "show less like this" has ruled out.
   final Set<String> lessArtists;
   final Set<String> lessSongs;
+
+  /// What the AI said about each song, by song ID. Empty when AI is off.
+  final Map<String, List<String>> moodsById;
+
+  /// Artists the AI says are alike. Every name here is in the library.
+  final Map<String, List<String>> similarArtists;
   final Random _random;
   late final Map<String, Song> _songsById;
   final Map<String, double> _plays = {};
@@ -209,11 +238,19 @@ class HomeBuilder {
     return last != null && now.difference(last) < _recentPlay;
   }
 
+  bool _isHeavy(Song song) =>
+      moodsById[song.id]?.any(_heavyMoods.contains) ?? false;
+
   /// Keeps songs in order, leaving out any that would put too many from one artist or
   /// album on a shelf, up to [limit].
-  List<Song> _varied(Iterable<Song> songs, {int limit = kShelfSize}) {
+  List<Song> _varied(
+    Iterable<Song> songs, {
+    int limit = kShelfSize,
+    bool isMoodShelf = false,
+  }) {
     final artists = <String, int>{};
     final albums = <String, int>{};
+    var heavy = 0;
     final picked = <Song>[];
     final leftOut = <Song>[];
     for (final song in songs) {
@@ -221,10 +258,12 @@ class HomeBuilder {
       final artist = song.artist;
       final album = song.albumId ?? song.album;
       if ((artists[artist] ?? 0) >= kMaxPerArtist ||
-          (albums[album] ?? 0) >= kMaxPerArtist) {
+          (albums[album] ?? 0) >= kMaxPerArtist ||
+          (!isMoodShelf && _isHeavy(song) && heavy >= _maxHeavySongs)) {
         leftOut.add(song);
         continue;
       }
+      if (_isHeavy(song)) heavy++;
       artists[artist] = (artists[artist] ?? 0) + 1;
       albums[album] = (albums[album] ?? 0) + 1;
       picked.add(song);
@@ -309,6 +348,7 @@ class HomeBuilder {
   /// An artist's songs, and others in their genres. Others come along so a shelf can be
   /// full despite the per-artist limit, which is also what makes it a discovery shelf.
   Iterable<Song> _relatedTo(String artist) {
+    final similar = similarArtists[artist]?.toSet() ?? const <String>{};
     final genres = pool
         .where((song) => _artistOf(song) == artist)
         .map(_genreOf)
@@ -317,7 +357,11 @@ class HomeBuilder {
     return pool.where(
       (song) =>
           _artistOf(song) == artist ||
-          (_genreOf(song) != null && genres.contains(_genreOf(song))),
+          similar.contains(_artistOf(song)) ||
+          // Genres are a weaker clue, used when the AI hasn't said who's alike.
+          (similar.isEmpty &&
+              _genreOf(song) != null &&
+              genres.contains(_genreOf(song))),
     );
   }
 
@@ -432,6 +476,33 @@ class HomeBuilder {
     ]);
   }
 
+  /// A shelf for each of a few moods, different ones on different days.
+  List<HomeShelf> _moodShelves() {
+    if (moodsById.isEmpty) return const [];
+    final byMood = <String, List<Song>>{};
+    for (final song in pool) {
+      if (_isWornOut(song)) continue;
+      for (final mood in moodsById[song.id] ?? const <String>[]) {
+        if (_moodTitles.containsKey(mood)) (byMood[mood] ??= []).add(song);
+      }
+    }
+    final moods = byMood.keys.toList()
+      ..sort()
+      ..shuffle(_random);
+    final shelves = <HomeShelf>[];
+    for (final mood in moods) {
+      if (shelves.length >= _shelvesPerFamily) break;
+      final songs = byMood[mood]!..shuffle(_random);
+      final shelf = _shelf(
+        ShelfKind.mood,
+        _moodTitles[mood]!,
+        _varied(songs, isMoodShelf: true),
+      );
+      if (shelf != null) shelves.add(shelf);
+    }
+    return shelves;
+  }
+
   /// Takes a little from many recent albums, newest albums more often, so one big upload
   /// can't fill the shelf and each day shows something else.
   HomeShelf? _recentlyAddedShelf() {
@@ -490,6 +561,7 @@ class HomeBuilder {
       recent,
       _discover(),
       _newToYou(),
+      ..._moodShelves(),
     ].whereType<HomeShelf>().toList()..shuffle(_random);
     final shelves = [?_jumpBack(), ...rotating].take(kMaxShelves).toList();
     if (keepOrder == null) return List.unmodifiable(shelves);

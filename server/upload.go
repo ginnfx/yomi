@@ -21,19 +21,22 @@ const (
 
 // Server wires authentication, storage and the post-upload library rescan together.
 type Server struct {
-	Config    Config
-	Auth      Authenticator
-	Store     Store
-	Scan      func(ctx context.Context, query url.Values)
-	Index     *HashIndex
-	Status    *StatusReader
-	Backups   *BackupSource
-	Messages  *MessageStore
-	Relay     *PushRelay
-	slots     chan struct{}
-	limits    *loginLimiter
-	scans     *scanDebouncer
-	publishMu sync.Mutex
+	Config      Config
+	Auth        Authenticator
+	Store       Store
+	Scan        func(ctx context.Context, query url.Values)
+	Index       *HashIndex
+	Status      *StatusReader
+	Backups     *BackupSource
+	Messages    *MessageStore
+	Relay       *PushRelay
+	Tags        *TagStore
+	LLM         *LLMClient
+	interpreter *Interpreter
+	slots       chan struct{}
+	limits      *loginLimiter
+	scans       *scanDebouncer
+	publishMu   sync.Mutex
 }
 
 func newServer(cfg Config, auth Authenticator, scan func(context.Context, url.Values), index *HashIndex) *Server {
@@ -74,6 +77,9 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("GET /v1/replica/file/{sha256}", s.handleReplicaFile)
 	mux.HandleFunc("GET /v1/replica/database", s.handleReplicaDatabase)
 	mux.HandleFunc("PUT /v1/upload/{sha256}", s.handleBulkUpload)
+	mux.HandleFunc("GET /v1/tags", s.handleTags)
+	mux.HandleFunc("POST /v1/tags/songs", s.handleQueueTags)
+	mux.HandleFunc("POST /v1/search/interpret", s.handleInterpret)
 	return mux
 }
 

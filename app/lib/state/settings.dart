@@ -90,6 +90,7 @@ class SettingsController extends ChangeNotifier {
     'discover',
     'artistsYouLove',
     'newToYou',
+    'mood',
   ];
 
   /// Set once the user arranges Home by hand; until then shelves rotate by themselves.

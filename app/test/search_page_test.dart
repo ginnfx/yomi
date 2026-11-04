@@ -9,6 +9,7 @@ import 'package:http/testing.dart';
 import 'package:provider/provider.dart';
 import 'package:yomi/core/recommendations.dart';
 import 'package:yomi/core/subsonic_client.dart';
+import 'package:yomi/state/ai_controller.dart';
 import 'package:yomi/state/catalog_controller.dart';
 import 'package:yomi/state/connectivity_controller.dart';
 import 'package:yomi/state/home_controller.dart';
@@ -68,6 +69,9 @@ void main() {
     providers: [
       ChangeNotifierProvider<CatalogController>.value(value: catalog),
       ChangeNotifierProvider<HomeController>.value(value: _Home()),
+      ChangeNotifierProvider<AiController>(
+        create: (_) => AiController(file: File('${dir.path}/labels.json')),
+      ),
       ChangeNotifierProvider(
         create: (_) => ConnectivityController(
           changes: const Stream<List<ConnectivityResult>>.empty(),

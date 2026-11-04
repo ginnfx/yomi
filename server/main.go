@@ -42,6 +42,7 @@ func main() {
 	if cfg.CoversOn {
 		startCovers(cfg)
 	}
+	startAI(cfg, server)
 	httpServer := &http.Server{
 		Addr:              cfg.Listen,
 		Handler:           server.routes(),
