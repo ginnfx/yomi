@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 
 import '../../core/models.dart';
 import '../../state/download_manager.dart';
+import '../../state/offline_keeper.dart';
 import '../../state/player_controller.dart';
 import '../../state/session.dart';
 import '../theme.dart';
@@ -268,6 +269,8 @@ class _CollectionPageState extends State<CollectionPage> {
                     ],
                   ),
                 ),
+                if (widget.playlist != null)
+                  _KeepOffline(playlist: widget.playlist!),
                 if (known == null &&
                     snapshot.connectionState != ConnectionState.done)
                   const SongListSkeleton(rows: 6),
@@ -332,6 +335,38 @@ class _CollectionPageState extends State<CollectionPage> {
           },
         ),
       ),
+    );
+  }
+}
+
+/// The switch for saving a playlist by itself, and how far along that is.
+class _KeepOffline extends StatelessWidget {
+  const _KeepOffline({required this.playlist});
+
+  final Playlist playlist;
+
+  @override
+  Widget build(BuildContext context) {
+    final keeper = context.watch<OfflineKeeper>();
+    final isKept = keeper.isKept(playlist);
+    final status = keeper.statusOf(playlist.id);
+    return SwitchListTile(
+      contentPadding: const EdgeInsets.symmetric(horizontal: kPagePadding),
+      title: Text('Keep offline', style: yomiText(15, weight: FontWeight.w700)),
+      subtitle: isKept && status != null
+          ? Text(
+              status.isLimited
+                  ? '${status.saved} of ${status.total} saved, storage limit reached'
+                  : '${status.saved} of ${status.total} saved',
+              style: yomiText(
+                12.5,
+                weight: FontWeight.w500,
+                color: YomiColors.textSecondary,
+              ),
+            )
+          : null,
+      value: isKept,
+      onChanged: (value) => keeper.setKept(playlist, value),
     );
   }
 }

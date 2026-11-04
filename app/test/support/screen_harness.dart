@@ -87,6 +87,8 @@ class FakePlayer extends ChangeNotifier implements PlayerController {
   @override
   bool get isBuffering => false;
   @override
+  bool isAvailableNow(Song song) => true;
+  @override
   bool get canSkipNext => true;
   @override
   int get userSkips => 0;

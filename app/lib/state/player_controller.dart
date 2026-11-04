@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:math';
 
 import 'package:audio_service/audio_service.dart';
 import 'package:flutter/foundation.dart';
@@ -94,6 +95,14 @@ class PlayerController extends ChangeNotifier implements TransportCommands {
 
   /// Songs to continue with when the queue runs out. Set by whoever knows what to suggest.
   List<Song> Function()? suggestNext;
+
+  /// Set while the server can't be reached even though there's a network.
+  bool isServerDown = false;
+
+  bool get _isDisconnected => connectivity.isOffline || isServerDown;
+
+  /// Whether this song can play right now. While disconnected only saved songs can.
+  bool isAvailableNow(Song song) => !_isDisconnected || _isLocal(song);
 
   /// Rises each time the user skips, including from the lock screen.
   int get userSkips => _userSkips;
@@ -338,7 +347,6 @@ class PlayerController extends ChangeNotifier implements TransportCommands {
   }
 
   void _onCacheSettingsChanged() {
-    cache.maxBytes = settings.cacheLimitBytes;
     if (connectivity.isOffline ||
         (!settings.preloadNext && !settings.cachePlayedSongs)) {
       _preloader.stop();
@@ -427,6 +435,20 @@ class PlayerController extends ChangeNotifier implements TransportCommands {
     bool autoplay = true,
   }) async {
     if (_client == null || songs.isEmpty) return;
+    if (_isDisconnected) {
+      // Only what's saved can play, starting from the tapped song if it's one of them.
+      final tapped = songs[startIndex.clamp(0, songs.length - 1)];
+      final saved = songs.where(_isLocal).toList();
+      if (saved.isEmpty) {
+        _fail('Nothing here is saved on this device');
+        return;
+      }
+      songs = saved;
+      startIndex = max(saved.indexOf(tapped), 0);
+      if (!identical(saved.first, tapped) && !saved.contains(tapped)) {
+        position = Duration.zero;
+      }
+    }
     _preloader.stop();
     _error = null;
     _queue = List.unmodifiable(songs);
@@ -559,7 +581,7 @@ class PlayerController extends ChangeNotifier implements TransportCommands {
   }
 
   void _fail(Object error) {
-    _error = connectivity.isOffline
+    _error = _isDisconnected
         ? "You're offline. Download songs to play them without a connection."
         : 'Playback problem. Check your connection to the server.';
     debugPrint('Playback error: $error');

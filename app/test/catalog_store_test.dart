@@ -6,6 +6,7 @@ import 'package:yomi/core/catalog_cache.dart';
 void main() {
   late Directory dir;
   late File file;
+  final opened = <CatalogCache>[];
 
   setUp(() async {
     dir = await Directory.systemTemp.createTemp('catalog_store');
@@ -13,12 +14,16 @@ void main() {
   });
 
   tearDown(() async {
-    await Future<void>.delayed(Duration.zero);
+    await Future.wait(opened.map((cache) => cache.flush()));
+    opened.clear();
     await dir.delete(recursive: true);
   });
 
-  CatalogCache open({DateTime Function()? now, int maxEntries = 128}) =>
-      CatalogCache(file: file, now: now, maxEntries: maxEntries);
+  CatalogCache open({DateTime Function()? now, int maxEntries = 128}) {
+    final cache = CatalogCache(file: file, now: now, maxEntries: maxEntries);
+    opened.add(cache);
+    return cache;
+  }
 
   test('returns nothing for a query it has never seen', () async {
     final cache = open();

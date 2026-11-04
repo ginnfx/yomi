@@ -4,6 +4,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../core/models.dart';
 
 const int _defaultCacheMb = 1024;
+const int _defaultStorageGb = 5;
+const List<int> storageLimitChoicesGb = [2, 5, 10, 20];
 const List<int> cacheLimitChoicesMb = [256, 512, 1024, 2048, 4096];
 
 /// User preferences, saved on the device.
@@ -29,6 +31,25 @@ class SettingsController extends ChangeNotifier {
   bool get autoDownloadRepeats => _prefs.getBool('autoDownloadRepeats') ?? true;
   Future<void> setAutoDownloadRepeats(bool value) =>
       _set(() => _prefs.setBool('autoDownloadRepeats', value));
+
+  /// How much Yomi may use by itself. Downloads you choose yourself don't count.
+  int get storageLimitGb =>
+      _prefs.getInt('storageLimitGb') ?? _defaultStorageGb;
+  int get storageLimitBytes => storageLimitGb * 1024 * 1024 * 1024;
+  Future<void> setStorageLimitGb(int value) =>
+      _set(() => _prefs.setInt('storageLimitGb', value));
+
+  /// Whether your playlists are saved for offline by themselves.
+  bool get keepPlaylistsOffline =>
+      _prefs.getBool('keepPlaylistsOffline') ?? true;
+  Future<void> setKeepPlaylistsOffline(bool value) =>
+      _set(() => _prefs.setBool('keepPlaylistsOffline', value));
+
+  /// A choice made for one playlist, or null to follow the default.
+  bool? playlistKeepChoice(String playlistId) =>
+      _prefs.getBool('keepPlaylist.$playlistId');
+  Future<void> setPlaylistKeepChoice(String playlistId, bool value) =>
+      _set(() => _prefs.setBool('keepPlaylist.$playlistId', value));
 
   bool get wifiOnlyDownloads => _prefs.getBool('wifiOnlyDownloads') ?? true;
   bool get cachePlayedSongs => _prefs.getBool('cachePlayedSongs') ?? true;

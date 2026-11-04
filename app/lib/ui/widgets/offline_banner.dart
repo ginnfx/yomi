@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 
 import '../../state/connectivity_controller.dart';
 import '../../state/download_manager.dart';
+import '../../state/session.dart';
 import '../theme.dart';
 
 /// Slim pill at the top whenever the phone has no connection, or downloads are waiting.
@@ -14,11 +15,17 @@ class StatusBanner extends StatelessWidget {
     final isOffline = context.select<ConnectivityController, bool>(
       (c) => c.isOffline,
     );
+    final isServerDown = context.select<SessionController, bool>(
+      (s) => s.isSignedIn && !s.isServerReachable,
+    );
     final waiting = context.select<DownloadManager, String?>(
       (d) => d.pausedReason,
     );
+    final isCutOff = isOffline || isServerDown;
     final message = isOffline
-        ? "You're offline · downloaded music still plays"
+        ? "You're offline · saved music still plays"
+        : isServerDown
+        ? "Can't reach your server · saved music still plays"
         : waiting;
     return AnimatedSize(
       duration: const Duration(milliseconds: 250),
@@ -37,7 +44,7 @@ class StatusBanner extends StatelessWidget {
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   Icon(
-                    isOffline
+                    isCutOff
                         ? Icons.cloud_off_rounded
                         : Icons.hourglass_bottom_rounded,
                     size: 16,

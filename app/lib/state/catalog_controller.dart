@@ -96,9 +96,7 @@ class CatalogController extends ChangeNotifier {
       final status = await client.scanStatus();
       if (status.isScanning && _isLoaded && !force) return;
       final isSameScan =
-          _isLoaded &&
-          status.lastScan != null &&
-          status.lastScan == _lastScan;
+          _isLoaded && status.lastScan != null && status.lastScan == _lastScan;
       final songs = isSameScan && !force
           ? _songs
           : await _fetchAll(client, generation);

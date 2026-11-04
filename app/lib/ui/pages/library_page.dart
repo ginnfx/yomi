@@ -174,7 +174,7 @@ class _LibraryPageState extends State<LibraryPage> {
                         _Tab.playlists => 'Playlists',
                         _Tab.songs => 'Songs',
                         _Tab.artists => 'Artists',
-                        _Tab.downloaded => 'Downloaded',
+                        _Tab.downloaded => 'On this device',
                       }),
                       selected: _tab == tab,
                       showCheckmark: false,

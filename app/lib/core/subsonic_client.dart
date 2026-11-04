@@ -10,6 +10,7 @@ import 'package:http/http.dart' as http;
 import 'catalog_cache.dart';
 import 'lyrics.dart';
 import 'models.dart';
+import 'offline/outbox.dart';
 import 'saved_play_queue.dart';
 
 const String _apiVersion = '1.16.1';
@@ -64,10 +65,12 @@ class SubsonicClient {
     required String password,
     http.Client? httpClient,
     CatalogCache? cache,
+    Outbox? outbox,
     String Function()? saltGenerator,
     bool Function()? isReadOnly,
   }) : baseUrl = baseUrl.replaceAll(RegExp(r'/+$'), ''),
        _cache = cache,
+       _outbox = outbox,
        _password = password,
        _http = httpClient ?? http.Client(),
        _newSalt = saltGenerator ?? _randomSalt,
@@ -77,6 +80,7 @@ class SubsonicClient {
   final String username;
   final String _password;
   final CatalogCache? _cache;
+  final Outbox? _outbox;
   final http.Client _http;
   final String Function() _newSalt;
   final bool Function() _isReadOnly;
@@ -107,7 +111,19 @@ class SubsonicClient {
     bool refreshesAll = false,
   ]) async {
     _requireWritable();
-    final result = await _get(endpoint, params);
+    final Map<String, dynamic> result;
+    try {
+      result = await _get(endpoint, params);
+    } on SubsonicException catch (error) {
+      final outbox = _outbox;
+      if (error.kind != ErrorKind.unreachable ||
+          outbox == null ||
+          !_waitableEndpoints.contains(endpoint)) {
+        rethrow;
+      }
+      await outbox.add(OutboxItem(endpoint, params));
+      return const {};
+    }
     final cache = _cache;
     if (cache != null) {
       if (clears.isNotEmpty) cache.remove(clears);
@@ -165,6 +181,52 @@ class SubsonicClient {
 
   static const Set<String> _playlistEndpoints = {'getPlaylists', 'getPlaylist'};
 
+  /// Changes that can safely wait until the server is back. A scan can't: it's only
+  /// useful now.
+  static const Set<String> _waitableEndpoints = {
+    'star',
+    'unstar',
+    'createPlaylist',
+    'updatePlaylist',
+    'deletePlaylist',
+  };
+
+  /// A saved action that isn't a single server call: removing a song once the server's
+  /// current list can be checked, so it can't remove the wrong one.
+  static const String _removeSongAction = 'removeSongFromPlaylist';
+
+  /// Sends changes made while the server couldn't be reached, in the order they were
+  /// made. Stops if it drops again. A change the server refuses can never succeed, so it's
+  /// dropped rather than blocking everything after it.
+  Future<void> flushOutbox() async {
+    final outbox = _outbox;
+    if (outbox == null) return;
+    await outbox.load();
+    while (outbox.items.isNotEmpty) {
+      final item = outbox.items.first;
+      try {
+        await _send(item);
+      } on SubsonicException catch (error) {
+        if (error.kind == ErrorKind.unreachable) return;
+        debugPrint('Dropping a saved change the server refused: $error');
+      }
+      await outbox.removeFirst();
+    }
+  }
+
+  Future<void> _send(OutboxItem item) async {
+    if (item.endpoint == _removeSongAction) {
+      await _removeSong(
+        item.params['playlistId'] as String,
+        item.params['songId'] as String,
+        (item.params['index'] as num).toInt(),
+      );
+      return;
+    }
+    await _get(item.endpoint, item.params);
+    _cache?.markAllStale();
+  }
+
   final Map<String, Future<Map<String, dynamic>>> _pendingReads = {};
   static const _cachedEndpoints = {
     'getSong',
@@ -216,13 +278,28 @@ class SubsonicClient {
     Song song,
     int shownIndex,
   ) async {
+    try {
+      await _removeSong(playlistId, song.id, shownIndex);
+    } on SubsonicException catch (error) {
+      final outbox = _outbox;
+      if (error.kind != ErrorKind.unreachable || outbox == null) rethrow;
+      await outbox.add(
+        OutboxItem(_removeSongAction, {
+          'playlistId': playlistId,
+          'songId': song.id,
+          'index': shownIndex,
+        }),
+      );
+    }
+  }
+
+  Future<void> _removeSong(String playlistId, String songId, int index) async {
     final current = await freshPlaylistSongs(playlistId);
-    final isStillThere =
-        shownIndex < current.length && current[shownIndex].id == song.id;
-    final index = isStillThere
-        ? shownIndex
-        : current.indexWhere((entry) => entry.id == song.id);
-    if (index >= 0) await removeFromPlaylist(playlistId, [index]);
+    final isStillThere = index < current.length && current[index].id == songId;
+    final at = isStillThere
+        ? index
+        : current.indexWhere((entry) => entry.id == songId);
+    if (at >= 0) await removeFromPlaylist(playlistId, [at]);
   }
 
   /// A saved response, available straight away, or null if there isn't one yet.
@@ -533,11 +610,11 @@ class SubsonicClient {
         'songIndexToRemove': indexes,
       }, _playlistEndpoints);
 
-  Future<void> renamePlaylist(String playlistId, String name) =>
-      _write('updatePlaylist', {
-        'playlistId': playlistId,
-        'name': name,
-      }, _playlistEndpoints);
+  Future<void> renamePlaylist(String playlistId, String name) => _write(
+    'updatePlaylist',
+    {'playlistId': playlistId, 'name': name},
+    _playlistEndpoints,
+  );
 
   Future<void> deletePlaylist(String playlistId) =>
       _write('deletePlaylist', {'id': playlistId}, _playlistEndpoints);
@@ -651,7 +728,10 @@ class SubsonicClient {
   }
 
   /// A page of the whole library straight from the server, for building the local copy.
-  Future<List<Song>> freshSongs({required int offset, required int count}) async {
+  Future<List<Song>> freshSongs({
+    required int offset,
+    required int count,
+  }) async {
     final body = await _fetch('search3', {
       'query': '',
       'artistCount': 0,

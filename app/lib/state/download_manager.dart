@@ -1,3 +1,5 @@
+import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
@@ -26,7 +28,9 @@ class DownloadManager extends ChangeNotifier {
     this.fetcher = const FileFetcher(),
     this.warmCover,
     this.ledger,
-  }) {
+    File? queueFile,
+    this.onSaved,
+  }) : _queueFile = queueFile {
     connectivity.addListener(_pump);
     settings.addListener(_pump);
   }
@@ -38,6 +42,11 @@ class DownloadManager extends ChangeNotifier {
   final CoverWarmer? warmCover;
   final AutoDownloadLedger? ledger;
 
+  /// Told once a song is saved, so a streamed or cached copy can be removed.
+  final Future<void> Function(String songId)? onSaved;
+  final File? _queueFile;
+  Future<void> _queueWrites = Future.value();
+
   SubsonicClient? _client;
   final List<Song> _queue = [];
   final Set<String> _failed = {};
@@ -45,6 +54,43 @@ class DownloadManager extends ChangeNotifier {
   String? _activeId;
   CancelToken? _cancel;
   bool _isPumping = false;
+
+  /// Picks up downloads that were still waiting when the app last closed.
+  Future<void> loadQueue() async {
+    final file = _queueFile;
+    if (file == null) return;
+    try {
+      if (!await file.exists()) return;
+      final json = jsonDecode(await file.readAsString()) as List<dynamic>;
+      final known = {for (final song in _queue) song.id};
+      _queue.addAll(
+        json
+            .cast<Map<String, dynamic>>()
+            .map(Song.fromJson)
+            .where((s) => !store.contains(s.id) && !known.contains(s.id)),
+      );
+      notifyListeners();
+      unawaited(_pump());
+    } on Object catch (error) {
+      debugPrint('Ignoring an unreadable download queue: $error');
+    }
+  }
+
+  void _saveQueue() {
+    final file = _queueFile;
+    if (file == null) return;
+    final snapshot = [for (final song in _queue) song.toJson()];
+    _queueWrites = _queueWrites.then((_) async {
+      try {
+        final temp = File('${file.path}.tmp');
+        await temp.parent.create(recursive: true);
+        await temp.writeAsString(jsonEncode(snapshot));
+        await temp.rename(file.path);
+      } on Object catch (error) {
+        debugPrint('Could not save the download queue: $error');
+      }
+    });
+  }
 
   void attach(SubsonicClient? client) {
     _client = client;
@@ -93,6 +139,7 @@ class DownloadManager extends ChangeNotifier {
       _failed.remove(song.id);
       _queue.add(song);
     }
+    _saveQueue();
     notifyListeners();
     _pump();
   }
@@ -107,6 +154,7 @@ class DownloadManager extends ChangeNotifier {
   Future<void> remove(Song song) async {
     ledger?.markUserRemoved(song.id);
     _queue.removeWhere((s) => s.id == song.id);
+    _saveQueue();
     if (_activeId == song.id) _cancel?.cancel();
     await store.remove(song.id);
     _progress.remove(song.id);
@@ -124,6 +172,7 @@ class DownloadManager extends ChangeNotifier {
 
   void cancelAll() {
     _queue.clear();
+    _saveQueue();
     _cancel?.cancel();
     notifyListeners();
   }
@@ -154,6 +203,7 @@ class DownloadManager extends ChangeNotifier {
             },
           );
           await store.add(song, fetched);
+          await onSaved?.call(song.id);
           await warmCover?.call(_client!, song);
         } on FetchCancelled {
           // removed or cancelled by the user
@@ -162,6 +212,7 @@ class DownloadManager extends ChangeNotifier {
           _failed.add(song.id);
         } finally {
           _queue.removeWhere((s) => s.id == song.id);
+          _saveQueue();
           _activeId = null;
           _cancel = null;
           _progress.remove(song.id);

@@ -11,6 +11,7 @@ import '../core/lan_discovery.dart';
 import '../core/subsonic_client.dart';
 import '../core/catalog_cache.dart';
 import '../core/messaging/messaging_api.dart';
+import '../core/offline/outbox.dart';
 import '../core/server_role.dart';
 import '../core/upload/bulk_upload_api.dart';
 import 'connectivity_controller.dart';
@@ -87,6 +88,7 @@ class SessionController extends ChangeNotifier with WidgetsBindingObserver {
     this.uploadPortFor,
     RoleProbe? roleProbe,
     this.catalogCacheFor,
+    this.outboxFor,
     http.Client? httpClient,
   }) : _httpClient = httpClient,
        _roleProbe = roleProbe ?? probeIsReplica,
@@ -107,6 +109,10 @@ class SessionController extends ChangeNotifier with WidgetsBindingObserver {
   /// Opens the saved server data for an account. Without it nothing is saved.
   final CatalogCache Function(String accountId)? catalogCacheFor;
   CatalogCache? _catalogCache;
+
+  /// Opens the saved changes waiting to reach the server for an account.
+  final Outbox Function(String accountId)? outboxFor;
+  Outbox? _outbox;
   String? _accountId;
 
   /// Stays the same however the server is reached, until sign-out.
@@ -276,6 +282,9 @@ class SessionController extends ChangeNotifier with WidgetsBindingObserver {
     final cache = catalogCacheFor?.call(id);
     await cache?.load();
     _catalogCache = cache;
+    final outbox = outboxFor?.call(id);
+    await outbox?.load();
+    _outbox = outbox;
   }
 
   /// Verifies the credentials with the server before saving them. [homeInput] is the optional
@@ -572,6 +581,9 @@ class SessionController extends ChangeNotifier with WidgetsBindingObserver {
     _catalogCache = null;
     _accountId = null;
     await cache?.clear();
+    final outbox = _outbox;
+    _outbox = null;
+    await outbox?.clear();
     try {
       await _storage.deleteAll();
     } on Exception catch (error) {
@@ -612,6 +624,7 @@ class SessionController extends ChangeNotifier with WidgetsBindingObserver {
       password: _password,
       isReadOnly: () => _isOnReplica,
       cache: _catalogCache,
+      outbox: _outbox,
       httpClient: _httpClient,
     );
     unawaited(_rememberUrl(url));

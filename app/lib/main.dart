@@ -22,6 +22,7 @@ import 'core/lyrics.dart';
 import 'core/offline/audio_cache.dart';
 import 'core/offline/cover_warmer.dart';
 import 'core/offline/download_store.dart';
+import 'core/offline/outbox.dart';
 import 'core/tunnel/tunnel_bridge.dart';
 import 'core/subsonic_client.dart';
 import 'dev_hooks.dart';
@@ -30,6 +31,7 @@ import 'state/connectivity_controller.dart';
 import 'state/download_manager.dart';
 import 'state/catalog_controller.dart';
 import 'state/home_controller.dart';
+import 'state/offline_keeper.dart';
 import 'state/listening_controller.dart';
 import 'state/messages_controller.dart';
 import 'state/player_controller.dart';
@@ -88,7 +90,10 @@ Future<void> main() async {
     connectivity: connectivity,
     warmCover: warmCovers,
     ledger: ledger,
+    queueFile: File('${downloadsDir.path}/queue.json'),
+    onSaved: cache.remove,
   );
+  await downloads.loadQueue();
   final tunnel = TunnelController(
     bridge: const MethodChannelTunnelBridge(),
     prefs: prefs,
@@ -101,6 +106,8 @@ Future<void> main() async {
     catalogCacheFor: (account) => CatalogCache(
       file: File('${supportDir.path}/catalog/responses/$account.json'),
     ),
+    outboxFor: (account) =>
+        Outbox(File('${supportDir.path}/catalog/outbox/$account.json')),
   );
   final audioPlayer = AudioPlayer();
   final audioHandler = await AudioService.init(
@@ -145,6 +152,15 @@ Future<void> main() async {
   player.onUpcomingSong = (client, song) {
     unawaited(lyrics.forSong(client, song));
   };
+  final keeper = OfflineKeeper(
+    downloads: downloads,
+    ledger: ledger,
+    settings: settings,
+    connectivity: connectivity,
+    history: history,
+    cache: cache,
+    currentSong: () => player.current,
+  );
   final catalog = CatalogController(
     directory: Directory('${supportDir.path}/catalog/songs'),
   );
@@ -186,6 +202,7 @@ Future<void> main() async {
     ),
   );
   profile.addListener(publishProfile);
+  var wasReachable = false;
   void followSession() {
     final client = session.isSignedIn ? session.client : null;
     player.attach(client);
@@ -193,6 +210,13 @@ Future<void> main() async {
     listening.attach(client);
     home.attach(client);
     unawaited(_followCatalog(catalog, client, session.accountId));
+    keeper.attach(client, session.username);
+    final isReachable = session.isServerReachable;
+    player.isServerDown = !isReachable;
+    if (client != null && isReachable && !wasReachable) {
+      unawaited(client.flushOutbox());
+    }
+    wasReachable = isReachable;
     if (client == null) {
       messages.attach(null);
     } else if (client.baseUrl != messagingUrl) {
@@ -229,6 +253,7 @@ Future<void> main() async {
       unawaited(updates.check());
       unawaited(home.refreshIfDue());
       unawaited(catalog.sync());
+      unawaited(keeper.run());
       unawaited(messages.refresh());
     },
   );
@@ -250,6 +275,7 @@ Future<void> main() async {
       uploads: uploads,
       home: home,
       catalog: catalog,
+      keeper: keeper,
       tunnel: tunnel,
       messages: messages,
     ),
@@ -315,6 +341,7 @@ class YomiApp extends StatelessWidget {
     required this.uploads,
     required this.home,
     required this.catalog,
+    required this.keeper,
     required this.tunnel,
     required this.messages,
   });
@@ -334,6 +361,7 @@ class YomiApp extends StatelessWidget {
   final UploadQueue uploads;
   final HomeController home;
   final CatalogController catalog;
+  final OfflineKeeper keeper;
   final TunnelController tunnel;
   final MessagesController messages;
 
@@ -347,6 +375,7 @@ class YomiApp extends StatelessWidget {
         ChangeNotifierProvider<TunnelController>.value(value: tunnel),
         ChangeNotifierProvider<HomeController>.value(value: home),
         ChangeNotifierProvider<CatalogController>.value(value: catalog),
+        ChangeNotifierProvider<OfflineKeeper>.value(value: keeper),
         ChangeNotifierProvider<PlaybackSyncController>.value(value: sync),
         ChangeNotifierProvider<SessionController>.value(value: session),
         ChangeNotifierProvider<PlayerController>.value(value: player),
