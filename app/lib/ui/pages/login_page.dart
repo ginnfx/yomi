@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/friendly_error.dart';
+import '../../core/server_defaults.dart';
 import '../../state/session.dart';
 import '../widgets/error_view.dart';
 import '../theme.dart';
@@ -14,10 +15,10 @@ class LoginPage extends StatefulWidget {
 }
 
 class _LoginPageState extends State<LoginPage> {
-  final _server = TextEditingController();
+  final _server = TextEditingController(text: defaultServerUrl);
   final _user = TextEditingController();
   final _password = TextEditingController();
-  final _home = TextEditingController();
+  final _home = TextEditingController(text: defaultHomeServerUrl);
   bool _isBusy = false;
   bool _showPassword = false;
   FriendlyError? _error;
@@ -32,6 +33,7 @@ class _LoginPageState extends State<LoginPage> {
   }
 
   Future<void> _submit() async {
+    if (_isBusy) return;
     final session = context.read<SessionController>();
     setState(() {
       _isBusy = true;
@@ -81,7 +83,7 @@ class _LoginPageState extends State<LoginPage> {
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      'Your music. Your server.',
+                      'One account. Your music, everywhere.',
                       textAlign: TextAlign.center,
                       style: yomiText(
                         16,
@@ -91,18 +93,8 @@ class _LoginPageState extends State<LoginPage> {
                     ),
                     const SizedBox(height: 44),
                     TextField(
-                      controller: _server,
-                      keyboardType: TextInputType.url,
-                      autocorrect: false,
-                      textInputAction: TextInputAction.next,
-                      decoration: const InputDecoration(
-                        labelText: 'Server address',
-                        hintText: '100.x.x.x or 192.168.1.x',
-                      ),
-                    ),
-                    const SizedBox(height: 14),
-                    TextField(
                       controller: _user,
+                      autofillHints: const [AutofillHints.username],
                       autocorrect: false,
                       enableSuggestions: false,
                       textCapitalization: TextCapitalization.none,
@@ -112,6 +104,7 @@ class _LoginPageState extends State<LoginPage> {
                     const SizedBox(height: 14),
                     TextField(
                       controller: _password,
+                      autofillHints: const [AutofillHints.password],
                       obscureText: !_showPassword,
                       autocorrect: false,
                       enableSuggestions: false,
@@ -136,7 +129,7 @@ class _LoginPageState extends State<LoginPage> {
                       child: ExpansionTile(
                         tilePadding: EdgeInsets.zero,
                         title: Text(
-                          'Home network address (optional)',
+                          'Advanced connection settings',
                           style: yomiText(
                             14,
                             weight: FontWeight.w700,
@@ -145,6 +138,15 @@ class _LoginPageState extends State<LoginPage> {
                         ),
                         childrenPadding: const EdgeInsets.only(bottom: 6),
                         children: [
+                          TextField(
+                            controller: _server,
+                            keyboardType: TextInputType.url,
+                            autocorrect: false,
+                            decoration: const InputDecoration(
+                              labelText: 'Server address',
+                            ),
+                          ),
+                          const SizedBox(height: 14),
                           TextField(
                             controller: _home,
                             keyboardType: TextInputType.url,

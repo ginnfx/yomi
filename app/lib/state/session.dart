@@ -69,7 +69,13 @@ class SessionController extends ChangeNotifier {
     HomeProbe? probe,
     UrlProbe? urlProbe,
     LanFinder? lanFinder,
-  }) : _storage = storage ?? const FlutterSecureStorage(),
+  }) : _storage =
+           storage ??
+           const FlutterSecureStorage(
+             // The login Keychain works for locally built Mac apps without a
+             // provisioning profile; credentials still stay in Apple's Keychain.
+             mOptions: MacOsOptions(usesDataProtectionKeychain: false),
+           ),
        _connectivity = connectivity,
        _probe = probe ?? _pingProbe,
        _urlProbe = urlProbe ?? probeUrl,
@@ -181,19 +187,26 @@ class SessionController extends ChangeNotifier {
         'Enter the server address, username and password.',
       );
     }
-    await SubsonicClient(
-      baseUrl: away,
-      username: user.trim(),
-      password: password,
-    ).ping();
+    // The account works on home Wi-Fi even when Tailscale is disconnected.
+    final homeWorks =
+        home.isNotEmpty &&
+        (_connectivity == null || _connectivity.isOnWifi) &&
+        await _probe(home, user.trim(), password);
+    if (!homeWorks) {
+      await SubsonicClient(
+        baseUrl: away,
+        username: user.trim(),
+        password: password,
+      ).ping();
+    }
     _awayUrl = away;
     _homeUrl = home.isEmpty ? null : home;
     _mode = RouteMode.auto;
     _user = user.trim();
     _password = password;
     await _remember();
-    _route = ActiveRoute.away;
-    _build(away);
+    _route = homeWorks ? ActiveRoute.home : ActiveRoute.away;
+    _build(homeWorks ? home : away);
     notifyListeners();
     await refreshRoute();
   }

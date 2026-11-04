@@ -1,5 +1,7 @@
+import 'dart:math' as math;
 import 'dart:ui';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:just_audio/just_audio.dart';
@@ -59,7 +61,15 @@ class _NowPlayingPageState extends State<NowPlayingPage> {
       return const Scaffold();
     }
     final width = MediaQuery.sizeOf(context).width;
-    final coverSize = (width - kPagePadding * 2).clamp(0.0, _maxCover);
+    final height = MediaQuery.sizeOf(context).height;
+    final isMac = defaultTargetPlatform == TargetPlatform.macOS;
+    final coverSize = math.min(
+      (width - kPagePadding * 2).clamp(0.0, _maxCover),
+      isMac ? math.max(100.0, height - 400) : _maxCover,
+    );
+    final horizontalPadding = isMac
+        ? math.max(kPagePadding, (width - 620) / 2)
+        : kPagePadding;
     return TintedBackground(
       coverArtId: song.coverArtId,
       child: Scaffold(
@@ -102,7 +112,7 @@ class _NowPlayingPageState extends State<NowPlayingPage> {
                     Navigator.pop(context);
                 },
                 child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: kPagePadding),
+                  padding: EdgeInsets.symmetric(horizontal: horizontalPadding),
                   child: Column(
                     children: [
                       Row(

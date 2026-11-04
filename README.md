@@ -17,11 +17,15 @@ flutter pub get
 flutter test
 flutter run                     # debug on a connected device
 flutter build apk --release     # -> build/app/outputs/flutter-apk/app-release.apk
+flutter run -d macos             # native Mac app
 ```
 
 Sign in with the server address, username and password. An optional second address is used
 on the home Wi-Fi; if it stops answering Yomi scans the local network and updates it. The
 Connection doctor in Settings tests every saved address and lets you add backups.
+
+Build the Mac app and ZIP with `./app/scripts/build_macos.sh` from the repository root.
+See [client instructions](app/README.md) for server setup and Mac keyboard controls.
 
 ## Upload service (`server/`)
 

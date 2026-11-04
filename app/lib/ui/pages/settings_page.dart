@@ -6,6 +6,7 @@ import '../../state/session.dart';
 import '../settings/appearance_section.dart';
 import '../settings/connection_section.dart';
 import '../settings/home_layout_section.dart';
+import '../settings/listening_sync_section.dart';
 import '../settings/profile_section.dart';
 import '../settings/settings_widgets.dart';
 import '../settings/storage_section.dart';
@@ -34,6 +35,7 @@ class SettingsPage extends StatelessWidget {
           ),
           children: [
             const ProfileSection(),
+            const ListeningSyncSection(),
             const ConnectionSection(),
             const AppearanceSection(),
             const HomeLayoutSection(),
@@ -49,7 +51,7 @@ class SettingsPage extends StatelessWidget {
                     style: yomiText(15, weight: FontWeight.w700),
                   ),
                   subtitle: Text(
-                    'Removes your login from this phone. Downloads stay.',
+                    'Removes your login from this device. Downloads stay.',
                     style: yomiText(
                       12.5,
                       weight: FontWeight.w500,

@@ -15,7 +15,14 @@ class SettingsController extends ChangeNotifier {
   static Future<SettingsController> load() async =>
       SettingsController(await SharedPreferences.getInstance());
 
+  bool get syncListening => _prefs.getBool('syncListening') ?? true;
+  Future<void> setSyncListening(bool value) =>
+      _set(() => _prefs.setBool('syncListening', value));
+
   bool get wifiOnlyDownloads => _prefs.getBool('wifiOnlyDownloads') ?? true;
+  bool get cachePlayedSongs => _prefs.getBool('cachePlayedSongs') ?? true;
+  Future<void> setCachePlayedSongs(bool value) =>
+      _set(() => _prefs.setBool('cachePlayedSongs', value));
   bool get preloadNext => _prefs.getBool('preloadNext') ?? true;
   int get cacheLimitMb => _prefs.getInt('cacheLimitMb') ?? _defaultCacheMb;
   int get cacheLimitBytes => cacheLimitMb * 1024 * 1024;

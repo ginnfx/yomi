@@ -76,6 +76,11 @@ class _StorageSectionState extends State<StorageSection> {
           title: 'Playback',
           children: [
             SettingsSwitch(
+              title: 'Cache songs as you listen',
+              value: settings.cachePlayedSongs,
+              onChanged: settings.setCachePlayedSongs,
+            ),
+            SettingsSwitch(
               title: 'Preload next songs',
               value: settings.preloadNext,
               onChanged: settings.setPreloadNext,

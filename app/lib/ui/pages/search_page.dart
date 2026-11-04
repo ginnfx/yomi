@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -10,6 +11,7 @@ import '../theme.dart';
 import '../widgets/album_card.dart';
 import '../widgets/async_section.dart';
 import '../widgets/cover_art.dart';
+import '../widgets/compact_music_grid.dart';
 import '../widgets/error_view.dart';
 import '../widgets/shimmer.dart';
 import '../widgets/song_tile.dart';
@@ -159,21 +161,35 @@ class _SearchPageState extends State<SearchPage> {
               load: () => client.randomSongs(size: 8),
               builder: (context, songs) => Padding(
                 padding: const EdgeInsets.symmetric(horizontal: kPagePadding),
-                child: GridView.count(
-                  crossAxisCount: 2,
-                  shrinkWrap: true,
-                  physics: const NeverScrollableScrollPhysics(),
-                  mainAxisSpacing: 12,
-                  crossAxisSpacing: 12,
-                  childAspectRatio: 1.45,
-                  children: [
-                    for (var i = 0; i < songs.length; i++)
-                      _BrowseTile(
-                        song: songs[i],
-                        onTap: () => player.playQueue(songs, startIndex: i),
+                child: defaultTargetPlatform == TargetPlatform.macOS
+                    ? CompactMusicGrid(
+                        items: [
+                          for (var i = 0; i < songs.length; i++)
+                            MusicShortcut(
+                              title: songs[i].title,
+                              subtitle: songs[i].artist,
+                              coverArtId: songs[i].coverArtId,
+                              onTap: () =>
+                                  player.playQueue(songs, startIndex: i),
+                            ),
+                        ],
+                      )
+                    : GridView.count(
+                        crossAxisCount: 2,
+                        shrinkWrap: true,
+                        physics: const NeverScrollableScrollPhysics(),
+                        mainAxisSpacing: 12,
+                        crossAxisSpacing: 12,
+                        childAspectRatio: 1.45,
+                        children: [
+                          for (var i = 0; i < songs.length; i++)
+                            _BrowseTile(
+                              song: songs[i],
+                              onTap: () =>
+                                  player.playQueue(songs, startIndex: i),
+                            ),
+                        ],
                       ),
-                  ],
-                ),
               ),
             ),
           ] else if (isEmpty)

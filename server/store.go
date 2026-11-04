@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
+	"syscall"
 	"unicode"
 )
 
@@ -26,6 +28,7 @@ var (
 	errNoUniqueName = errors.New("could not find a free file name")
 	userPattern     = regexp.MustCompile(`^[a-z0-9._-]+$`)
 	allowedExt      = map[string]bool{".mp3": true, ".flac": true, ".m4a": true, ".aac": true, ".ogg": true, ".opus": true, ".wav": true}
+	publicationMu   sync.Mutex
 )
 
 // sanitizeUser lowercases and validates a user name for use as a folder name.
@@ -117,7 +120,7 @@ func (s Store) Save(user, name string, r io.Reader) (string, error) {
 	if err := tmp.Close(); err != nil {
 		return "", err
 	}
-	if err := os.Chmod(tmpPath, 0o666); err != nil {
+	if err := os.Chmod(tmpPath, 0o666); err != nil && !errors.Is(err, syscall.EPERM) && !errors.Is(err, syscall.EOPNOTSUPP) {
 		return "", err
 	}
 	return linkUnique(tmpPath, dir, safeName, safeUser)
@@ -125,6 +128,15 @@ func (s Store) Save(user, name string, r io.Reader) (string, error) {
 
 // linkUnique atomically publishes tmpPath as dir/name, adding " (n)" if the name is taken.
 func linkUnique(tmpPath, dir, name, user string) (string, error) {
+	return publishUnique(tmpPath, dir, name, user, os.Link)
+}
+
+// One uploader process owns the library. Serialize publication so FAT32/FUSE can
+// use a same-directory atomic rename without overwriting another upload. Native
+// filesystems retain the hard-link no-replace behavior, including across processes.
+func publishUnique(tmpPath, dir, name, user string, link func(string, string) error) (string, error) {
+	publicationMu.Lock()
+	defer publicationMu.Unlock()
 	ext := filepath.Ext(name)
 	stem := strings.TrimSuffix(name, ext)
 	for attempt := 0; attempt < maxDuplicateTry; attempt++ {
@@ -132,8 +144,20 @@ func linkUnique(tmpPath, dir, name, user string) (string, error) {
 		if attempt > 0 {
 			candidate = fmt.Sprintf("%s (%d)%s", stem, attempt+1, ext)
 		}
-		err := os.Link(tmpPath, filepath.Join(dir, candidate))
+		destination := filepath.Join(dir, candidate)
+		err := link(tmpPath, destination)
 		if err == nil {
+			return filepath.Join(user, candidate), nil
+		}
+		if errors.Is(err, syscall.EPERM) || errors.Is(err, syscall.EOPNOTSUPP) || errors.Is(err, syscall.ENOSYS) {
+			if _, statErr := os.Lstat(destination); statErr == nil {
+				continue
+			} else if !errors.Is(statErr, os.ErrNotExist) {
+				return "", statErr
+			}
+			if err := os.Rename(tmpPath, destination); err != nil {
+				return "", err
+			}
 			return filepath.Join(user, candidate), nil
 		}
 		if !errors.Is(err, os.ErrExist) {

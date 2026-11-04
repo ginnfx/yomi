@@ -6,6 +6,7 @@ import 'package:http/http.dart' as http;
 
 import 'lyrics.dart';
 import 'models.dart';
+import 'saved_play_queue.dart';
 
 const String _apiVersion = '1.16.1';
 const String _clientName = 'Yomi';
@@ -100,12 +101,19 @@ class SubsonicClient {
     String endpoint, [
     Map<String, Object?> params = const {},
     Duration? timeout,
+    bool post = false,
   ]) async {
     final http.Response response;
     try {
-      response = await _http
-          .get(_uri(endpoint, params))
-          .timeout(timeout ?? _requestTimeout);
+      final uri = _uri(endpoint, params);
+      final request = post
+          ? _http.post(
+              uri.replace(query: ''),
+              headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+              body: uri.query,
+            )
+          : _http.get(uri);
+      response = await request.timeout(timeout ?? _requestTimeout);
     } on Exception catch (error) {
       throw SubsonicException(
         'Cannot reach the server. ($error)',
@@ -339,6 +347,33 @@ class SubsonicClient {
           (l['value'] as String?)?.trim() ?? '',
         ),
     ], isSynced: isSynced);
+  }
+
+  Future<SavedPlayQueue?> savedPlayQueue() async {
+    final body = await _get('getPlayQueue');
+    return SavedPlayQueue.fromJson(body['playQueue'] as Map<String, dynamic>?);
+  }
+
+  Future<void> savePlayQueue({
+    required List<Song> songs,
+    required int index,
+    required Duration position,
+    required String deviceId,
+  }) {
+    if (songs.isEmpty || index < 0 || index >= songs.length) {
+      return Future.value();
+    }
+    return _get(
+      'savePlayQueue',
+      {
+        'id': songs.map((song) => song.id),
+        'current': songs[index].id,
+        'position': position.inMilliseconds.clamp(0, 1 << 53),
+        'c': deviceId,
+      },
+      null,
+      true,
+    );
   }
 
   Future<void> startScan() => _get('startScan');

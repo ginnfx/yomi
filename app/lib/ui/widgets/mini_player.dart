@@ -85,7 +85,14 @@ class MiniPlayer extends StatelessWidget {
                             ],
                           ),
                         ),
+                        if (MediaQuery.sizeOf(context).width >= 900)
+                          IconButton(
+                            tooltip: 'Previous song',
+                            onPressed: player.previous,
+                            icon: const Icon(Icons.skip_previous_rounded),
+                          ),
                         IconButton(
+                          tooltip: player.isPlaying ? 'Pause' : 'Play',
                           iconSize: 34,
                           onPressed: () {
                             HapticFeedback.lightImpact();
@@ -103,6 +110,12 @@ class MiniPlayer extends StatelessWidget {
                             ),
                           ),
                         ),
+                        if (MediaQuery.sizeOf(context).width >= 900)
+                          IconButton(
+                            tooltip: 'Next song',
+                            onPressed: player.next,
+                            icon: const Icon(Icons.skip_next_rounded),
+                          ),
                       ],
                     ),
                   ),
