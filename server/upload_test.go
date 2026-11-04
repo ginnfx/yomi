@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 var (
@@ -179,8 +180,15 @@ func TestSanitizeNameKeepsUnicodeTitles(t *testing.T) {
 	if err != nil || got != "全ての人の魂の戦い.mp3" {
 		t.Fatalf("got %q, %v", got, err)
 	}
-	if _, err := sanitizeName(strings.Repeat("a", 200) + ".mp3"); err == nil {
-		t.Fatal("overlong names must be rejected")
+	for _, name := range []string{strings.Repeat("a", 200) + ".mp3", strings.Repeat("全", 100) + ".m4a"} {
+		got, err := sanitizeName(name)
+		if err != nil || len(got) > maxNameBytes || !utf8.ValidString(got) || filepath.Ext(got) != filepath.Ext(name) {
+			t.Fatalf("long name not safely shortened: %q, %v", got, err)
+		}
+		other, _ := sanitizeName("b" + name)
+		if got == other {
+			t.Fatal("distinct names must stay distinct")
+		}
 	}
 }
 
