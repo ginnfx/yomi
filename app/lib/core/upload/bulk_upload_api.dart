@@ -27,6 +27,11 @@ class UploadRouteMissing implements Exception {
   const UploadRouteMissing();
 }
 
+/// This is the read-only backup server, which can't take uploads.
+class UploadReadOnly implements Exception {
+  const UploadReadOnly();
+}
+
 class UploadAuthFailed implements Exception {
   const UploadAuthFailed();
 }
@@ -102,6 +107,11 @@ class BulkUploadApi implements UploadTransport {
       throw const UploadUnreachable();
     } on TimeoutException {
       throw const UploadUnreachable();
+    } on FormatException {
+      // Something else answered, such as a Wi-Fi login page.
+      throw const UploadUnreachable();
+    } on TypeError {
+      throw const UploadUnreachable();
     } finally {
       client.close(force: true);
     }
@@ -141,6 +151,11 @@ class BulkUploadApi implements UploadTransport {
       throw const UploadUnreachable();
     } on TimeoutException {
       throw const UploadUnreachable();
+    } on FormatException {
+      // Something else answered, such as a Wi-Fi login page.
+      throw const UploadUnreachable();
+    } on TypeError {
+      throw const UploadUnreachable();
     } finally {
       client.close(force: true);
     }
@@ -161,6 +176,8 @@ class BulkUploadApi implements UploadTransport {
         );
       case HttpStatus.unauthorized:
         throw const UploadAuthFailed();
+      case HttpStatus.forbidden:
+        throw const UploadReadOnly();
       case HttpStatus.insufficientStorage:
         throw const UploadStorageFull();
       case HttpStatus.unprocessableEntity:

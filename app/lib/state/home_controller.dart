@@ -35,6 +35,7 @@ class HomeController extends ChangeNotifier {
   String? _builtFor;
   bool _isLoading = false;
   Future<void>? _inFlight;
+  int _generation = 0;
   Object? _error;
 
   bool get isLoading => _isLoading;
@@ -76,6 +77,9 @@ class HomeController extends ChangeNotifier {
     if (client == null) {
       _shelves = const [];
       _builtFor = null;
+      _generation++;
+      // The next person to sign in on this device shouldn't see this Home.
+      unawaited(_deleteCache());
       notifyListeners();
     } else if (isNewClient) {
       unawaited(refreshIfDue());
@@ -100,6 +104,7 @@ class HomeController extends ChangeNotifier {
   Future<void> _rebuild() async {
     final client = _client;
     if (client == null) return;
+    final generation = _generation;
     _isLoading = true;
     _error = null;
     notifyListeners();
@@ -109,6 +114,8 @@ class HomeController extends ChangeNotifier {
         client.recentSongs(count: _recentCount),
         client.starredSongs(),
       ]);
+      if (generation != _generation)
+        return; // Signed out while this was loading.
       final key = _currentKey;
       final order = settings.hasCustomHomeOrder
           ? [
@@ -134,6 +141,14 @@ class HomeController extends ChangeNotifier {
     } finally {
       _isLoading = false;
       notifyListeners();
+    }
+  }
+
+  Future<void> _deleteCache() async {
+    try {
+      if (await cacheFile.exists()) await cacheFile.delete();
+    } on FileSystemException catch (error) {
+      debugPrint('Could not delete saved Home: $error');
     }
   }
 

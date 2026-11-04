@@ -4,8 +4,10 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 export PATH="$PATH:$(go env GOPATH)/bin"
-command -v gomobile >/dev/null || go install golang.org/x/mobile/cmd/gomobile@latest
-command -v gobind >/dev/null || go install golang.org/x/mobile/cmd/gobind@latest
+# Tools at the version go.mod pins, because release builds run close to the signing key.
+MOBILE_VERSION=$(go list -m -f '{{.Version}}' golang.org/x/mobile)
+command -v gomobile >/dev/null || go install "golang.org/x/mobile/cmd/gomobile@$MOBILE_VERSION"
+command -v gobind >/dev/null || go install "golang.org/x/mobile/cmd/gobind@$MOBILE_VERSION"
 # Same SDK the Flutter build uses, when nothing else says where it is.
 if [ -z "${ANDROID_HOME:-}" ] && [ -f ../app/android/local.properties ]; then
   ANDROID_HOME=$(sed -n 's/^sdk\.dir=//p' ../app/android/local.properties)

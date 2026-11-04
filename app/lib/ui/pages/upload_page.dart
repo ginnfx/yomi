@@ -16,6 +16,8 @@ String _pauseMessage(UploadPause pause) => switch (pause) {
   UploadPause.storageFull => "The server's storage is full.",
   UploadPause.needsFolderAccess =>
     'Yomi lost access to these files. Choose the folder again to continue.',
+  UploadPause.onBackupServer =>
+    "You're on the backup server. Uploads continue when the main one is back.",
   UploadPause.serverNeedsUpdate =>
     'The server needs updating before it can take bulk uploads.',
 };

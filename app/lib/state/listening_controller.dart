@@ -165,6 +165,8 @@ class ListeningController {
       try {
         for (final id in oldestFirst) {
           if (total <= kAutoDownloadCapBytes) break;
+          // The user may have saved it by hand while the last eviction ran.
+          if (!ledger.isAuto(id)) continue;
           total -= downloads.bytesOf(id);
           ledger.markEvicted(id, _now());
           await downloads.evict(id);

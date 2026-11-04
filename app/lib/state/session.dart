@@ -18,6 +18,7 @@ const Duration _routeDebounce = Duration(milliseconds: 700);
 const Duration _reachTimeout = Duration(seconds: 4);
 const Duration _reachRetryEvery = Duration(seconds: 15);
 const Duration _primaryRetryEvery = Duration(seconds: 60);
+const Duration _roleRetryAfter = Duration(seconds: 15);
 const String _awayKey = 'server_url';
 const String _homeKey = 'home_url';
 const String _extraKey = 'extra_urls';
@@ -105,6 +106,7 @@ class SessionController extends ChangeNotifier {
   bool _isOnTunnel = false;
   bool _isOnReplica = false;
   Timer? _primaryRetry;
+  Timer? _roleRetry;
   bool _isScanning = false;
   DateTime? _lastScan;
   List<String> _extraUrls = const [];
@@ -498,6 +500,12 @@ class SessionController extends ChangeNotifier {
   Future<void> _refreshRole(String url) async {
     final isReplica = await _roleProbe(url, _uploadPort(url));
     if (url != serverUrl) return; // Moved on while this was being asked.
+    _roleRetry?.cancel();
+    if (isReplica == null) {
+      // Couldn't tell, so keep what was known and ask again shortly.
+      _roleRetry = Timer(_roleRetryAfter, () => unawaited(_refreshRole(url)));
+      return;
+    }
     if (isReplica != _isOnReplica) {
       _isOnReplica = isReplica;
       notifyListeners();
@@ -517,7 +525,8 @@ class SessionController extends ChangeNotifier {
     for (final url in candidateUrls) {
       if (url == serverUrl) continue;
       final result = await _urlProbe(url, _user, _password);
-      if (!result.isOk || await _roleProbe(url, _uploadPort(url))) continue;
+      if (!result.isOk) continue;
+      if (await _roleProbe(url, _uploadPort(url)) != false) continue;
       _isOnReplica = false;
       _isOnBackup = url != _awayUrl && url != _homeUrl;
       _isOnTunnel = false;
@@ -532,6 +541,7 @@ class SessionController extends ChangeNotifier {
   @override
   void dispose() {
     _primaryRetry?.cancel();
+    _roleRetry?.cancel();
     _debounce?.cancel();
     _reachRetry?.cancel();
     _connectivity?.removeListener(_onNetworkChanged);

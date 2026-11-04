@@ -350,6 +350,10 @@ func TestSeedIndexesExistingFilesAndClearsStaleTemps(t *testing.T) {
 	os.WriteFile(filepath.Join(root, "keli", "cover.jpg"), []byte("img"), 0o666)
 	stale := filepath.Join(root, "keli", ".upload-123.tmp")
 	os.WriteFile(stale, []byte("partial"), 0o666)
+	longAgo := time.Now().Add(-2 * staleTempAfter)
+	os.Chtimes(stale, longAgo, longAgo)
+	live := filepath.Join(root, "keli", ".upload-456.tmp")
+	os.WriteFile(live, []byte("in progress"), 0o666)
 	index, _ := openHashIndex(root, filepath.Join(t.TempDir(), "index.jsonl"))
 
 	index.Seed()
@@ -363,6 +367,9 @@ func TestSeedIndexesExistingFilesAndClearsStaleTemps(t *testing.T) {
 	}
 	if _, err := os.Stat(stale); !os.IsNotExist(err) {
 		t.Fatal("stale temp file was left behind")
+	}
+	if _, err := os.Stat(live); err != nil {
+		t.Fatal("removed a temp file that may be an upload in progress")
 	}
 }
 
@@ -445,5 +452,76 @@ func TestDifferentPasswordIsNotServedFromCache(t *testing.T) {
 	cached.Verify(context.Background(), url.Values{"u": {"keli"}, "p": {"other"}})
 	if inner.calls.Load() != 2 {
 		t.Fatalf("calls = %d", inner.calls.Load())
+	}
+}
+
+func TestRequestErrorsNeverContainCredentials(t *testing.T) {
+	dead := httptest.NewServer(http.NotFoundHandler())
+	address := dead.URL
+	dead.Close()
+	auth := newNavidromeAuth(address)
+
+	_, err := auth.Verify(context.Background(), url.Values{"u": {"keli"}, "p": {"hunter2"}, "t": {"tok"}, "s": {"salty"}})
+
+	if err == nil {
+		t.Fatal("expected an error")
+	}
+	for _, secret := range []string{"hunter2", "tok", "salty"} {
+		if strings.Contains(err.Error(), secret) {
+			t.Fatalf("error exposes %q: %v", secret, err)
+		}
+	}
+}
+
+func TestWrongPasswordsCannotLockOutSomeoneAlreadyLoggedIn(t *testing.T) {
+	dir := t.TempDir()
+	index, _ := openHashIndex(dir, filepath.Join(t.TempDir(), "i.jsonl"))
+	server := newServer(Config{MusicDir: dir, MaxFileBytes: 1 << 10}, newCachedAuth(fakeAuth{}), nil, index)
+	ts := httptest.NewServer(server.routes())
+	defer ts.Close()
+	check := func(password string) int {
+		resp, err := http.Post(ts.URL+"/v1/check?u=keli&p="+password, "application/json", strings.NewReader(`{"hashes":[]}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		return resp.StatusCode
+	}
+	if code := check("good"); code != http.StatusOK {
+		t.Fatalf("login = %d", code)
+	}
+	for range maxFailedLogins + 1 {
+		check("guess")
+	}
+	if code := check("guess"); code != http.StatusTooManyRequests {
+		t.Fatalf("attacker = %d, want locked out", code)
+	}
+	if code := check("good"); code != http.StatusOK {
+		t.Fatalf("real user = %d, want still working", code)
+	}
+}
+
+func TestGoodLoginsDoNotClearAttemptsAgainstTheAccount(t *testing.T) {
+	dir := t.TempDir()
+	index, _ := openHashIndex(dir, filepath.Join(t.TempDir(), "i.jsonl"))
+	server := newServer(Config{MusicDir: dir, MaxFileBytes: 1 << 10}, newCachedAuth(fakeAuth{}), nil, index)
+	ts := httptest.NewServer(server.routes())
+	defer ts.Close()
+	check := func(password string) int {
+		resp, err := http.Post(ts.URL+"/v1/check?u=keli&p="+password, "application/json", strings.NewReader(`{"hashes":[]}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		return resp.StatusCode
+	}
+	for i := range maxFailedLogins {
+		check("guess")
+		if i < maxFailedLogins-1 {
+			check("good") // The victim's app polling between guesses.
+		}
+	}
+	if code := check("guess"); code != http.StatusTooManyRequests {
+		t.Fatalf("code = %d: polling reset the guess counter", code)
 	}
 }

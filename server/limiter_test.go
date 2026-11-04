@@ -27,7 +27,7 @@ func TestLimiterLocksAfterRepeatedFailuresAndRecovers(t *testing.T) {
 	}
 }
 
-func TestLimiterForgetsOldFailuresAndResetsOnSuccess(t *testing.T) {
+func TestLimiterForgetsOldFailures(t *testing.T) {
 	now := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
 	l := newLoginLimiter()
 	l.now = func() time.Time { return now }
@@ -39,15 +39,6 @@ func TestLimiterForgetsOldFailuresAndResetsOnSuccess(t *testing.T) {
 	l.Fail("a")
 	if l.Blocked("a") {
 		t.Fatal("failures outside the window must not count")
-	}
-
-	for i := 0; i < maxFailedLogins-1; i++ {
-		l.Fail("b")
-	}
-	l.Reset("b")
-	l.Fail("b")
-	if l.Blocked("b") {
-		t.Fatal("reset must clear the counter")
 	}
 }
 

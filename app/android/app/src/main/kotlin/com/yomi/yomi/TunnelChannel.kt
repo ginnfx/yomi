@@ -26,8 +26,9 @@ class TunnelChannel(messenger: BinaryMessenger) {
             try {
                 val value = run(call)
                 mainThread.post { result.success(value) }
-            } catch (error: UnsatisfiedLinkError) {
+            } catch (error: LinkageError) {
                 // Devices with a processor the bridge wasn't built for, such as x86 emulators.
+                // The first call throws UnsatisfiedLinkError, later ones NoClassDefFoundError.
                 mainThread.post { result.error("unsupported", error.message, null) }
             } catch (error: Exception) {
                 mainThread.post { result.error("tunnel", error.message, null) }

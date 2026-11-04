@@ -146,6 +146,21 @@ void main() {
       expect(controller.thread.map((m) => m.text), ['hi']);
     });
 
+    test(
+      'a message from a friend is not lost when sending right after it',
+      () async {
+        await attached();
+        await controller.openThread('sam');
+        transport.receive('from sam, not polled yet');
+        await controller.send(text: 'from me');
+        await controller.pollThreadForTest();
+        expect(controller.thread.map((m) => m.text), [
+          'from sam, not polled yet',
+          'from me',
+        ]);
+      },
+    );
+
     test('a failed send reports why and returns false', () async {
       await attached();
       await controller.openThread('sam');

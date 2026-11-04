@@ -359,6 +359,21 @@ void main() {
       expect(harness.fetcher.fetched.where((id) => id == 's1'), hasLength(1));
     });
 
+    test('saving by hand during eviction protects the song', () async {
+      harness.fetcher.bytes = kAutoDownloadCapBytes ~/ 2 + 1;
+      for (var i = 0; i < kRepeatPlays; i++) {
+        await harness.playFully(song);
+      }
+      await harness.settle();
+      harness.downloads.enqueue([song]);
+      harness.now = harness.now.add(const Duration(hours: 1));
+      for (var i = 0; i < kRepeatPlays; i++) {
+        await harness.playFully(otherSong);
+      }
+      await harness.settle();
+      expect(harness.downloads.isDownloaded('s1'), isTrue);
+    });
+
     test('a manual download is never evicted', () async {
       harness.fetcher.bytes = kAutoDownloadCapBytes + 1;
       harness.downloads.enqueue([song]);

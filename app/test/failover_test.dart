@@ -391,6 +391,34 @@ void main() {
       expect(session.client.isReadOnly, isFalse);
     });
 
+    test(
+      'an unclear answer does not make the backup look like the main server',
+      () async {
+        FlutterSecureStorage.setMockInitialValues({
+          'server_url': replica,
+          'username': 'u',
+          'password': 'p',
+        });
+        var answer = true as bool?;
+        final session = SessionController(
+          probe: (url, user, password) async => true,
+          urlProbe: (url, user, password) async =>
+              ProbeResult(url: url, isOk: true, elapsed: Duration.zero),
+          roleProbe: (url, port) async => answer,
+        );
+        addTearDown(session.dispose);
+        await session.restore();
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+        expect(session.isOnReplica, isTrue);
+
+        answer = null;
+        session.useUrl(replica);
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+        expect(session.isOnReplica, isTrue);
+        expect(session.client.isReadOnly, isTrue);
+      },
+    );
+
     test('a healthy main server is never read-only', () async {
       final session = await start({primary});
       expect(session.serverUrl, primary);

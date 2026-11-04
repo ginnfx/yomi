@@ -370,6 +370,17 @@ void main() {
       expect(home.error, isNotNull);
     });
 
+    test('signing out clears Home, even if a rebuild was running', () async {
+      final home = await controller();
+      home.attach(client());
+      final running = home.refresh();
+      home.attach(null);
+      await running;
+      expect(home.shelves, isEmpty);
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+      expect(File('${dir.path}/home.json').existsSync(), isFalse);
+    });
+
     test('hidden shelves stay hidden', () async {
       final home = await controller();
       home.attach(client());

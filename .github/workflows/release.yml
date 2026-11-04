@@ -33,6 +33,8 @@ jobs:
         with:
           go-version-file: tailscale_bridge/go.mod
           cache: false
+      - name: Build Tailscale bridge
+        run: tailscale_bridge/build.sh android
       - name: Restore signing key
         env:
           KEYSTORE_BASE64: ${{ secrets.YOMI_KEYSTORE_BASE64 }}
@@ -71,6 +73,8 @@ jobs:
         with:
           go-version-file: tailscale_bridge/go.mod
           cache: false
+      - name: Build Tailscale bridge
+        run: tailscale_bridge/build.sh apple
       - name: Build Mac app
         env:
           TAG: ${{ github.ref_name }}

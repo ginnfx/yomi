@@ -13,9 +13,19 @@ import (
 )
 
 const (
-	authCacheFor     = 5 * time.Minute
+	authCacheFor     = time.Minute
 	authCacheEntries = 64
 )
+
+// redactURL removes the URL from a request error. Go puts the whole URL in the message,
+// and Subsonic logins travel in the query string, so logging it would log passwords.
+func redactURL(err error) error {
+	var urlErr *url.Error
+	if errors.As(err, &urlErr) {
+		return fmt.Errorf("%s request failed: %w", urlErr.Op, urlErr.Err)
+	}
+	return err
+}
 
 var errUnauthorized = errors.New("invalid username or password")
 
@@ -53,7 +63,7 @@ func (a NavidromeAuth) Verify(ctx context.Context, query url.Values) (string, er
 	}
 	resp, err := a.Client.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("navidrome unreachable: %w", err)
+		return "", fmt.Errorf("navidrome unreachable: %w", redactURL(err))
 	}
 	defer resp.Body.Close()
 	var body struct {
@@ -89,14 +99,27 @@ func newCachedAuth(inner Authenticator) *cachedAuth {
 	return &cachedAuth{inner: inner, now: time.Now, valid: make(map[[sha256.Size]byte]cachedLogin)}
 }
 
-func (a *cachedAuth) Verify(ctx context.Context, query url.Values) (string, error) {
-	key := sha256.Sum256([]byte(query.Get("u") + "\x00" + query.Get("t") + "\x00" + query.Get("s") + "\x00" + query.Get("p")))
+func authCacheKey(query url.Values) [sha256.Size]byte {
+	return sha256.Sum256([]byte(query.Get("u") + "\x00" + query.Get("t") + "\x00" + query.Get("s") + "\x00" + query.Get("p")))
+}
+
+// RecentlyVerified reports a login that passed moments ago. These skip the lockout, so
+// someone guessing a friend's password can't lock that friend out while they're listening.
+func (a *cachedAuth) RecentlyVerified(query url.Values) (string, bool) {
 	a.mu.Lock()
-	login, ok := a.valid[key]
-	a.mu.Unlock()
-	if ok && a.now().Before(login.expires) {
-		return login.user, nil
+	defer a.mu.Unlock()
+	login, ok := a.valid[authCacheKey(query)]
+	if !ok || !a.now().Before(login.expires) {
+		return "", false
 	}
+	return login.user, true
+}
+
+func (a *cachedAuth) Verify(ctx context.Context, query url.Values) (string, error) {
+	if user, ok := a.RecentlyVerified(query); ok {
+		return user, nil
+	}
+	key := authCacheKey(query)
 	user, err := a.inner.Verify(ctx, query)
 	if err != nil {
 		return "", err

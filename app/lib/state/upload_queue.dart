@@ -108,6 +108,9 @@ enum UploadPause {
   storageFull,
   needsFolderAccess,
 
+  /// Connected to the read-only backup server. Clears once the main one is back.
+  onBackupServer,
+
   /// The server predates bulk uploads. Sending thousands of files the old way
   /// would run a full library scan for each one, so the queue waits instead.
   serverNeedsUpdate,
@@ -481,6 +484,9 @@ class UploadQueue extends ChangeNotifier {
     } on UploadAuthFailed {
       _pause = UploadPause.signInAgain;
       _items[item.path] = item.copyWith(state: UploadState.ready);
+    } on UploadReadOnly {
+      _pause = UploadPause.onBackupServer;
+      _items[item.path] = item.copyWith(state: UploadState.ready);
     } on UploadStorageFull {
       _pause = UploadPause.storageFull;
       _items[item.path] = item.copyWith(state: UploadState.ready);
@@ -492,6 +498,10 @@ class UploadQueue extends ChangeNotifier {
       debugPrint('Cannot read ${item.path}: $error');
       _pause = UploadPause.needsFolderAccess;
       _items[item.path] = item.copyWith(state: UploadState.ready);
+    } on Object catch (error) {
+      // Nothing unexpected may strand a file as "uploading" or end this worker.
+      debugPrint('Unexpected upload failure for ${item.name}: $error');
+      _retryOrFail(item, 'Something went wrong sending this file.');
     } finally {
       _progress.remove(item.path);
       _changed(saveNow: true);
@@ -527,9 +537,15 @@ class UploadQueue extends ChangeNotifier {
 
   void _scheduleResumeIfWaiting() {
     _resumeTimer?.cancel();
-    if (_pause != UploadPause.waitingForServer || _isDisposed) return;
+    final canClearByItself =
+        _pause == UploadPause.waitingForServer ||
+        _pause == UploadPause.onBackupServer;
+    if (!canClearByItself || _isDisposed) return;
     _resumeTimer = Timer(retryAfterUnreachable, () {
-      if (_pause == UploadPause.waitingForServer) resume();
+      if (_pause == UploadPause.waitingForServer ||
+          _pause == UploadPause.onBackupServer) {
+        resume();
+      }
     });
   }
 

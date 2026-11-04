@@ -56,10 +56,3 @@ func (l *loginLimiter) Fail(user string) {
 	}
 	l.entries[key] = entry
 }
-
-// Reset clears the user's failures after a successful login.
-func (l *loginLimiter) Reset(user string) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	delete(l.entries, limiterKey(user))
-}

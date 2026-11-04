@@ -14,9 +14,14 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 )
 
-const maxIndexLineBytes = 8 << 10
+const (
+	maxIndexLineBytes = 8 << 10
+	// A temp file this long untouched belongs to a crash, not to an upload in progress.
+	staleTempAfter = time.Hour
+)
 
 // indexEntry records one stored file. Path is relative to the music folder.
 type indexEntry struct {
@@ -140,10 +145,8 @@ func (i *HashIndex) Seed() {
 		if entry.IsDir() {
 			return nil
 		}
-		if isStaleTempFile(entry.Name()) {
-			if err := os.Remove(path); err != nil {
-				log.Printf("index: could not remove %s: %v", path, err)
-			}
+		if isTempFile(entry.Name()) {
+			removeIfStale(path, entry)
 			return nil
 		}
 		if !allowedExt[strings.ToLower(filepath.Ext(entry.Name()))] {
@@ -178,8 +181,18 @@ func (i *HashIndex) seedFile(path, relative string) {
 	}
 }
 
-func isStaleTempFile(name string) bool {
+func isTempFile(name string) bool {
 	return strings.HasPrefix(name, tempFilePrefix) && strings.HasSuffix(name, tempFileSuffix)
+}
+
+func removeIfStale(path string, entry fs.DirEntry) {
+	info, err := entry.Info()
+	if err != nil || time.Since(info.ModTime()) < staleTempAfter {
+		return
+	}
+	if err := os.Remove(path); err != nil {
+		log.Printf("index: could not remove %s: %v", path, err)
+	}
 }
 
 func hashFile(path string) (string, int64, error) {

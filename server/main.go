@@ -79,7 +79,7 @@ func navidromeScan(baseURL string) func(context.Context, url.Values) {
 		}
 		resp, err := client.Do(req)
 		if err != nil {
-			log.Printf("startScan: %v", err)
+			log.Printf("startScan: %v", redactURL(err))
 			return
 		}
 		resp.Body.Close()

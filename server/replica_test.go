@@ -116,6 +116,32 @@ func TestDatabaseWaitsUntilEveryFileArrived(t *testing.T) {
 	}
 }
 
+func TestOneBadFileDoesNotStopTheRest(t *testing.T) {
+	world := newReplicaWorld(t)
+	world.addToPrimary(t, "keli/a-bad.mp3", mp3Bytes)
+	world.addToPrimary(t, "keli/b-good.mp3", flacBytes)
+	os.WriteFile(filepath.Join(world.primary.Config.MusicDir, "keli/a-bad.mp3"), []byte("changed"), 0o666)
+
+	err := world.sync.Sync(context.Background())
+
+	if err == nil || world.applied != 0 {
+		t.Fatalf("err = %v, applied = %d", err, world.applied)
+	}
+	if _, statErr := os.Stat(filepath.Join(world.root, "keli/b-good.mp3")); statErr != nil {
+		t.Fatal("a later file was held back by an earlier failure")
+	}
+}
+
+func TestReplicaPasswordIsNeverSent(t *testing.T) {
+	login := tokenLogin("keli", "hunter2")
+	if login.Get("p") != "" || strings.Contains(login.Encode(), "hunter2") {
+		t.Fatalf("login = %v", login)
+	}
+	if login.Get("t") == "" || login.Get("s") == "" {
+		t.Fatalf("login = %v", login)
+	}
+}
+
 func TestNotADatabaseIsRefused(t *testing.T) {
 	world := newReplicaWorld(t)
 	dir := world.primary.Backups.Dir

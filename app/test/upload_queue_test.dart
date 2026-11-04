@@ -300,6 +300,36 @@ void main() {
       queue.dispose();
     });
 
+    test('the backup server pauses uploads rather than failing them', () async {
+      song('a.mp3', 'aaa');
+      transport.failPut = (_) => const UploadReadOnly();
+      final queue = newQueue()..attach(transport);
+      await queue.addFolder(music.path);
+      await settle(queue);
+      expect(queue.pause, UploadPause.onBackupServer);
+      expect(queue.count(UploadState.failed), 0);
+
+      transport.failPut = null;
+      for (var i = 0; i < 200 && transport.uploaded.isEmpty; i++) {
+        await Future<void>.delayed(const Duration(milliseconds: 5));
+      }
+      expect(transport.uploaded, ['a.mp3']);
+      queue.dispose();
+    });
+
+    test('an unexpected error cannot strand a file as uploading', () async {
+      song('a.mp3', 'aaa');
+      song('b.mp3', 'bbb');
+      transport.failPut = (name) => name == 'a.mp3' ? _StrangeFailure() : null;
+      final queue = newQueue()..attach(transport);
+      await queue.addFolder(music.path);
+      await settle(queue);
+      expect(transport.uploaded, ['b.mp3']);
+      expect(queue.count(UploadState.uploading), 0);
+      expect(queue.count(UploadState.failed), 1);
+      queue.dispose();
+    });
+
     test('stops and says so when storage is full', () async {
       song('a.mp3', 'aaa');
       transport.failPut = (_) => const UploadStorageFull();
@@ -399,6 +429,8 @@ void main() {
     expect(hasUploadExtension('/a/noext'), isFalse);
   });
 }
+
+class _StrangeFailure implements Exception {}
 
 String _itemJson(String path, String state, String sha) =>
     '{"path":"$path","name":"a.mp3","state":"$state","facts":{"sha256":"$sha"}}';

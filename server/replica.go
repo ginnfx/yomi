@@ -3,6 +3,8 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/md5" //nolint:gosec // The Subsonic API defines its token this way.
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -174,7 +176,7 @@ type ReplicaSync struct {
 func newReplicaSync(cfg Config, index *HashIndex) *ReplicaSync {
 	return &ReplicaSync{
 		PrimaryURL:   strings.TrimRight(cfg.PrimaryURL, "/"),
-		Login:        url.Values{"u": {cfg.ReplicaUser}, "p": {cfg.ReplicaPassword}},
+		Login:        tokenLogin(cfg.ReplicaUser, cfg.ReplicaPassword),
 		Root:         cfg.MusicDir,
 		Index:        index,
 		DatabaseFile: cfg.ReplicaDatabase,
@@ -198,11 +200,22 @@ func newReplicaSync(cfg Config, index *HashIndex) *ReplicaSync {
 	}
 }
 
+// tokenLogin uses Subsonic's salted token, so the password itself never travels.
+func tokenLogin(user, password string) url.Values {
+	saltBytes := make([]byte, 8)
+	if _, err := rand.Read(saltBytes); err != nil {
+		log.Fatalf("replica: no randomness: %v", err)
+	}
+	salt := hex.EncodeToString(saltBytes)
+	token := md5.Sum([]byte(password + salt))
+	return url.Values{"u": {user}, "t": {hex.EncodeToString(token[:])}, "s": {salt}}
+}
+
 // Run syncs until ctx ends. A failed pass just waits for the next one.
 func (r *ReplicaSync) Run(ctx context.Context) {
 	for {
 		if err := r.Sync(ctx); err != nil {
-			log.Printf("replica: sync: %v", err)
+			log.Printf("replica: sync: %v", redactURL(err))
 		}
 		select {
 		case <-ctx.Done():
@@ -218,6 +231,8 @@ func (r *ReplicaSync) Sync(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	failures := 0
+	var firstFailure error
 	for _, entry := range entries {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -225,11 +240,18 @@ func (r *ReplicaSync) Sync(ctx context.Context) error {
 		if _, have := r.Index.Lookup(entry.SHA256); have {
 			continue
 		}
-		// One bad file must not hold back the rest, but the database has to wait: it
-		// would list a song this server doesn't have.
+		// One bad file must not hold back the rest.
 		if err := r.fetchFile(ctx, entry); err != nil {
-			return fmt.Errorf("%s: %w", entry.Path, err)
+			failures++
+			log.Printf("replica: %s: %v", entry.Path, redactURL(err))
+			if firstFailure == nil {
+				firstFailure = err
+			}
 		}
+	}
+	if failures > 0 {
+		// The database has to wait: it would list songs this server doesn't have.
+		return fmt.Errorf("%d files failed, first: %w", failures, redactURL(firstFailure))
 	}
 	return r.syncDatabase(ctx)
 }

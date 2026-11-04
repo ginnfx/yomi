@@ -8,6 +8,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -28,6 +29,13 @@ const (
 // authenticate verifies credentials, writing the error response when they fail.
 func (s *Server) authenticate(w http.ResponseWriter, r *http.Request) (string, bool) {
 	query := r.URL.Query()
+	if recent, ok := s.Auth.(interface {
+		RecentlyVerified(url.Values) (string, bool)
+	}); ok {
+		if user, verified := recent.RecentlyVerified(query); verified {
+			return user, true
+		}
+	}
 	if s.limits.Blocked(query.Get("u")) {
 		writeError(w, http.StatusTooManyRequests, "too many wrong passwords, try again in a few minutes")
 		return "", false
@@ -43,7 +51,6 @@ func (s *Server) authenticate(w http.ResponseWriter, r *http.Request) (string, b
 		writeError(w, http.StatusBadGateway, "music server unavailable")
 		return "", false
 	}
-	s.limits.Reset(user)
 	return user, true
 }
 

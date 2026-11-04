@@ -267,7 +267,7 @@ func (r *StatusReader) readNavidrome(ctx context.Context, query url.Values) *Nav
 	info := &NavidromeInfo{LatencyMs: r.Now().Sub(started).Milliseconds()}
 	if err != nil || ping.Response.Status != "ok" {
 		if err != nil {
-			log.Printf("status: navidrome: %v", err)
+			log.Printf("status: navidrome: %v", redactURL(err))
 		}
 		return info
 	}
@@ -281,7 +281,7 @@ func (r *StatusReader) readNavidrome(ctx context.Context, query url.Values) *Nav
 		} `json:"subsonic-response"`
 	}
 	if err := r.callNavidrome(checkCtx, "getScanStatus", query, &scan); err != nil {
-		log.Printf("status: scan status: %v", err)
+		log.Printf("status: scan status: %v", redactURL(err))
 		return info
 	}
 	info.IsScanning = scan.Response.ScanStatus.IsScanning
@@ -349,7 +349,7 @@ func (s *Server) isAdmin(ctx context.Context, query url.Values) bool {
 	client := &http.Client{Timeout: navidromeCheckWait}
 	response, err := client.Do(request)
 	if err != nil {
-		log.Printf("status: admin check: %v", err)
+		log.Printf("status: admin check: %v", redactURL(err))
 		return false
 	}
 	defer response.Body.Close()

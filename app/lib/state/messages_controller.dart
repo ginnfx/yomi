@@ -28,6 +28,10 @@ class MessagesController extends ChangeNotifier {
   List<ChatProfile> _people = const [];
   String? _openThread;
   List<ChatMessage> _thread = const [];
+
+  /// The newest message found by polling. It ignores messages sent from here, or a
+  /// friend's message that arrived just before one of ours would never be fetched.
+  int _pollCursor = 0;
   String? _error;
 
   /// False when the server has no messaging, such as the backup server.
@@ -112,6 +116,7 @@ class MessagesController extends ChangeNotifier {
   Future<void> openThread(String user) async {
     _openThread = user;
     _thread = const [];
+    _pollCursor = 0;
     _error = null;
     _threadTimer?.cancel();
     _threadTimer = Timer.periodic(
@@ -129,15 +134,18 @@ class MessagesController extends ChangeNotifier {
     unawaited(refresh());
   }
 
+  @visibleForTesting
+  Future<void> pollThreadForTest() => _pullThread();
+
   Future<void> _pullThread() async {
     final user = _openThread;
     final transport = _transport;
     if (user == null || transport == null) return;
-    final after = _thread.isEmpty ? 0 : _thread.last.id;
     try {
-      final fresh = await transport.thread(user, after: after);
+      final fresh = await transport.thread(user, after: _pollCursor);
       if (user != _openThread) return; // Moved to another thread meanwhile.
       if (fresh.isEmpty) return;
+      _pollCursor = fresh.last.id;
       _thread = List.unmodifiable(_merge(_thread, fresh));
       _changed();
       await transport.markRead(user, _thread.last.id);
@@ -158,7 +166,7 @@ class MessagesController extends ChangeNotifier {
     return [
       ...existing,
       ...fresh.where((message) => !known.contains(message.id)),
-    ];
+    ]..sort((a, b) => a.id.compareTo(b.id));
   }
 
   /// Returns false and sets [error] if the message couldn't be sent, so the text can stay
