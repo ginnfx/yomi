@@ -130,9 +130,16 @@ Future<void> main() async {
   audioHandler.commands = player;
   player.onStalled = () => unawaited(session.checkServer());
   final listeningDir = '${supportDir.path}/listening';
-  final history = PlayHistory(File('$listeningDir/history.json'));
+  File historyFile(String account) =>
+      File('$listeningDir/history-$account.json');
+  final legacyHistory = File('$listeningDir/history.json');
+  final history = PlayHistory(legacyHistory);
   final scrobbles = ScrobbleQueue(File('$listeningDir/scrobbles.json'));
-  await history.load();
+  var historyAccount = session.accountId;
+  await history.openFor(
+    historyAccount == null ? legacyHistory : historyFile(historyAccount),
+    legacy: historyAccount == null ? null : legacyHistory,
+  );
   await scrobbles.load();
   final listening = ListeningController(
     history: history,
@@ -168,6 +175,7 @@ Future<void> main() async {
     history: history,
     settings: settings,
     cacheFile: File('$listeningDir/home.json'),
+    catalogSongs: () => catalog.songs,
   );
   await home.loadCache();
   player.suggestNext = () =>
@@ -208,6 +216,19 @@ Future<void> main() async {
     player.attach(client);
     downloads.attach(client);
     listening.attach(client);
+    final account = session.accountId;
+    if (account != historyAccount) {
+      final wasSignedIn = historyAccount != null;
+      historyAccount = account;
+      unawaited(
+        account == null
+            ? history.clear()
+            : history.openFor(
+                historyFile(account),
+                legacy: wasSignedIn ? null : legacyHistory,
+              ),
+      );
+    }
     home.attach(client);
     unawaited(_followCatalog(catalog, client, session.accountId));
     keeper.attach(client, session.username);

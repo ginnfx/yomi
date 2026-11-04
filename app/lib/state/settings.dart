@@ -44,6 +44,21 @@ class SettingsController extends ChangeNotifier {
   Future<void> setPlaylistKeepChoice(String playlistId, bool value) =>
       _set(() => _prefs.setBool('keepPlaylist.$playlistId', value));
 
+  /// Artists and songs "show less like this" has ruled out of suggestions.
+  Set<String> get lessArtists =>
+      (_prefs.getStringList('lessArtists') ?? const <String>[]).toSet();
+  Set<String> get lessSongs =>
+      (_prefs.getStringList('lessSongs') ?? const <String>[]).toSet();
+  Future<void> addLessArtist(String artist) =>
+      _set(() => _prefs.setStringList('lessArtists', [...lessArtists, artist]));
+  Future<void> addLessSong(String songId) =>
+      _set(() => _prefs.setStringList('lessSongs', [...lessSongs, songId]));
+  Future<void> clearLess() => _set(() async {
+    await _prefs.remove('lessArtists');
+    await _prefs.remove('lessSongs');
+    return true;
+  });
+
   bool get wifiOnlyDownloads => _prefs.getBool('wifiOnlyDownloads') ?? true;
 
   /// Home screen sections, in the order shown. Unknown or missing ids are repaired.
@@ -57,6 +72,8 @@ class SettingsController extends ChangeNotifier {
     'timeOfDay',
     'recentlyAdded',
     'discover',
+    'artistsYouLove',
+    'newToYou',
   ];
 
   /// Set once the user arranges Home by hand; until then shelves rotate by themselves.

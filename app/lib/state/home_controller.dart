@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
 
 import 'package:flutter/foundation.dart';
 
@@ -14,6 +15,7 @@ import 'settings.dart';
 const int quickPickCount = 6;
 const int _libraryPoolSize = 200;
 const int _recentCount = 16;
+const int _recentAlbums = 20;
 
 /// Keeps Home's shelves. They're saved to disk so Home opens instantly and offline, and
 /// only rebuilt when the rotation key changes: a new day, or enough new plays.
@@ -22,6 +24,7 @@ class HomeController extends ChangeNotifier {
     required this.history,
     required this.settings,
     required this.cacheFile,
+    this.catalogSongs,
     DateTime Function()? now,
   }) : _now = now ?? DateTime.now {
     history.addListener(_onHistoryChanged);
@@ -31,12 +34,16 @@ class HomeController extends ChangeNotifier {
   final PlayHistory history;
   final SettingsController settings;
   final File cacheFile;
+
+  /// The whole library saved on this device, when it's available.
+  final List<Song> Function()? catalogSongs;
   final DateTime Function() _now;
   SubsonicClient? _client;
   List<HomeShelf> _shelves = const [];
   List<Playlist> _quickPlaylists = const [];
   List<Song> _quickSongs = const [];
   _HomeContent? _heldBack;
+  Map<String, int> _shown = const {};
   String? _builtFor;
   bool _isLoading = false;
   Future<void>? _inFlight;
@@ -81,6 +88,11 @@ class HomeController extends ChangeNotifier {
             .cast<Map<String, dynamic>>()
             .map(Song.fromJson),
       );
+      _shown = {
+        for (final entry
+            in ((json['shown'] as Map<String, dynamic>?) ?? const {}).entries)
+          entry.key: (entry.value as num).toInt(),
+      };
       notifyListeners();
     } on Object catch (error) {
       // Home simply rebuilds; a damaged cache costs nothing else.
@@ -155,9 +167,14 @@ class HomeController extends ChangeNotifier {
     _error = null;
     notifyListeners();
     try {
+      final library = catalogSongs?.call() ?? const <Song>[];
       final results = await Future.wait<List<Song>>([
-        client.randomSongs(size: _libraryPoolSize),
-        client.recentSongs(count: _recentCount),
+        library.isNotEmpty
+            ? Future.value(library)
+            : client.randomSongs(size: _libraryPoolSize),
+        library.isNotEmpty
+            ? _recentFromCatalog(client, library)
+            : client.recentSongs(count: _recentCount),
         client.starredSongs(),
       ]);
       final playlists = await _quickPlaylistsFrom(client);
@@ -179,11 +196,15 @@ class HomeController extends ChangeNotifier {
         recentlyAdded: results[1],
         starred: {for (final song in results[2]) song.id},
         now: _now(),
+        shown: _shown,
+        lessArtists: settings.lessArtists,
+        lessSongs: settings.lessSongs,
       ).build(keepOrder: order);
+      _shown = _countShown(shelves);
       final content = _HomeContent(
         List.unmodifiable(shelves),
         playlists,
-        List.unmodifiable(results[0].take(quickPickCount)),
+        _quickSongsFrom(results[0]),
       );
       _builtFor = key;
       if (showNow) {
@@ -210,6 +231,63 @@ class HomeController extends ChangeNotifier {
     }
   }
 
+  /// Newest albums first, using the saved library so it needn't ask for each album.
+  Future<List<Song>> _recentFromCatalog(
+    SubsonicClient client,
+    List<Song> library,
+  ) async {
+    final albums = await client.albums('newest', size: _recentAlbums);
+    final byAlbum = <String, List<Song>>{};
+    for (final song in library) {
+      final id = song.albumId;
+      if (id != null) (byAlbum[id] ??= []).add(song);
+    }
+    return [for (final album in albums) ...?byAlbum[album.id]];
+  }
+
+  /// A few songs for the top of Home, which change with Home rather than on every open.
+  List<Song> _quickSongsFrom(List<Song> pool) {
+    final sample = [...pool]..shuffle(Random(_currentKey.hashCode));
+    return List.unmodifiable(sample.take(quickPickCount));
+  }
+
+  /// Adds up what's on screen, and forgets anything played since, so a song only fades
+  /// from Home when it keeps being offered without being chosen.
+  Map<String, int> _countShown(List<HomeShelf> shelves) {
+    final playedSince = {
+      for (final event in history.events)
+        if (event.kind == PlayKind.completed) event.songId,
+    };
+    return {
+      for (final entry in _shown.entries)
+        if (!playedSince.contains(entry.key)) entry.key: entry.value,
+      for (final shelf in shelves)
+        for (final song in shelf.songs)
+          if (!playedSince.contains(song.id))
+            song.id: (_shown[song.id] ?? 0) + 1,
+    };
+  }
+
+  /// "Show less like this": rules out the song, and its artist if [wholeArtist].
+  Future<void> showLess(Song song, {required bool wholeArtist}) async {
+    await (wholeArtist
+        ? settings.addLessArtist(song.artist)
+        : settings.addLessSong(song.id));
+    _shelves = List.unmodifiable(
+      _shelves
+          .map(
+            (shelf) => HomeShelf(shelf.kind, shelf.title, [
+              for (final other in shelf.songs)
+                if (other.id != song.id &&
+                    !(wholeArtist && other.artist == song.artist))
+                  other,
+            ]),
+          )
+          .where((shelf) => shelf.songs.isNotEmpty),
+    );
+    notifyListeners();
+  }
+
   Future<List<Playlist>> _quickPlaylistsFrom(SubsonicClient client) async {
     try {
       return List.unmodifiable((await client.playlists()).take(quickPickCount));
@@ -231,6 +309,7 @@ class HomeController extends ChangeNotifier {
             for (final playlist in content.playlists) playlist.toJson(),
           ],
           'quickSongs': [for (final song in content.songs) song.toJson()],
+          'shown': _shown,
         }),
       );
       await temp.rename(cacheFile.path);

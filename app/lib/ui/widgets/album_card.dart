@@ -14,13 +14,19 @@ class AlbumCard extends StatelessWidget {
     required this.subtitle,
     required this.coverArtId,
     required this.onTap,
+    this.onLongPress,
   });
 
-  factory AlbumCard.song(Song song, VoidCallback onTap) => AlbumCard(
+  factory AlbumCard.song(
+    Song song,
+    VoidCallback onTap, {
+    VoidCallback? onLongPress,
+  }) => AlbumCard(
     title: song.title,
     subtitle: song.artist,
     coverArtId: song.coverArtId,
     onTap: onTap,
+    onLongPress: onLongPress,
   );
 
   factory AlbumCard.playlist(Playlist playlist, VoidCallback onTap) =>
@@ -35,6 +41,7 @@ class AlbumCard extends StatelessWidget {
   final String subtitle;
   final String? coverArtId;
   final VoidCallback onTap;
+  final VoidCallback? onLongPress;
 
   @override
   Widget build(BuildContext context) {
@@ -43,6 +50,7 @@ class AlbumCard extends StatelessWidget {
         HapticFeedback.selectionClick();
         onTap();
       },
+      onLongPress: onLongPress,
       child: SizedBox(
         width: kCardWidth,
         child: Column(

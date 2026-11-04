@@ -108,10 +108,14 @@ void main() {
         recentlyAdded: library.take(5).toList(),
         now: now,
       ).build();
-      expect(shelves.map((s) => s.kind), [
+      expect(shelves.map((s) => s.kind).take(2), [
         ShelfKind.recentlyAdded,
         ShelfKind.discover,
       ]);
+      expect(
+        shelves.map((s) => s.kind),
+        isNot(contains(ShelfKind.becauseYouPlayed)),
+      );
     });
 
     test('an empty library produces no shelves rather than failing', () {

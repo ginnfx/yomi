@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/format.dart';
+import '../../core/models.dart';
 import '../../state/home_controller.dart';
 import '../../state/messages_controller.dart';
 import '../../state/player_controller.dart';
@@ -63,40 +64,111 @@ class _HomePageState extends State<HomePage> {
         onRefresh: () async {
           await context.read<HomeController>().refresh();
         },
-        child: ListView(
+        child: _lazyList([
+          () => _Header(
+            name: profile.displayName(session.username),
+            greetingTime: widget.greetingTime,
+          ),
+          () => const ContinueListening(),
+          for (final id in sections) () => _section(id, session),
+          ..._shelfBuilders(home),
+          () => Center(
+            child: TextButton.icon(
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute<void>(builder: (_) => const _EditHomePage()),
+              ),
+              icon: const Icon(Icons.tune_rounded, size: 18),
+              label: const Text('Edit Home'),
+            ),
+          ),
+          if (sections.isEmpty && home.shelves.isEmpty && !home.isLoading)
+            () => Padding(
+              padding: const EdgeInsets.all(48),
+              child: Text(
+                'Every section is hidden',
+                textAlign: TextAlign.center,
+                style: yomiText(
+                  14,
+                  weight: FontWeight.w500,
+                  color: YomiColors.textSecondary,
+                  height: 1.4,
+                ),
+              ),
+            ),
+        ]),
+      ),
+    );
+  }
+
+  /// Only what's near the screen is built, so a long Home stays quick.
+  Widget _lazyList(List<Widget Function()> items) => ListView.builder(
+    itemCount: items.length,
+    itemBuilder: (_, i) => items[i](),
+  );
+
+  /// One builder per shelf. See [HomeController].
+  List<Widget Function()> _shelfBuilders(HomeController home) {
+    final player = context.read<PlayerController>();
+    final shelves = home.shelves;
+    if (shelves.isEmpty) {
+      final error = home.error;
+      return [
+        if (home.isLoading)
+          () => const Padding(
+            padding: EdgeInsets.only(top: YomiSpace.xl),
+            child: CardRowSkeleton(),
+          )
+        else if (error != null)
+          () => ErrorView(error: error, onRetry: home.refresh),
+      ];
+    }
+    return [
+      for (final shelf in shelves)
+        () => Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            _Header(
-              name: profile.displayName(session.username),
-              greetingTime: widget.greetingTime,
-            ),
-            const ContinueListening(),
-            for (final id in sections) _section(id, session),
-            const _Shelves(),
-            Center(
-              child: TextButton.icon(
-                onPressed: () => Navigator.of(context).push(
-                  MaterialPageRoute<void>(
-                    builder: (_) => const _EditHomePage(),
+            SectionTitle(shelf.title),
+            CardRow(
+              children: [
+                for (var i = 0; i < shelf.songs.length; i++)
+                  AlbumCard.song(
+                    shelf.songs[i],
+                    () => player.playQueue(shelf.songs, startIndex: i),
+                    onLongPress: () => _showLess(shelf.songs[i]),
                   ),
-                ),
-                icon: const Icon(Icons.tune_rounded, size: 18),
-                label: const Text('Edit Home'),
-              ),
+              ],
             ),
-            if (sections.isEmpty && home.shelves.isEmpty && !home.isLoading)
-              Padding(
-                padding: const EdgeInsets.all(48),
-                child: Text(
-                  'Every section is hidden',
-                  textAlign: TextAlign.center,
-                  style: yomiText(
-                    14,
-                    weight: FontWeight.w500,
-                    color: YomiColors.textSecondary,
-                    height: 1.4,
-                  ),
-                ),
-              ),
+          ],
+        ),
+    ];
+  }
+
+  void _showLess(Song song) {
+    final home = context.read<HomeController>();
+    HapticFeedback.mediumImpact();
+    showModalBottomSheet<void>(
+      context: context,
+      builder: (sheet) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.thumb_down_outlined),
+              title: const Text('Show less like this'),
+              subtitle: Text(song.title),
+              onTap: () {
+                Navigator.pop(sheet);
+                home.showLess(song, wholeArtist: false);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.person_off_outlined),
+              title: Text('Show less from ${song.artist}'),
+              onTap: () {
+                Navigator.pop(sheet);
+                home.showLess(song, wholeArtist: true);
+              },
+            ),
           ],
         ),
       ),
@@ -197,50 +269,19 @@ class _EditHomePage extends StatelessWidget {
       appBar: AppBar(
         title: Text('Edit Home', style: yomiText(20, weight: FontWeight.w800)),
       ),
-      body: const SingleChildScrollView(child: HomeLayoutSection()),
+      body: SingleChildScrollView(
+        child: Column(
+          children: [
+            const HomeLayoutSection(),
+            TextButton(
+              onPressed: () => context.read<SettingsController>().clearLess(),
+              child: const Text('Forget "show less" choices'),
+            ),
+          ],
+        ),
+      ),
     ),
   );
-}
-
-/// The shelves that change with listening. See [HomeController].
-class _Shelves extends StatelessWidget {
-  const _Shelves();
-
-  @override
-  Widget build(BuildContext context) {
-    final home = context.watch<HomeController>();
-    final player = context.read<PlayerController>();
-    final shelves = home.shelves;
-    if (shelves.isEmpty) {
-      if (home.isLoading) {
-        return const Padding(
-          padding: EdgeInsets.only(top: YomiSpace.xl),
-          child: CardRowSkeleton(),
-        );
-      }
-      final error = home.error;
-      return error == null
-          ? const SizedBox.shrink()
-          : ErrorView(error: error, onRetry: home.refresh);
-    }
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        for (final shelf in shelves) ...[
-          SectionTitle(shelf.title),
-          CardRow(
-            children: [
-              for (var i = 0; i < shelf.songs.length; i++)
-                AlbumCard.song(
-                  shelf.songs[i],
-                  () => player.playQueue(shelf.songs, startIndex: i),
-                ),
-            ],
-          ),
-        ],
-      ],
-    );
-  }
 }
 
 class _Header extends StatelessWidget {
