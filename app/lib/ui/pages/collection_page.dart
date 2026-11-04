@@ -314,9 +314,10 @@ class _CollectionPageState extends State<CollectionPage> {
                             ),
                           ),
                           onDismissed: (_) async {
-                            await client.removeFromPlaylist(
+                            await client.removeSongFromPlaylist(
                               widget.playlist!.id,
-                              [i],
+                              songs[i],
+                              i,
                             );
                             _reload();
                           },

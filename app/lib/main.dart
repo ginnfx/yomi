@@ -4,7 +4,7 @@ import 'dart:math';
 
 import 'package:flutter/material.dart';
 import 'package:just_audio/just_audio.dart';
-import 'package:just_audio_background/just_audio_background.dart';
+import 'package:audio_service/audio_service.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
@@ -12,6 +12,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'core/apk_installer.dart';
 import 'core/app_update.dart';
+import 'core/audio/yomi_audio_handler.dart';
 import 'core/catalog_cache.dart';
 import 'core/cover_palette.dart';
 import 'core/listening/auto_download_ledger.dart';
@@ -48,11 +49,6 @@ final _navigatorKey = GlobalKey<NavigatorState>();
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await JustAudioBackground.init(
-    androidNotificationChannelId: 'com.yomi.yomi.playback',
-    androidNotificationChannelName: 'Yomi playback',
-    androidNotificationOngoing: true,
-  );
 
   final settings = await SettingsController.load();
   final appearance = await AppearanceController.load();
@@ -106,8 +102,17 @@ Future<void> main() async {
       file: File('${supportDir.path}/catalog/responses/$account.json'),
     ),
   );
+  final audioPlayer = AudioPlayer();
+  final audioHandler = await AudioService.init(
+    builder: () => YomiAudioHandler(audioPlayer),
+    config: const AudioServiceConfig(
+      androidNotificationChannelId: 'com.yomi.yomi.playback',
+      androidNotificationChannelName: 'Yomi playback',
+      androidNotificationOngoing: true,
+    ),
+  );
   final player = PlayerController(
-    AudioPlayer(),
+    audioPlayer,
     cache: cache,
     downloads: downloads,
     settings: settings,
@@ -115,6 +120,7 @@ Future<void> main() async {
   );
   await session.restoreSaved();
   session.startMonitoring();
+  audioHandler.commands = player;
   player.onStalled = () => unawaited(session.checkServer());
   final listeningDir = '${supportDir.path}/listening';
   final history = PlayHistory(File('$listeningDir/history.json'));
@@ -148,6 +154,10 @@ Future<void> main() async {
     cacheFile: File('$listeningDir/home.json'),
   );
   await home.loadCache();
+  player.suggestNext = () =>
+      [for (final shelf in home.shelves) ...shelf.songs]
+          .take(_suggestedSongsPerSkip)
+          .toList();
   final uploadsDir = '${supportDir.path}/uploads';
   final uploads = UploadQueue(
     queueFile: File('$uploadsDir/queue.json'),
@@ -212,7 +222,8 @@ Future<void> main() async {
     onHide: () => hiddenSince = DateTime.now(),
     onResume: () {
       final since = hiddenSince;
-      if (since != null && DateTime.now().difference(since) > _showNewHomeAfter) {
+      if (since != null &&
+          DateTime.now().difference(since) > _showNewHomeAfter) {
         home.applyHeldBack();
       }
       unawaited(updates.check());
@@ -249,6 +260,8 @@ Future<void> main() async {
 }
 
 /// Follows the signed-in account, then brings its saved songs up to date.
+const int _suggestedSongsPerSkip = 20;
+
 /// How long the app must be away before a prepared Home replaces the one showing.
 const Duration _showNewHomeAfter = Duration(minutes: 30);
 

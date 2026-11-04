@@ -51,6 +51,11 @@ class LyricsView extends StatefulWidget {
 }
 
 class _LyricsViewState extends State<LyricsView> {
+  double? _measuredWidth;
+  TextScaler? _measuredScaler;
+  Lyrics? _measuredLyrics;
+  List<double> _measuredTops = const [];
+
   final _scroll = ScrollController();
   int _lastActive = -2;
   DateTime _followPausedUntil = DateTime.fromMillisecondsSinceEpoch(0);
@@ -124,13 +129,23 @@ class _LyricsViewState extends State<LyricsView> {
   Widget _synced(BuildContext context, BoxConstraints box) {
     final player = context.read<PlayerController>();
     final lines = widget.lyrics.lines;
-    final tops = measureLyricTops(
-      lines: [for (final line in lines) _textOf(line)],
-      width: box.maxWidth,
-      style: _style,
-      textScaler: MediaQuery.textScalerOf(context),
-      textDirection: Directionality.of(context),
-    );
+    final scaler = MediaQuery.textScalerOf(context);
+    // Laying out every line is slow, so it's only redone when the result would differ.
+    if (_measuredWidth != box.maxWidth ||
+        _measuredScaler != scaler ||
+        !identical(_measuredLyrics, widget.lyrics)) {
+      _measuredWidth = box.maxWidth;
+      _measuredScaler = scaler;
+      _measuredLyrics = widget.lyrics;
+      _measuredTops = measureLyricTops(
+        lines: [for (final line in lines) _textOf(line)],
+        width: box.maxWidth,
+        style: _style,
+        textScaler: scaler,
+        textDirection: Directionality.of(context),
+      );
+    }
+    final tops = _measuredTops;
     return NotificationListener<UserScrollNotification>(
       onNotification: (_) {
         _followPausedUntil = DateTime.now().add(_followResumeAfter);

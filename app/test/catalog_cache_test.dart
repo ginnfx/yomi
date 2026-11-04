@@ -10,13 +10,21 @@ import 'package:yomi/core/subsonic_client.dart';
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   late Directory dir;
-  CatalogCache openCache([String account = 'one']) =>
-      CatalogCache(file: File('${dir.path}/$account.json'));
+  final opened = <CatalogCache>[];
+  CatalogCache openCache([String account = 'one']) {
+    final cache = CatalogCache(file: File('${dir.path}/$account.json'));
+    opened.add(cache);
+    return cache;
+  }
 
   setUp(() async {
     dir = await Directory.systemTemp.createTemp('client_cache');
   });
-  tearDown(() => dir.delete(recursive: true));
+  tearDown(() async {
+    await Future.wait(opened.map((cache) => cache.flush()));
+    opened.clear();
+    await dir.delete(recursive: true);
+  });
 
   http.Response ok(Map<String, Object?> body) => http.Response(
     jsonEncode({

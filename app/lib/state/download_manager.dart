@@ -15,6 +15,9 @@ enum DownloadStatus { none, queued, downloading, done, failed }
 typedef CoverWarmer = Future<void> Function(SubsonicClient client, Song song);
 
 /// Saves songs for offline play, one at a time so the little server is never overloaded.
+/// Screens hear about download progress this many times per song.
+const int _progressSteps = 20;
+
 class DownloadManager extends ChangeNotifier {
   DownloadManager({
     required this.store,
@@ -141,8 +144,13 @@ class DownloadManager extends ChangeNotifier {
             store.baseFor(song.id),
             cancel: _cancel,
             onProgress: (p) {
+              final previous = _progress[song.id] ?? 0;
               _progress[song.id] = p;
-              notifyListeners();
+              // Rebuilding on every chunk slows the whole screen, and nobody needs it.
+              if ((p * _progressSteps).floor() !=
+                  (previous * _progressSteps).floor()) {
+                notifyListeners();
+              }
             },
           );
           await store.add(song, fetched);

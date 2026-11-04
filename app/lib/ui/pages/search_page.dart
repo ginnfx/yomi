@@ -49,7 +49,8 @@ class _SearchPageState extends State<SearchPage> {
   void didChangeDependencies() {
     super.didChangeDependencies();
     final url = context.watch<SessionController>().serverUrl;
-    if (_routeUrl != null && _routeUrl != url) {
+    // Results stay on screen after a route change. Only a search that failed runs again.
+    if (_routeUrl != null && _routeUrl != url && _error != null) {
       _generation++;
       _error = null;
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -131,7 +132,16 @@ class _SearchPageState extends State<SearchPage> {
           _songs = [..._songs, ...results.songs];
         } else {
           _artists = results.artists;
-          _songs = results.songs;
+          // Songs already showing stay where they are, so a result can't change just as
+          // someone taps it. The server's extra results are added below.
+          final showing = {for (final song in _songs) song.id};
+          final isRefinement = _songs.isNotEmpty && local.isNotEmpty;
+          _songs = isRefinement
+              ? [
+                  ..._songs,
+                  ...results.songs.where((song) => !showing.contains(song.id)),
+                ]
+              : results.songs;
         }
         _hasSearched = true;
         _hasMore = results.songs.length == _pageSize;
@@ -167,6 +177,7 @@ class _SearchPageState extends State<SearchPage> {
   Widget build(BuildContext context) {
     final client = context.watch<SessionController>().client;
     final player = context.read<PlayerController>();
+    final visible = _visibleSongs;
     final isEmpty = _hasSearched && _artists.isEmpty && _songs.isEmpty;
     return SafeArea(
       bottom: false,
@@ -366,10 +377,11 @@ class _SearchPageState extends State<SearchPage> {
                 onChanged: (selected) =>
                     setState(() => _selectedGenres = selected),
               ),
-              for (var i = 0; i < _visibleSongs.length; i++)
+              for (var i = 0; i < visible.length; i++)
                 SongTile(
-                  song: _visibleSongs[i],
-                  onTap: () => player.playQueue(_visibleSongs, startIndex: i),
+                  key: ValueKey(visible[i].id),
+                  song: visible[i],
+                  onTap: () => player.playQueue(visible, startIndex: i),
                 ),
               if (_hasMore)
                 Padding(

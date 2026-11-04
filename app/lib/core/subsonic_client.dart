@@ -209,6 +209,22 @@ class SubsonicClient {
     return saved.data;
   }
 
+  /// Removes [song], checking the server's current list first, because the list on screen
+  /// may be out of date and a wrong position would remove a different song.
+  Future<void> removeSongFromPlaylist(
+    String playlistId,
+    Song song,
+    int shownIndex,
+  ) async {
+    final current = await freshPlaylistSongs(playlistId);
+    final isStillThere =
+        shownIndex < current.length && current[shownIndex].id == song.id;
+    final index = isStillThere
+        ? shownIndex
+        : current.indexWhere((entry) => entry.id == song.id);
+    if (index >= 0) await removeFromPlaylist(playlistId, [index]);
+  }
+
   /// A saved response, available straight away, or null if there isn't one yet.
   Map<String, dynamic>? _peek(
     String endpoint, [
@@ -648,6 +664,12 @@ class SubsonicClient {
       'song',
     ).map(Song.fromJson).toList(growable: false);
   }
+
+  /// A playlist as the server has it right now, for edits that go by position.
+  Future<List<Song>> freshPlaylistSongs(String playlistId) async =>
+      _parsePlaylistSongs(
+        await _fetch('getPlaylist', {'id': playlistId}, _requestTimeout),
+      );
 
   Future<List<Song>> freshStarredSongs() async {
     final body = await _fetch('getStarred2', const {}, _catalogPageTimeout);

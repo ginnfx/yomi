@@ -1,11 +1,14 @@
 import 'dart:async';
+import 'dart:io';
 
+import 'package:audio_service/audio_service.dart';
 import 'package:flutter/foundation.dart';
 import 'package:just_audio/just_audio.dart';
-import 'package:just_audio_background/just_audio_background.dart';
 
+import '../core/audio/yomi_audio_handler.dart';
 import '../core/models.dart';
 import '../core/offline/audio_cache.dart';
+import '../core/offline/audio_files.dart';
 import '../core/offline/audio_preloader.dart';
 import '../core/offline/file_fetcher.dart';
 import '../core/stall_detector.dart';
@@ -17,7 +20,7 @@ import 'settings.dart';
 const Duration _stallCheckEvery = Duration(seconds: 1);
 
 /// Owns the audio player and the play queue; the UI listens to this.
-class PlayerController extends ChangeNotifier {
+class PlayerController extends ChangeNotifier implements TransportCommands {
   PlayerController(
     this._player, {
     required this.cache,
@@ -76,6 +79,29 @@ class PlayerController extends ChangeNotifier {
   int? _index;
   String? _error;
 
+  /// Where a skip is heading, until the player catches up. While set, reports from the
+  /// player about the old song are ignored.
+  int? _pendingIndex;
+
+  /// Rises with every load. A load that's been replaced stays quiet when it finishes.
+  int _loadGeneration = 0;
+
+  /// Set from the moment playback is asked for until the player has really started, so a
+  /// skip tapped in between doesn't forget it.
+  bool _shouldPlayAfterLoad = false;
+  _HeldShuffleOrder? _heldOrder;
+  int _userSkips = 0;
+
+  /// Songs to continue with when the queue runs out. Set by whoever knows what to suggest.
+  List<Song> Function()? suggestNext;
+
+  /// Rises each time the user skips, including from the lock screen.
+  int get userSkips => _userSkips;
+
+  /// Whether Next would do anything right now.
+  bool get canSkipNext =>
+      _targetFrom(1) != null || _newSuggestions().isNotEmpty;
+
   /// Called after sign-in/out so stream and cover URLs use the right credentials.
   void attach(SubsonicClient? client) {
     final previous = _client;
@@ -115,16 +141,119 @@ class PlayerController extends ChangeNotifier {
     final position = fromStart ? Duration.zero : _player.position;
     _error = null;
     _stalls.reset();
+    _shouldPlayAfterLoad = _shouldPlayAfterLoad || wasPlaying;
+    await _load(index, position);
+    if (!_disposed) notifyListeners();
+  }
+
+  /// Loads the whole queue at [index]. A newer load takes over from an older one, so the
+  /// latest tap always wins; only the newest load reports a failure or starts playback.
+  Future<void> _load(
+    int index,
+    Duration position, {
+    ShuffleOrder? shuffleOrder,
+  }) async {
+    final generation = ++_loadGeneration;
     try {
       await _player.setAudioSources(
-        _queue.map(_sourceFor).toList(),
+        _sourcesForQueue(),
         initialIndex: index,
         initialPosition: position,
+        shuffleOrder: shuffleOrder,
       );
-      if (wasPlaying) unawaited(_player.play());
+      if (generation != _loadGeneration) return;
+      _heldOrder?.release();
+      _heldOrder = null;
+      _pendingIndex = null;
+      if (_shouldPlayAfterLoad) {
+        _shouldPlayAfterLoad = false;
+        unawaited(_player.play());
+      }
+    } on PlayerInterruptedException {
+      // Something newer replaced this load, which is exactly what should happen.
     } on Object catch (error) {
+      if (generation != _loadGeneration) return;
+      _pendingIndex = null;
+      _shouldPlayAfterLoad = false;
       _fail(error);
     }
+  }
+
+  /// Lists the cache folder once rather than checking disk for each song, which froze
+  /// the screen on long queues.
+  List<AudioSource> _sourcesForQueue() {
+    final cached = cache.savedFiles();
+    return [for (final song in _queue) _sourceFor(song, cached: cached)];
+  }
+
+  /// The order songs play in, for showing the queue as it will really play.
+  List<int> get playOrder => _order;
+
+  /// The order songs play in. During a load the player's own answer may be out of date,
+  /// so the one the load started from is used.
+  List<int> get _order {
+    final held = _heldOrder;
+    if (held != null) return held.indices;
+    final order = _player.effectiveIndices;
+    return order.length == _queue.length
+        ? order
+        : [for (var i = 0; i < _queue.length; i++) i];
+  }
+
+  /// The queue position [step] songs along, or null at the end of a queue that doesn't
+  /// repeat. Repeat-one doesn't count here: skipping means you want a different song.
+  int? _targetFrom(int step) {
+    final index = _index;
+    if (index == null || _queue.isEmpty) return null;
+    final order = _order;
+    final position = order.indexOf(index);
+    if (position < 0) return null;
+    final target = position + step;
+    if (target >= 0 && target < order.length) return order[target];
+    return _player.loopMode == LoopMode.all
+        ? order[target % order.length]
+        : null;
+  }
+
+  List<Song> _newSuggestions() {
+    final suggest = suggestNext;
+    if (suggest == null || _queue.isEmpty) return const [];
+    final queued = {for (final song in _queue) song.id};
+    return [
+      for (final song in suggest())
+        if (!queued.contains(song.id)) song,
+    ];
+  }
+
+  Future<void> _skipTo(int target) async {
+    _userSkips++;
+    _index = target;
+    _pendingIndex = target;
+    _error = null;
+    debugPrint(
+      'Skip to $target of ${_queue.length}: ${_player.processingState.name}, '
+      'playing ${_player.playing}, repeat ${_player.loopMode.name}, '
+      'shuffle ${_player.shuffleModeEnabled}',
+    );
+    notifyListeners();
+    final state = _player.processingState;
+    final mustReload =
+        state == ProcessingState.loading ||
+        state == ProcessingState.idle ||
+        _needsNewSources;
+    if (!mustReload) {
+      await _player.seek(Duration.zero, index: target);
+      if (_pendingIndex == target) _pendingIndex = null;
+      return;
+    }
+    // The player ignores seeks while loading, but a new load replaces the current one.
+    _needsNewSources = false;
+    _shouldPlayAfterLoad = _shouldPlayAfterLoad || _player.playing;
+    ShuffleOrder? shuffleOrder;
+    if (_player.shuffleModeEnabled) {
+      shuffleOrder = _heldOrder ??= _HeldShuffleOrder(_order);
+    }
+    await _load(target, Duration.zero, shuffleOrder: shuffleOrder);
     if (!_disposed) notifyListeners();
   }
 
@@ -145,6 +274,7 @@ class PlayerController extends ChangeNotifier {
   int? get index => _index;
   Song? get current =>
       (_index != null && _index! < _queue.length) ? _queue[_index!] : null;
+  @override
   bool get isPlaying => _player.playing;
   bool get isBuffering =>
       _player.processingState == ProcessingState.loading ||
@@ -162,7 +292,11 @@ class PlayerController extends ChangeNotifier {
 
   /// Order of preference: a saved download, an already-cached copy, then a direct stream.
   /// Saved files keep their real extension (iOS cannot open anything else).
-  AudioSource _sourceFor(Song song, {bool allowLocal = true}) {
+  AudioSource _sourceFor(
+    Song song, {
+    bool allowLocal = true,
+    Map<String, File>? cached,
+  }) {
     final client = _client!;
     final tag = MediaItem(
       id: song.id,
@@ -175,7 +309,9 @@ class PlayerController extends ChangeNotifier {
           : client.coverArtUri(song.coverArtId, size: 600),
     );
     if (allowLocal) {
-      final local = downloads.localFile(song.id) ?? cache.find(song.id);
+      final local =
+          downloads.localFile(song.id) ??
+          (cached == null ? cache.find(song.id) : cached[safeFileId(song.id)]);
       if (local != null) return AudioSource.file(local.path, tag: tag);
     }
     return AudioSource.uri(client.streamUri(song.id), tag: tag);
@@ -235,15 +371,22 @@ class PlayerController extends ChangeNotifier {
   }
 
   Future<void> _switchQueuedToLocal(Song song) async {
+    // In shuffle the swapped song would land somewhere random, and during a skip the
+    // queue is about to change anyway. Streaming works just as well in those cases.
+    if (_player.shuffleModeEnabled || _pendingIndex != null) return;
+    final generation = _loadGeneration;
     for (var i = 0; i < _queue.length; i++) {
       // The playing item is never touched; only songs still waiting in the queue are swapped.
       if (_queue[i].id != song.id ||
           i <= (_index ?? -1) ||
-          _player.audioSources.length != _queue.length)
+          _player.audioSources.length != _queue.length) {
         continue;
+      }
       try {
+        // Adding first means there's never a moment without a next song.
+        await _player.insertAudioSource(i + 1, _sourceFor(song));
+        if (generation != _loadGeneration) return;
         await _player.removeAudioSourceAt(i);
-        await _player.insertAudioSource(i, _sourceFor(song));
       } on Object catch (error) {
         debugPrint('Could not switch ${song.title} to its cached copy: $error');
       }
@@ -287,25 +430,23 @@ class PlayerController extends ChangeNotifier {
     _preloader.stop();
     _error = null;
     _queue = List.unmodifiable(songs);
-    _index = startIndex.clamp(0, songs.length - 1);
+    final index = startIndex.clamp(0, songs.length - 1);
+    _index = index;
+    _pendingIndex = null;
+    _heldOrder = null;
+    _shouldPlayAfterLoad = autoplay;
     notifyListeners();
-    try {
-      await _player.setAudioSources(
-        songs.map(_sourceFor).toList(),
-        initialIndex: _index,
-        initialPosition: position,
+    final generation = _loadGeneration + 1;
+    await _load(index, position);
+    if (!autoplay &&
+        generation == _loadGeneration &&
+        _error == null &&
+        defaultTargetPlatform == TargetPlatform.macOS &&
+        connectivity.isOnWifi) {
+      // Prepare a handoff in the background while the phone keeps playing.
+      _scheduleCaching(
+        includeCurrent: settings.cachePlayedSongs && connectivity.isOnWifi,
       );
-      if (autoplay) {
-        unawaited(_player.play());
-      } else if (defaultTargetPlatform == TargetPlatform.macOS &&
-          connectivity.isOnWifi) {
-        // Prepare a handoff in the background while the phone keeps playing.
-        _scheduleCaching(
-          includeCurrent: settings.cachePlayedSongs && connectivity.isOnWifi,
-        );
-      }
-    } on Object catch (error) {
-      _fail(error);
     }
   }
 
@@ -325,21 +466,44 @@ class PlayerController extends ChangeNotifier {
   }
 
   Future<void> jumpTo(int queueIndex) async {
-    await _player.seek(Duration.zero, index: queueIndex);
-    unawaited(_player.play());
+    _shouldPlayAfterLoad = true;
+    await _skipTo(queueIndex);
+    if (_pendingIndex == null &&
+        _player.processingState != ProcessingState.idle) {
+      _shouldPlayAfterLoad = false;
+      unawaited(_player.play());
+    }
   }
 
+  @override
   Future<void> togglePlay() =>
       _player.playing ? _player.pause() : _player.play();
-  Future<void> next() => _player.seekToNext();
-  Future<void> previous() async {
-    if (_player.position > const Duration(seconds: 3))
-      return _player.seek(Duration.zero);
-    return _player.seekToPrevious();
+  @override
+  Future<void> next() async {
+    final target = _targetFrom(1);
+    if (target != null) return _skipTo(target);
+    final more = _newSuggestions();
+    if (more.isEmpty) return;
+    final first = _queue.length;
+    _queue = List.unmodifiable([..._queue, ...more]);
+    await _player.addAudioSources(more.map(_sourceFor).toList());
+    return _skipTo(first);
   }
 
+  @override
+  Future<void> previous() async {
+    if (_player.position > const Duration(seconds: 3)) {
+      return _player.seek(Duration.zero);
+    }
+    final target = _targetFrom(-1);
+    if (target != null) return _skipTo(target);
+    return _player.seek(Duration.zero);
+  }
+
+  @override
   Future<void> pause() => _player.pause();
 
+  @override
   Future<void> seek(Duration position) async {
     await _player.seek(position);
     notifyListeners();
@@ -356,6 +520,9 @@ class PlayerController extends ChangeNotifier {
   }
 
   void _onIndexChanged(int? index) {
+    final pending = _pendingIndex;
+    if (pending != null && index != pending) return;
+    _pendingIndex = null;
     final didChangeSong = index != _index;
     _index = index;
     if (_needsNewSources && didChangeSong && index != null) {
@@ -411,5 +578,22 @@ class PlayerController extends ChangeNotifier {
     }
     _player.dispose();
     super.dispose();
+  }
+}
+
+/// A shuffled order that stays as it is while a reload is happening, then goes back to
+/// shuffling normally. A plain reload would otherwise pick a new random order.
+class _HeldShuffleOrder extends DefaultShuffleOrder {
+  _HeldShuffleOrder(List<int> order) {
+    indices.addAll(order);
+  }
+
+  bool _isHeld = true;
+
+  void release() => _isHeld = false;
+
+  @override
+  void shuffle({int? initialIndex}) {
+    if (!_isHeld) super.shuffle(initialIndex: initialIndex);
   }
 }

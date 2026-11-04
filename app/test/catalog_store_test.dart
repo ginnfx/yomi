@@ -12,7 +12,10 @@ void main() {
     file = File('${dir.path}/account.json');
   });
 
-  tearDown(() => dir.delete(recursive: true));
+  tearDown(() async {
+    await Future<void>.delayed(Duration.zero);
+    await dir.delete(recursive: true);
+  });
 
   CatalogCache open({DateTime Function()? now, int maxEntries = 128}) =>
       CatalogCache(file: file, now: now, maxEntries: maxEntries);

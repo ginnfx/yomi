@@ -129,7 +129,11 @@ class _NowPlayingPageState extends State<NowPlayingPage>
               child: FutureBuilder<Lyrics?>(
                 future: _lyricsFor(song),
                 builder: (context, snapshot) {
-                  final lyrics = snapshot.data;
+                  // Waiting on a new song's lyrics still reports the previous song's.
+                  final lyrics =
+                      snapshot.connectionState == ConnectionState.done
+                      ? snapshot.data
+                      : null;
                   final hasLyrics = lyrics != null && lyrics.lines.isNotEmpty;
                   return context.isWideLayout
                       ? _WideLayout(
@@ -413,21 +417,23 @@ class _WideLayout extends StatelessWidget {
               YomiSpace.xxl,
               YomiSpace.s,
             ),
-            child: lines == null
-                ? Center(child: artColumn)
-                : Row(
-                    children: [
-                      Expanded(child: artColumn),
-                      const SizedBox(width: YomiSpace.xxl * 2),
-                      Expanded(
-                        child: LyricsView(
-                          key: ValueKey(song.id),
-                          lyrics: lines,
-                          fontSize: 32,
-                        ),
-                      ),
-                    ],
+            // Always a Row: changing the shape when lyrics arrive would rebuild the
+            // controls, cancelling any tap in progress.
+            child: Row(
+              children: [
+                Expanded(child: Center(child: artColumn)),
+                if (lines != null) ...[
+                  const SizedBox(width: YomiSpace.xxl * 2),
+                  Expanded(
+                    child: LyricsView(
+                      key: ValueKey(song.id),
+                      lyrics: lines,
+                      fontSize: 32,
+                    ),
                   ),
+                ],
+              ],
+            ),
           ),
         ),
       ],
@@ -654,10 +660,12 @@ class _Controls extends StatelessWidget {
         IconButton(
           iconSize: 38,
           icon: const Icon(Icons.skip_next_rounded),
-          onPressed: () {
-            HapticFeedback.lightImpact();
-            player.next();
-          },
+          onPressed: player.canSkipNext
+              ? () {
+                  HapticFeedback.lightImpact();
+                  player.next();
+                }
+              : null,
         ),
         IconButton(
           icon: Icon(
@@ -682,6 +690,7 @@ class _QueueSheet extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final player = context.watch<PlayerController>();
+    final order = player.playOrder;
     return SafeArea(
       child: ConstrainedBox(
         constraints: BoxConstraints(
@@ -708,8 +717,10 @@ class _QueueSheet extends StatelessWidget {
             Flexible(
               child: ListView.builder(
                 shrinkWrap: true,
-                itemCount: player.queue.length,
-                itemBuilder: (context, i) {
+                itemCount: order.length,
+                itemBuilder: (context, position) {
+                  // Listed in the order they'll really play, which differs in shuffle.
+                  final i = order[position];
                   final song = player.queue[i];
                   final isCurrent = i == player.index;
                   return ListTile(

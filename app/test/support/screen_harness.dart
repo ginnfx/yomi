@@ -87,6 +87,10 @@ class FakePlayer extends ChangeNotifier implements PlayerController {
   @override
   bool get isBuffering => false;
   @override
+  bool get canSkipNext => true;
+  @override
+  int get userSkips => 0;
+  @override
   bool get isShuffled => false;
   @override
   LoopMode get loopMode => LoopMode.off;
