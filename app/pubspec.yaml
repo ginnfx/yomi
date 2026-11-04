@@ -49,6 +49,9 @@ dependencies:
   flutter_cache_manager: ^3.4.6
   package_info_plus: ^10.2.2
   url_launcher: ^6.3.3
+  audio_metadata_reader: ^1.8.1
+  permission_handler: ^13.0.2
+  convert: ^3.1.2
 
 dev_dependencies:
   flutter_test:

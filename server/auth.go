@@ -2,12 +2,19 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
+	"sync"
 	"time"
+)
+
+const (
+	authCacheFor     = 5 * time.Minute
+	authCacheEntries = 64
 )
 
 var errUnauthorized = errors.New("invalid username or password")
@@ -60,5 +67,45 @@ func (a NavidromeAuth) Verify(ctx context.Context, query url.Values) (string, er
 	if body.Response.Status != "ok" {
 		return "", errUnauthorized
 	}
+	return user, nil
+}
+
+// cachedAuth remembers successful logins briefly, so a bulk upload doesn't ping
+// Navidrome for every file. Failures are never cached, and keys are hashed so
+// credentials aren't kept in memory longer than the request.
+type cachedAuth struct {
+	inner Authenticator
+	now   func() time.Time
+	mu    sync.Mutex
+	valid map[[sha256.Size]byte]cachedLogin
+}
+
+type cachedLogin struct {
+	user    string
+	expires time.Time
+}
+
+func newCachedAuth(inner Authenticator) *cachedAuth {
+	return &cachedAuth{inner: inner, now: time.Now, valid: make(map[[sha256.Size]byte]cachedLogin)}
+}
+
+func (a *cachedAuth) Verify(ctx context.Context, query url.Values) (string, error) {
+	key := sha256.Sum256([]byte(query.Get("u") + "\x00" + query.Get("t") + "\x00" + query.Get("s") + "\x00" + query.Get("p")))
+	a.mu.Lock()
+	login, ok := a.valid[key]
+	a.mu.Unlock()
+	if ok && a.now().Before(login.expires) {
+		return login.user, nil
+	}
+	user, err := a.inner.Verify(ctx, query)
+	if err != nil {
+		return "", err
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if len(a.valid) >= authCacheEntries {
+		a.valid = make(map[[sha256.Size]byte]cachedLogin)
+	}
+	a.valid[key] = cachedLogin{user: user, expires: a.now().Add(authCacheFor)}
 	return user, nil
 }

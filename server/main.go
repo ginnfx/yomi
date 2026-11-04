@@ -16,8 +16,13 @@ const (
 
 func main() {
 	cfg := loadConfig()
-	auth := newNavidromeAuth(cfg.NavidromeURL)
-	server := newServer(cfg, auth, navidromeScan(cfg.NavidromeURL))
+	auth := newCachedAuth(newNavidromeAuth(cfg.NavidromeURL))
+	index, err := openHashIndex(cfg.MusicDir, cfg.IndexFile)
+	if err != nil {
+		log.Fatalf("open index: %v", err)
+	}
+	go index.Seed()
+	server := newServer(cfg, auth, navidromeScan(cfg.NavidromeURL), index)
 	httpServer := &http.Server{
 		Addr:              cfg.Listen,
 		Handler:           server.routes(),

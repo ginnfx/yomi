@@ -31,6 +31,7 @@ import 'state/profile_controller.dart';
 import 'state/session.dart';
 import 'state/settings.dart';
 import 'state/update_controller.dart';
+import 'state/upload_queue.dart';
 import 'ui/pages/login_page.dart';
 import 'ui/pages/shell_page.dart';
 import 'ui/theme.dart';
@@ -116,6 +117,12 @@ Future<void> main() async {
   player.onUpcomingSong = (client, song) {
     unawaited(lyrics.forSong(client, song));
   };
+  final uploadsDir = '${supportDir.path}/uploads';
+  final uploads = UploadQueue(
+    queueFile: File('$uploadsDir/queue.json'),
+    hashCacheFile: File('$uploadsDir/hashes.json'),
+  );
+  await uploads.load();
   var deviceId = prefs.getString('playbackDeviceId');
   if (deviceId == null) {
     deviceId =
@@ -133,6 +140,10 @@ Future<void> main() async {
     player.attach(client);
     downloads.attach(client);
     listening.attach(client);
+    uploads.attach(
+      client == null ? null : session.uploader,
+      loadSnapshot: client == null ? null : snapshotLoaderFor(client),
+    );
     sync.attach(client);
   });
 
@@ -153,6 +164,7 @@ Future<void> main() async {
       profile: profile,
       lyrics: lyrics,
       history: history,
+      uploads: uploads,
     ),
   );
   unawaited(updates.check());
@@ -198,6 +210,7 @@ class YomiApp extends StatelessWidget {
     required this.profile,
     required this.lyrics,
     required this.history,
+    required this.uploads,
   });
 
   final UpdateController updates;
@@ -212,12 +225,14 @@ class YomiApp extends StatelessWidget {
   final ProfileController profile;
   final LyricsService lyrics;
   final PlayHistory history;
+  final UploadQueue uploads;
 
   @override
   Widget build(BuildContext context) {
     return MultiProvider(
       providers: [
         ChangeNotifierProvider<UpdateController>.value(value: updates),
+        ChangeNotifierProvider<UploadQueue>.value(value: uploads),
         ChangeNotifierProvider<PlaybackSyncController>.value(value: sync),
         ChangeNotifierProvider<SessionController>.value(value: session),
         ChangeNotifierProvider<PlayerController>.value(value: player),

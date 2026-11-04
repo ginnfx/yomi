@@ -7,7 +7,7 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import '../core/connection_probe.dart';
 import '../core/lan_discovery.dart';
 import '../core/subsonic_client.dart';
-import '../core/upload_client.dart';
+import '../core/upload/bulk_upload_api.dart';
 import 'connectivity_controller.dart';
 
 const int _defaultNavidromePort = 4533;
@@ -94,7 +94,7 @@ class SessionController extends ChangeNotifier {
   bool _isOnBackup = false;
 
   SubsonicClient? _client;
-  UploadClient? _uploader;
+  UploadTransport? _uploader;
   String? _awayUrl;
   String? _homeUrl;
   String _user = '';
@@ -126,7 +126,7 @@ class SessionController extends ChangeNotifier {
   bool get isRestoring => _isRestoring;
   bool get isSignedIn => _client != null;
   SubsonicClient get client => _client!;
-  UploadClient get uploader => _uploader!;
+  UploadTransport get uploader => _uploader!;
   String get username => _user;
   String get serverUrl => _client?.baseUrl ?? '';
   String get awayUrl => _awayUrl ?? '';
@@ -423,7 +423,7 @@ class SessionController extends ChangeNotifier {
       username: _user,
       password: _password,
     );
-    _uploader = UploadClient(serverUrl: url, auth: _client!);
+    _uploader = BulkUploadApi(serverUrl: url, auth: _client!);
   }
 
   @override

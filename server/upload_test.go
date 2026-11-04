@@ -30,7 +30,7 @@ func (fakeAuth) Verify(_ context.Context, q url.Values) (string, error) {
 func newTestServer(t *testing.T) (*httptest.Server, string) {
 	t.Helper()
 	dir := t.TempDir()
-	srv := newServer(Config{MusicDir: dir, MaxFileBytes: 1 << 10}, fakeAuth{}, nil)
+	srv := newServer(Config{MusicDir: dir, MaxFileBytes: 1 << 10}, fakeAuth{}, nil, nil)
 	ts := httptest.NewServer(srv.routes())
 	t.Cleanup(ts.Close)
 	return ts, dir
