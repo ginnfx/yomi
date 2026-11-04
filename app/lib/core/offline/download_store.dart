@@ -112,7 +112,15 @@ class DownloadStore {
     await _save();
   }
 
-  Future<void> _save() async {
+  Future<void> _saveQueue = Future.value();
+
+  Future<void> _save() {
+    final next = _saveQueue.then((_) => _writeIndex());
+    _saveQueue = next.then<void>((_) {}, onError: (Object _) {});
+    return next;
+  }
+
+  Future<void> _writeIndex() async {
     final temp = File('${_indexFile.path}.tmp');
     await temp.writeAsString(
       jsonEncode({for (final e in _entries.entries) e.key: e.value.toJson()}),

@@ -62,6 +62,9 @@ class ListeningController {
   SubsonicClient? _client;
   bool _isEvicting = false;
 
+  @visibleForTesting
+  bool get isEvicting => _isEvicting;
+
   void attach(SubsonicClient? client) {
     _client = client;
     if (client != null) {

@@ -430,6 +430,18 @@ class _FakeFetcher extends FileFetcher {
   }
 }
 
+class _TrackedHistory extends PlayHistory {
+  _TrackedHistory(super.file, {super.now});
+  Future<void> pending = Future.value();
+
+  @override
+  Future<void> record(Song song, PlayKind kind, DateTime at) {
+    final work = super.record(song, kind, at);
+    pending = work;
+    return work;
+  }
+}
+
 class _Harness {
   _Harness._(
     this.ledger,
@@ -492,7 +504,7 @@ class _Harness {
     );
     harness.submitted = submitted;
     harness.network = networkChanges;
-    harness.history = PlayHistory(
+    harness.history = _TrackedHistory(
       File('${dir.path}/h.json'),
       now: () => harness.now,
     );
@@ -523,7 +535,7 @@ class _Harness {
   final SubsonicClient client;
   late final List<String> submitted;
   late final StreamController<List<ConnectivityResult>> network;
-  late final PlayHistory history;
+  late final _TrackedHistory history;
   late final ListeningController controller;
   final trackChanges = ValueNotifier<int>(0);
   final positions = StreamController<Duration>.broadcast();
@@ -531,8 +543,16 @@ class _Harness {
   DateTime now = DateTime(2026, 3, 1);
 
   Future<void> settle() async {
-    for (var i = 0; i < 40; i++) {
-      await Future<void>.delayed(const Duration(milliseconds: 1));
+    await Future<void>.delayed(Duration.zero);
+    await history.pending;
+    await Future<void>.delayed(Duration.zero);
+    final deadline = DateTime.now().add(const Duration(seconds: 10));
+    while (controller.isEvicting ||
+        (downloads.pendingCount > 0 && downloads.pausedReason == null)) {
+      if (DateTime.now().isAfter(deadline)) {
+        throw StateError('Downloads did not settle');
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 5));
     }
   }
 
