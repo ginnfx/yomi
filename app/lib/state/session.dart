@@ -1,12 +1,15 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math';
 
 import 'package:flutter/widgets.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:http/http.dart' as http;
 
 import '../core/connection_probe.dart';
 import '../core/lan_discovery.dart';
 import '../core/subsonic_client.dart';
+import '../core/catalog_cache.dart';
 import '../core/messaging/messaging_api.dart';
 import '../core/server_role.dart';
 import '../core/upload/bulk_upload_api.dart';
@@ -16,9 +19,16 @@ const int _defaultNavidromePort = 4533;
 const Duration _homeProbeTimeout = Duration(milliseconds: 1500);
 const Duration _routeDebounce = Duration(milliseconds: 700);
 const Duration _reachTimeout = Duration(seconds: 4);
+
+/// Networks take a moment to wake up, so routine checks wait longer and try twice before
+/// anything on screen changes.
+const Duration _wakeTimeout = Duration(seconds: 8);
+const int _routineAttempts = 2;
 const Duration _reachRetryEvery = Duration(seconds: 15);
 const Duration _primaryRetryEvery = Duration(seconds: 60);
 const Duration _roleRetryAfter = Duration(seconds: 15);
+const String _accountKey = 'account_id';
+const String _lastUrlKey = 'last_url';
 const String _awayKey = 'server_url';
 const String _homeKey = 'home_url';
 const String _extraKey = 'extra_urls';
@@ -76,7 +86,10 @@ class SessionController extends ChangeNotifier with WidgetsBindingObserver {
     this.tunnelConnect,
     this.uploadPortFor,
     RoleProbe? roleProbe,
-  }) : _roleProbe = roleProbe ?? probeIsReplica,
+    this.catalogCacheFor,
+    http.Client? httpClient,
+  }) : _httpClient = httpClient,
+       _roleProbe = roleProbe ?? probeIsReplica,
        _storage =
            storage ??
            const FlutterSecureStorage(
@@ -91,6 +104,15 @@ class SessionController extends ChangeNotifier with WidgetsBindingObserver {
     _connectivity?.addListener(_onNetworkChanged);
   }
 
+  /// Opens the saved server data for an account. Without it nothing is saved.
+  final CatalogCache Function(String accountId)? catalogCacheFor;
+  CatalogCache? _catalogCache;
+  String? _accountId;
+
+  /// Stays the same however the server is reached, until sign-out.
+  String? get accountId => _accountId;
+
+  final http.Client? _httpClient;
   final FlutterSecureStorage _storage;
   final ConnectivityController? _connectivity;
   final HomeProbe _probe;
@@ -189,7 +211,15 @@ class SessionController extends ChangeNotifier with WidgetsBindingObserver {
           ActiveRoute.away => hasHomeAddress ? 'Away from home' : 'Connected',
         };
 
+  /// Restores the session and works out the best route. See [restoreSaved].
   Future<void> restore() async {
+    await restoreSaved();
+    await resolveRoute();
+  }
+
+  /// Signs back in from what's saved, without touching the network, so the app can show
+  /// real content while [resolveRoute] finds the best address behind it.
+  Future<void> restoreSaved() async {
     try {
       final away = await _storage.read(key: _awayKey);
       final user = await _storage.read(key: _userKey);
@@ -205,9 +235,12 @@ class SessionController extends ChangeNotifier with WidgetsBindingObserver {
         );
         _user = user;
         _password = password;
-        _route = ActiveRoute.away;
-        _build(away);
-        await refreshRoute();
+        await _openAccount();
+        final lastUrl = await _storage.read(key: _lastUrlKey);
+        final url = candidateUrls.contains(lastUrl) ? lastUrl! : away;
+        _route = url == _homeUrl ? ActiveRoute.home : ActiveRoute.away;
+        _isOnBackup = url != _homeUrl && url != _awayUrl;
+        _build(url);
       }
     } on Exception catch (error) {
       debugPrint('Could not restore session: $error');
@@ -215,7 +248,34 @@ class SessionController extends ChangeNotifier with WidgetsBindingObserver {
       _isRestoring = false;
       notifyListeners();
     }
+  }
+
+  /// Checks the route and the server after [restoreSaved].
+  Future<void> resolveRoute() async {
+    if (_client == null) return;
+    try {
+      await refreshRoute();
+    } on Exception catch (error) {
+      debugPrint('Could not choose a route: $error');
+    }
     if (_client != null) unawaited(checkServer());
+  }
+
+  /// Finds this account's saved ID, or creates one, and opens its saved data.
+  Future<void> _openAccount() async {
+    var id = await _storage.read(key: _accountKey);
+    if (id == null) {
+      final random = Random.secure();
+      id = List.generate(
+        16,
+        (_) => random.nextInt(256).toRadixString(16).padLeft(2, '0'),
+      ).join();
+      await _storage.write(key: _accountKey, value: id);
+    }
+    _accountId = id;
+    final cache = catalogCacheFor?.call(id);
+    await cache?.load();
+    _catalogCache = cache;
   }
 
   /// Verifies the credentials with the server before saving them. [homeInput] is the optional
@@ -298,6 +358,12 @@ class SessionController extends ChangeNotifier with WidgetsBindingObserver {
       // The tunnel exists because the away address failed, so it isn't undone by
       // merely choosing "away" again. Only home, or a failed check, moves off it.
       if (_isOnTunnel && chosen == ActiveRoute.away) return;
+      // A backup address took over because the away address failed. Move back only once
+      // the away address answers, or each check would bounce between the two.
+      if (_isOnBackup && chosen == ActiveRoute.away) {
+        final away = _awayUrl ?? _homeUrl!;
+        if (!(await _urlProbe(away, _user, _password)).isOk) return;
+      }
       _isOnTunnel = false;
       final url = chosen == ActiveRoute.home
           ? _homeUrl!
@@ -426,6 +492,11 @@ class SessionController extends ChangeNotifier with WidgetsBindingObserver {
     if (_connectivity != null && !_connectivity.isOnWifi)
       return ActiveRoute.away;
     if (await _probe(_homeUrl!, _user, _password)) return ActiveRoute.home;
+    // Already home: one slow answer, often just after wake, isn't a reason to leave.
+    if (_route == ActiveRoute.home &&
+        await _probe(_homeUrl!, _user, _password)) {
+      return ActiveRoute.home;
+    }
     unawaited(_healHome());
     return ActiveRoute.away;
   }
@@ -468,11 +539,36 @@ class SessionController extends ChangeNotifier with WidgetsBindingObserver {
     _debounce?.cancel();
     _debounce = Timer(_routeDebounce, () async {
       await refreshRoute();
-      await checkServer();
+      await _routineCheck();
     });
   }
 
+  /// A check nobody is waiting on. Only when it keeps failing does the full check run,
+  /// which may change the route or show the app as offline.
+  Future<void> _routineCheck() async {
+    final client = _client;
+    if (client == null) return;
+    for (var attempt = 0; attempt < _routineAttempts; attempt++) {
+      try {
+        await client.ping(timeout: _wakeTimeout);
+        if (!_isServerReachable) {
+          _reachRetry?.cancel();
+          _isServerReachable = true;
+          notifyListeners();
+        }
+        return;
+      } on Exception catch (error) {
+        debugPrint('Routine server check failed: $error');
+      }
+    }
+    await checkServer();
+  }
+
   Future<void> signOut() async {
+    final cache = _catalogCache;
+    _catalogCache = null;
+    _accountId = null;
+    await cache?.clear();
     try {
       await _storage.deleteAll();
     } on Exception catch (error) {
@@ -512,13 +608,24 @@ class SessionController extends ChangeNotifier with WidgetsBindingObserver {
       username: _user,
       password: _password,
       isReadOnly: () => _isOnReplica,
+      cache: _catalogCache,
+      httpClient: _httpClient,
     );
+    unawaited(_rememberUrl(url));
     unawaited(_refreshRole(url));
     _uploader = BulkUploadApi(
       serverUrl: url,
       auth: _client!,
       port: _uploadPort(url),
     );
+  }
+
+  Future<void> _rememberUrl(String url) async {
+    try {
+      await _storage.write(key: _lastUrlKey, value: url);
+    } on Exception catch (error) {
+      debugPrint('Could not save the last address: $error');
+    }
   }
 
   Future<void> _refreshRole(String url) async {

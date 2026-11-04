@@ -3,7 +3,6 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/format.dart';
-import '../../core/models.dart';
 import '../../state/home_controller.dart';
 import '../../state/messages_controller.dart';
 import '../../state/player_controller.dart';
@@ -13,7 +12,6 @@ import '../../state/settings.dart';
 import '../settings/profile_section.dart';
 import '../theme.dart';
 import '../widgets/album_card.dart';
-import '../widgets/async_section.dart';
 import '../widgets/cover_art.dart';
 import '../widgets/error_view.dart';
 import '../widgets/continue_listening.dart';
@@ -24,7 +22,7 @@ import 'collection_page.dart';
 import 'messages_page.dart';
 
 const int _shuffleBatch = 60;
-const int _quickPickCount = 6;
+const int _quickPlaylistCount = 3;
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key, this.greetingTime});
@@ -37,8 +35,6 @@ class HomePage extends StatefulWidget {
 }
 
 class _HomePageState extends State<HomePage> {
-  int _refresh = 0;
-
   Future<void> _shuffleEverything() async {
     final player = context.read<PlayerController>();
     final client = context.read<SessionController>().client;
@@ -64,7 +60,6 @@ class _HomePageState extends State<HomePage> {
         color: context.accent,
         backgroundColor: YomiColors.surfaceHigh,
         onRefresh: () async {
-          setState(() => _refresh++);
           await context.read<HomeController>().refresh();
         },
         child: ListView(
@@ -98,7 +93,6 @@ class _HomePageState extends State<HomePage> {
 
   Widget _section(String id, SessionController session) {
     final isWide = context.isWideLayout;
-    final client = session.client;
     final player = context.read<PlayerController>();
     switch (id) {
       case 'shuffle':
@@ -122,78 +116,62 @@ class _HomePageState extends State<HomePage> {
               : _ShuffleHero(onTap: _shuffleEverything),
         );
       case 'quick':
-        return AsyncSection<List<_QuickPick>>(
-          key: ValueKey('quick-${session.serverUrl}-$_refresh'),
-          skeleton: const Padding(
-            padding: EdgeInsets.only(top: 18),
-            child: Shimmer(child: SkeletonBox(height: 190, radius: 16)),
-          ),
-          load: () async {
-            final results = await Future.wait([
-              client.playlists(),
-              client.randomSongs(size: _quickPickCount),
-            ]);
-            final playlists = (results[0] as List<Playlist>)
-                .take(3)
-                .map(
-                  (p) => _QuickPick(
-                    p.name,
-                    '${p.songCount} songs · Playlist',
-                    p.coverArtId,
-                    () => openPlaylist(context, p),
-                  ),
-                );
-            final songs = results[1] as List<Song>;
-            final recent = [
-              for (var i = 0; i < songs.length; i++)
-                _QuickPick(
-                  songs[i].title,
-                  songs[i].artist,
-                  songs[i].coverArtId,
-                  () => player.playQueue(songs, startIndex: i),
-                ),
-            ];
-            return [
-              ...playlists,
-              ...recent,
-            ].take(_quickPickCount).toList(growable: false);
-          },
-          builder: (context, picks) => picks.isEmpty
-              ? const SizedBox.shrink()
-              : Padding(
-                  padding: const EdgeInsets.fromLTRB(
-                    kPagePadding,
-                    18,
-                    kPagePadding,
-                    0,
-                  ),
-                  child: isWide
-                      ? CompactMusicGrid(
-                          items: [
-                            for (final pick in picks)
-                              MusicShortcut(
-                                title: pick.title,
-                                subtitle: pick.subtitle,
-                                coverArtId: pick.coverArtId,
-                                onTap: pick.onTap,
-                              ),
-                          ],
-                        )
-                      : GridView.count(
-                          crossAxisCount: 2,
-                          shrinkWrap: true,
-                          physics: const NeverScrollableScrollPhysics(),
-                          mainAxisSpacing: YomiSpace.s,
-                          crossAxisSpacing: YomiSpace.s,
-                          childAspectRatio: 3.1,
-                          children: [
-                            for (final pick in picks) _QuickTile(pick: pick),
-                          ],
-                        ),
-                ),
-        );
+        return _quickSection(isWide, player);
     }
     return const SizedBox.shrink();
+  }
+
+  Widget _quickSection(bool isWide, PlayerController player) {
+    final home = context.watch<HomeController>();
+    final songs = home.quickSongs;
+    final picks = [
+      for (final playlist in home.quickPlaylists.take(_quickPlaylistCount))
+        _QuickPick(
+          playlist.name,
+          '${playlist.songCount} songs · Playlist',
+          playlist.coverArtId,
+          () => openPlaylist(context, playlist),
+        ),
+      for (var i = 0; i < songs.length; i++)
+        _QuickPick(
+          songs[i].title,
+          songs[i].artist,
+          songs[i].coverArtId,
+          () => player.playQueue(songs, startIndex: i),
+        ),
+    ].take(quickPickCount).toList(growable: false);
+    if (picks.isEmpty) {
+      return home.isLoading
+          ? const Padding(
+              padding: EdgeInsets.only(top: 18),
+              child: Shimmer(child: SkeletonBox(height: 190, radius: 16)),
+            )
+          : const SizedBox.shrink();
+    }
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(kPagePadding, 18, kPagePadding, 0),
+      child: isWide
+          ? CompactMusicGrid(
+              items: [
+                for (final pick in picks)
+                  MusicShortcut(
+                    title: pick.title,
+                    subtitle: pick.subtitle,
+                    coverArtId: pick.coverArtId,
+                    onTap: pick.onTap,
+                  ),
+              ],
+            )
+          : GridView.count(
+              crossAxisCount: 2,
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              mainAxisSpacing: YomiSpace.s,
+              crossAxisSpacing: YomiSpace.s,
+              childAspectRatio: 3.1,
+              children: [for (final pick in picks) _QuickTile(pick: pick)],
+            ),
+    );
   }
 }
 

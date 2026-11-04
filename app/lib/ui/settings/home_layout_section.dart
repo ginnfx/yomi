@@ -13,7 +13,7 @@ const Map<String, (String, String, IconData)> homeSectionInfo = {
   ),
   'quick': (
     'Quick picks',
-    'Your playlists and newest songs as tiles',
+    'Your playlists and a few songs as tiles',
     Icons.grid_view_rounded,
   ),
   'jumpBack': (

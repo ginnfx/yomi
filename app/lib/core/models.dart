@@ -178,6 +178,15 @@ class Playlist {
   final int durationSeconds;
   final String? owner;
   final String? coverArtId;
+
+  Map<String, Object?> toJson() => {
+    'id': id,
+    'name': name,
+    'songCount': songCount,
+    'duration': durationSeconds,
+    'owner': owner,
+    'coverArt': coverArtId,
+  };
 }
 
 @immutable

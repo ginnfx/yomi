@@ -329,6 +329,47 @@ void main() {
       );
     }
 
+    test('the top of Home is saved and returns unchanged after a restart', () async {
+      final first = await controller();
+      first.attach(client());
+      await first.refreshIfDue();
+      final picks = [for (final song in first.quickSongs) song.id];
+      expect(picks, isNotEmpty);
+
+      requests = 0;
+      final second = await controller();
+      await second.loadCache();
+      second.attach(client());
+
+      expect([for (final song in second.quickSongs) song.id], picks);
+      expect(requests, 0);
+    });
+
+    test('a background refresh waits instead of changing what is showing', () async {
+      final home = await controller();
+      home.attach(client());
+      await home.refreshIfDue();
+      final before = home.shelves;
+
+      clock = clock.add(const Duration(days: 1));
+      await home.refreshIfDue();
+      expect(identical(home.shelves.first, before.first), isTrue);
+
+      home.applyHeldBack();
+      expect(identical(home.shelves.first, before.first), isFalse);
+    });
+
+    test('pulling to refresh shows the new version straight away', () async {
+      final home = await controller();
+      home.attach(client());
+      await home.refreshIfDue();
+      final before = home.shelves;
+
+      await home.refresh();
+
+      expect(identical(home.shelves.first, before.first), isFalse);
+    });
+
     test('opens from disk without asking the server', () async {
       final first = await controller();
       first.attach(client());

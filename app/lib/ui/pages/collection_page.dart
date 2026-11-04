@@ -24,6 +24,7 @@ class CollectionPage extends StatefulWidget {
     required this.title,
     required this.subtitle,
     required this.loadSongs,
+    this.savedSongs,
     this.coverArtId,
     this.playlist,
   });
@@ -32,6 +33,9 @@ class CollectionPage extends StatefulWidget {
   final String subtitle;
   final String? coverArtId;
   final Future<List<Song>> Function() loadSongs;
+
+  /// What's already saved on this device, shown straight away while [loadSongs] runs.
+  final List<Song>? savedSongs;
 
   /// Set for editable playlists: enables swipe-to-remove, rename and delete.
   final Playlist? playlist;
@@ -42,6 +46,7 @@ class CollectionPage extends StatefulWidget {
 
 class _CollectionPageState extends State<CollectionPage> {
   late Future<List<Song>> _songs = widget.loadSongs();
+  late List<Song>? _lastSongs = widget.savedSongs;
   late String _title = widget.title;
 
   void _reload() => setState(() => _songs = widget.loadSongs());
@@ -122,7 +127,10 @@ class _CollectionPageState extends State<CollectionPage> {
         body: FutureBuilder<List<Song>>(
           future: _songs,
           builder: (context, snapshot) {
-            final songs = snapshot.data ?? const <Song>[];
+            final loaded = snapshot.data;
+            if (loaded != null) _lastSongs = loaded;
+            final known = _lastSongs;
+            final songs = known ?? const <Song>[];
             final savedCount = downloads.downloadedCountOf(songs);
             final isFullySaved = songs.isNotEmpty && savedCount == songs.length;
             final isBusy = songs.any((s) {
@@ -260,9 +268,10 @@ class _CollectionPageState extends State<CollectionPage> {
                     ],
                   ),
                 ),
-                if (snapshot.connectionState != ConnectionState.done)
+                if (known == null &&
+                    snapshot.connectionState != ConnectionState.done)
                   const SongListSkeleton(rows: 6),
-                if (snapshot.hasError)
+                if (known == null && snapshot.hasError)
                   ErrorView(error: snapshot.error!, onRetry: _reload),
                 if (snapshot.connectionState == ConnectionState.done &&
                     songs.isEmpty &&
@@ -402,6 +411,7 @@ void openPlaylist(BuildContext context, Playlist playlist) {
         coverArtId: playlist.coverArtId,
         playlist: playlist,
         loadSongs: () => client.playlistSongs(playlist.id),
+        savedSongs: client.cachedPlaylistSongs(playlist.id),
       ),
     ),
   );

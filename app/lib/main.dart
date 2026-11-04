@@ -12,6 +12,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'core/apk_installer.dart';
 import 'core/app_update.dart';
+import 'core/catalog_cache.dart';
 import 'core/cover_palette.dart';
 import 'core/listening/auto_download_ledger.dart';
 import 'core/listening/play_history.dart';
@@ -21,10 +22,12 @@ import 'core/offline/audio_cache.dart';
 import 'core/offline/cover_warmer.dart';
 import 'core/offline/download_store.dart';
 import 'core/tunnel/tunnel_bridge.dart';
+import 'core/subsonic_client.dart';
 import 'dev_hooks.dart';
 import 'state/appearance_controller.dart';
 import 'state/connectivity_controller.dart';
 import 'state/download_manager.dart';
+import 'state/catalog_controller.dart';
 import 'state/home_controller.dart';
 import 'state/listening_controller.dart';
 import 'state/messages_controller.dart';
@@ -99,6 +102,9 @@ Future<void> main() async {
     connectivity: connectivity,
     tunnelConnect: tunnel.connect,
     uploadPortFor: tunnel.uploadPortFor,
+    catalogCacheFor: (account) => CatalogCache(
+      file: File('${supportDir.path}/catalog/responses/$account.json'),
+    ),
   );
   final player = PlayerController(
     AudioPlayer(),
@@ -107,6 +113,7 @@ Future<void> main() async {
     settings: settings,
     connectivity: connectivity,
   );
+  await session.restoreSaved();
   session.startMonitoring();
   player.onStalled = () => unawaited(session.checkServer());
   final listeningDir = '${supportDir.path}/listening';
@@ -132,6 +139,9 @@ Future<void> main() async {
   player.onUpcomingSong = (client, song) {
     unawaited(lyrics.forSong(client, song));
   };
+  final catalog = CatalogController(
+    directory: Directory('${supportDir.path}/catalog/songs'),
+  );
   final home = HomeController(
     history: history,
     settings: settings,
@@ -166,12 +176,13 @@ Future<void> main() async {
     ),
   );
   profile.addListener(publishProfile);
-  session.addListener(() {
+  void followSession() {
     final client = session.isSignedIn ? session.client : null;
     player.attach(client);
     downloads.attach(client);
     listening.attach(client);
     home.attach(client);
+    unawaited(_followCatalog(catalog, client, session.accountId));
     if (client == null) {
       messages.attach(null);
     } else if (client.baseUrl != messagingUrl) {
@@ -184,13 +195,29 @@ Future<void> main() async {
       loadSnapshot: client == null ? null : snapshotLoaderFor(client),
     );
     sync.attach(client);
-  });
+  }
 
+  session.addListener(followSession);
+  followSession();
+
+  // Older versions kept these in preferences, where they could never be read again.
+  for (final key in prefs.getKeys().toList()) {
+    if (key.startsWith('catalog_v1_') || key.startsWith('song_count_')) {
+      await prefs.remove(key);
+    }
+  }
   final updates = await _buildUpdateController(prefs);
+  DateTime? hiddenSince;
   AppLifecycleListener(
+    onHide: () => hiddenSince = DateTime.now(),
     onResume: () {
+      final since = hiddenSince;
+      if (since != null && DateTime.now().difference(since) > _showNewHomeAfter) {
+        home.applyHeldBack();
+      }
       unawaited(updates.check());
       unawaited(home.refreshIfDue());
+      unawaited(catalog.sync());
       unawaited(messages.refresh());
     },
   );
@@ -211,13 +238,27 @@ Future<void> main() async {
       history: history,
       uploads: uploads,
       home: home,
+      catalog: catalog,
       tunnel: tunnel,
       messages: messages,
     ),
   );
   unawaited(updates.check());
-  await session.restore();
+  unawaited(session.resolveRoute());
   await runDevHooks(session, player);
+}
+
+/// Follows the signed-in account, then brings its saved songs up to date.
+/// How long the app must be away before a prepared Home replaces the one showing.
+const Duration _showNewHomeAfter = Duration(minutes: 30);
+
+Future<void> _followCatalog(
+  CatalogController catalog,
+  SubsonicClient? client,
+  String? accountId,
+) async {
+  await catalog.attach(client, accountId);
+  if (client != null) await catalog.sync();
 }
 
 Future<UpdateController> _buildUpdateController(SharedPreferences prefs) async {
@@ -260,6 +301,7 @@ class YomiApp extends StatelessWidget {
     required this.history,
     required this.uploads,
     required this.home,
+    required this.catalog,
     required this.tunnel,
     required this.messages,
   });
@@ -278,6 +320,7 @@ class YomiApp extends StatelessWidget {
   final PlayHistory history;
   final UploadQueue uploads;
   final HomeController home;
+  final CatalogController catalog;
   final TunnelController tunnel;
   final MessagesController messages;
 
@@ -290,6 +333,7 @@ class YomiApp extends StatelessWidget {
         ChangeNotifierProvider<MessagesController>.value(value: messages),
         ChangeNotifierProvider<TunnelController>.value(value: tunnel),
         ChangeNotifierProvider<HomeController>.value(value: home),
+        ChangeNotifierProvider<CatalogController>.value(value: catalog),
         ChangeNotifierProvider<PlaybackSyncController>.value(value: sync),
         ChangeNotifierProvider<SessionController>.value(value: session),
         ChangeNotifierProvider<PlayerController>.value(value: player),

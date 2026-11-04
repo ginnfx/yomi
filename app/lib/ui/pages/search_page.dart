@@ -238,7 +238,7 @@ class _SearchPageState extends State<SearchPage> {
                 padding: EdgeInsets.symmetric(horizontal: kPagePadding),
                 child: Shimmer(child: SkeletonBox(height: 200, radius: 16)),
               ),
-              key: ValueKey('browse-${client.baseUrl}-$_browseRevision'),
+              key: ValueKey('browse-$_browseRevision'),
               load: () {
                 final songs = <String, Song>{
                   for (final shelf in context.read<HomeController>().shelves)
