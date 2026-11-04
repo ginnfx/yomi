@@ -182,6 +182,30 @@ class SubsonicClient {
     ).map(Album.fromJson).toList(growable: false);
   }
 
+  Future<List<Genre>> genres() async {
+    final body = await _get('getGenres');
+    return jsonList(
+      body['genres'] as Map<String, dynamic>?,
+      'genre',
+    ).map(Genre.fromJson).toList(growable: false);
+  }
+
+  Future<List<Song>> songsByGenre(
+    String genre, {
+    int offset = 0,
+    int count = 100,
+  }) async {
+    final body = await _get('getSongsByGenre', {
+      'genre': genre,
+      'offset': offset,
+      'count': count,
+    });
+    return jsonList(
+      body['songsByGenre'] as Map<String, dynamic>?,
+      'song',
+    ).map(Song.fromJson).toList(growable: false);
+  }
+
   Future<List<Song>> randomSongs({int size = 20}) async {
     final body = await _get('getRandomSongs', {'size': size});
     return jsonList(

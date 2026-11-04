@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../../core/genres.dart';
 import '../../core/models.dart';
 import '../../state/player_controller.dart';
 import '../../state/session.dart';
@@ -12,6 +13,7 @@ import '../widgets/async_section.dart';
 import '../widgets/cover_art.dart';
 import '../widgets/compact_music_grid.dart';
 import '../widgets/error_view.dart';
+import '../widgets/genre_filter_bar.dart';
 import '../widgets/shimmer.dart';
 import '../widgets/song_tile.dart';
 import 'collection_page.dart';
@@ -32,6 +34,7 @@ class _SearchPageState extends State<SearchPage> {
   Timer? _timer;
   List<Artist> _artists = const [];
   List<Song> _songs = const [];
+  Set<String> _selectedGenres = const {};
   bool _hasSearched = false;
   bool _hasMore = false;
   Object? _error;
@@ -53,6 +56,7 @@ class _SearchPageState extends State<SearchPage> {
         _hasSearched = false;
         _artists = const [];
         _songs = const [];
+        _selectedGenres = const {};
         _error = null;
         _isLoading = false;
       });
@@ -91,6 +95,22 @@ class _SearchPageState extends State<SearchPage> {
       });
     }
   }
+
+  /// Genres present in the current results, so a chip can never lead to nothing.
+  List<GenreGroup> get _resultGenres {
+    final counts = <String, int>{};
+    for (final genre in _songs.map((song) => song.genre).whereType<String>()) {
+      counts[genre] = (counts[genre] ?? 0) + 1;
+    }
+    return groupGenres([
+      for (final entry in counts.entries) Genre(entry.key, entry.value),
+    ]);
+  }
+
+  List<Song> get _visibleSongs => [
+    for (final song in _songs)
+      if (songMatchesGenres(song, _selectedGenres)) song,
+  ];
 
   @override
   Widget build(BuildContext context) {
@@ -265,10 +285,16 @@ class _SearchPageState extends State<SearchPage> {
                   ),
                 ),
               ),
-              for (var i = 0; i < _songs.length; i++)
+              GenreFilterBar(
+                groups: _resultGenres,
+                selected: _selectedGenres,
+                onChanged: (selected) =>
+                    setState(() => _selectedGenres = selected),
+              ),
+              for (var i = 0; i < _visibleSongs.length; i++)
                 SongTile(
-                  song: _songs[i],
-                  onTap: () => player.playQueue(_songs, startIndex: i),
+                  song: _visibleSongs[i],
+                  onTap: () => player.playQueue(_visibleSongs, startIndex: i),
                 ),
               if (_hasMore)
                 Padding(

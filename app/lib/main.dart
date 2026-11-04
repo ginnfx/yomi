@@ -24,6 +24,7 @@ import 'dev_hooks.dart';
 import 'state/appearance_controller.dart';
 import 'state/connectivity_controller.dart';
 import 'state/download_manager.dart';
+import 'state/home_controller.dart';
 import 'state/listening_controller.dart';
 import 'state/player_controller.dart';
 import 'state/playback_sync_controller.dart';
@@ -117,6 +118,12 @@ Future<void> main() async {
   player.onUpcomingSong = (client, song) {
     unawaited(lyrics.forSong(client, song));
   };
+  final home = HomeController(
+    history: history,
+    settings: settings,
+    cacheFile: File('$listeningDir/home.json'),
+  );
+  await home.loadCache();
   final uploadsDir = '${supportDir.path}/uploads';
   final uploads = UploadQueue(
     queueFile: File('$uploadsDir/queue.json'),
@@ -140,6 +147,7 @@ Future<void> main() async {
     player.attach(client);
     downloads.attach(client);
     listening.attach(client);
+    home.attach(client);
     uploads.attach(
       client == null ? null : session.uploader,
       loadSnapshot: client == null ? null : snapshotLoaderFor(client),
@@ -148,7 +156,12 @@ Future<void> main() async {
   });
 
   final updates = await _buildUpdateController(prefs);
-  AppLifecycleListener(onResume: () => unawaited(updates.check()));
+  AppLifecycleListener(
+    onResume: () {
+      unawaited(updates.check());
+      unawaited(home.refreshIfDue());
+    },
+  );
 
   runApp(
     YomiApp(
@@ -165,6 +178,7 @@ Future<void> main() async {
       lyrics: lyrics,
       history: history,
       uploads: uploads,
+      home: home,
     ),
   );
   unawaited(updates.check());
@@ -211,6 +225,7 @@ class YomiApp extends StatelessWidget {
     required this.lyrics,
     required this.history,
     required this.uploads,
+    required this.home,
   });
 
   final UpdateController updates;
@@ -226,6 +241,7 @@ class YomiApp extends StatelessWidget {
   final LyricsService lyrics;
   final PlayHistory history;
   final UploadQueue uploads;
+  final HomeController home;
 
   @override
   Widget build(BuildContext context) {
@@ -233,6 +249,7 @@ class YomiApp extends StatelessWidget {
       providers: [
         ChangeNotifierProvider<UpdateController>.value(value: updates),
         ChangeNotifierProvider<UploadQueue>.value(value: uploads),
+        ChangeNotifierProvider<HomeController>.value(value: home),
         ChangeNotifierProvider<PlaybackSyncController>.value(value: sync),
         ChangeNotifierProvider<SessionController>.value(value: session),
         ChangeNotifierProvider<PlayerController>.value(value: player),

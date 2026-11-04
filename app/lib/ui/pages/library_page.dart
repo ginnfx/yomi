@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../../core/genres.dart';
 import '../../core/models.dart';
 import '../../core/subsonic_client.dart';
 import '../../state/connectivity_controller.dart';
@@ -14,6 +15,7 @@ import '../widgets/async_section.dart';
 import '../widgets/cover_art.dart';
 import '../widgets/downloaded_songs.dart';
 import '../widgets/error_view.dart';
+import '../widgets/genre_filter_bar.dart';
 import '../widgets/playlist_sheet.dart';
 import '../widgets/shimmer.dart';
 import '../widgets/song_tile.dart';
@@ -262,14 +264,49 @@ class _SongsTab extends StatefulWidget {
 class _SongsTabState extends State<_SongsTab> {
   final _scroll = ScrollController();
   final List<Song> _songs = [];
+  List<GenreGroup> _genres = const [];
+  Set<String> _selectedGenres = const {};
+  GenrePager? _pager;
   Object? _error;
   bool _isLoading = false;
   bool _isDone = false;
+  int _generation = 0;
 
   @override
   void initState() {
     super.initState();
     _scroll.addListener(_onScroll);
+    _loadMore();
+    _loadGenres();
+  }
+
+  Future<void> _loadGenres() async {
+    try {
+      final genres = await context.read<SessionController>().client.genres();
+      if (mounted) setState(() => _genres = groupGenres(genres));
+    } on Object catch (error) {
+      // Filtering is optional; the list works without it.
+      debugPrint('Could not load genres: $error');
+    }
+  }
+
+  void _setGenres(Set<String> selected) {
+    final client = context.read<SessionController>().client;
+    setState(() {
+      _selectedGenres = selected;
+      _pager = selected.isEmpty
+          ? null
+          : GenrePager(
+              client,
+              _genres.where((group) => selected.contains(group.name)),
+              pageSize: _pageSize,
+            );
+      _songs.clear();
+      _isDone = false;
+      _isLoading = false;
+      _error = null;
+      _generation++;
+    });
     _loadMore();
   }
 
@@ -289,19 +326,24 @@ class _SongsTabState extends State<_SongsTab> {
       _isLoading = true;
       _error = null;
     });
+    final generation = _generation;
+    final pager = _pager;
     try {
-      final page = await context.read<SessionController>().client.songs(
-        offset: _songs.length,
-        count: _pageSize,
-      );
-      if (!mounted) return;
+      final page = pager != null
+          ? await pager.nextPage()
+          : await context.read<SessionController>().client.songs(
+              offset: _songs.length,
+              count: _pageSize,
+            );
+      // The filter changed while this page was on its way.
+      if (!mounted || generation != _generation) return;
       setState(() {
         _songs.addAll(page);
-        _isDone = page.length < _pageSize;
+        _isDone = pager != null ? pager.isDone : page.length < _pageSize;
         _isLoading = false;
       });
     } on Object catch (error) {
-      if (!mounted) return;
+      if (!mounted || generation != _generation) return;
       setState(() {
         _error = error;
         _isLoading = false;
@@ -316,13 +358,15 @@ class _SongsTabState extends State<_SongsTab> {
       return ListView(
         children: [ErrorView(error: _error!, onRetry: _loadMore)],
       );
-    if (_songs.isEmpty && _isLoading) return const SongListSkeleton(rows: 8);
+    if (_songs.isEmpty && _isLoading && _selectedGenres.isEmpty) {
+      return const SongListSkeleton(rows: 8);
+    }
     return ListView.builder(
       controller: _scroll,
       itemCount: _songs.length + 2,
       itemBuilder: (context, i) {
         if (i == 0) {
-          return Padding(
+          final actions = Padding(
             padding: const EdgeInsets.fromLTRB(
               kPagePadding,
               4,
@@ -371,6 +415,17 @@ class _SongsTabState extends State<_SongsTab> {
                 ),
               ],
             ),
+          );
+          return Column(
+            children: [
+              actions,
+              GenreFilterBar(
+                groups: _genres,
+                selected: _selectedGenres,
+                onChanged: _setGenres,
+              ),
+              const SizedBox(height: YomiSpace.s),
+            ],
           );
         }
         if (i == _songs.length + 1) {

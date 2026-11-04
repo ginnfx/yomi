@@ -33,7 +33,7 @@ class PlayEvent {
 }
 
 /// What was played and skipped on this device, kept in one small JSON file.
-class PlayHistory {
+class PlayHistory extends ChangeNotifier {
   PlayHistory(this.file, {DateTime Function()? now})
     : _now = now ?? DateTime.now;
 
@@ -87,6 +87,7 @@ class PlayHistory {
       song.id: song,
     });
     await _save();
+    notifyListeners();
   }
 
   /// Full listens of [songId] after [since].

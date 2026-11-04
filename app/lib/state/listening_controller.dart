@@ -26,27 +26,24 @@ class ListeningController {
     required this.downloads,
     required this.settings,
     required this.connectivity,
-    required Listenable trackChanges,
-    required Song? Function() currentSong,
-    required bool Function() isPlaying,
+    required this.trackChanges,
+    required this.currentSong,
+    required this.isPlaying,
     required Stream<Duration> positions,
     DateTime Function()? now,
-  }) : _trackChanges = trackChanges,
-       _currentSong = currentSong,
-       _isPlaying = isPlaying,
-       _now = now ?? DateTime.now {
+  }) : _now = now ?? DateTime.now {
     _tracker = PlayTracker(
       onStarted: _onStarted,
       onScrobble: _onScrobble,
       onCompleted: _onCompleted,
       onSkipped: _onSkipped,
     );
-    _trackChanges.addListener(_onTrackChange);
+    trackChanges.addListener(_onTrackChange);
     connectivity.addListener(_onConnectivityChange);
     downloads.addListener(_enforceCap);
     _positions = positions.listen(
       (position) =>
-          _tracker.position(position, isPlaying: _isPlaying(), now: _now()),
+          _tracker.position(position, isPlaying: isPlaying(), now: _now()),
     );
   }
 
@@ -56,9 +53,9 @@ class ListeningController {
   final DownloadManager downloads;
   final SettingsController settings;
   final ConnectivityController connectivity;
-  final Listenable _trackChanges;
-  final Song? Function() _currentSong;
-  final bool Function() _isPlaying;
+  final Listenable trackChanges;
+  final Song? Function() currentSong;
+  final bool Function() isPlaying;
   final DateTime Function() _now;
   late final PlayTracker _tracker;
   late final StreamSubscription<Duration> _positions;
@@ -73,7 +70,7 @@ class ListeningController {
     }
   }
 
-  void _onTrackChange() => _tracker.trackChanged(_currentSong(), _now());
+  void _onTrackChange() => _tracker.trackChanged(currentSong(), _now());
 
   void _onConnectivityChange() {
     if (connectivity.isOffline) return;
@@ -154,7 +151,7 @@ class ListeningController {
     final saved = ledger.autoIds.where(downloads.isDownloaded).toList();
     var total = saved.fold<int>(0, (sum, id) => sum + downloads.bytesOf(id));
     if (total <= kAutoDownloadCapBytes) return;
-    final playing = _currentSong()?.id;
+    final playing = currentSong()?.id;
     final epoch = DateTime.fromMillisecondsSinceEpoch(0);
     final oldestFirst = saved.where((id) => id != playing).toList()
       ..sort(
@@ -178,7 +175,7 @@ class ListeningController {
   }
 
   void dispose() {
-    _trackChanges.removeListener(_onTrackChange);
+    trackChanges.removeListener(_onTrackChange);
     connectivity.removeListener(_onConnectivityChange);
     downloads.removeListener(_enforceCap);
     unawaited(_positions.cancel());

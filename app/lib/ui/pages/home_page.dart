@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 
 import '../../core/format.dart';
 import '../../core/models.dart';
+import '../../state/home_controller.dart';
 import '../../state/player_controller.dart';
 import '../../state/profile_controller.dart';
 import '../../state/session.dart';
@@ -13,16 +14,15 @@ import '../theme.dart';
 import '../widgets/album_card.dart';
 import '../widgets/async_section.dart';
 import '../widgets/cover_art.dart';
+import '../widgets/error_view.dart';
 import '../widgets/continue_listening.dart';
 import '../widgets/compact_music_grid.dart';
 import '../widgets/shimmer.dart';
 import '../widgets/profile_panel.dart';
-import '../widgets/song_tile.dart';
 import 'collection_page.dart';
 
 const int _shuffleBatch = 60;
 const int _quickPickCount = 6;
-const int _recentCount = 16;
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -52,6 +52,7 @@ class _HomePageState extends State<HomePage> {
     final session = context.watch<SessionController>();
     final profile = context.watch<ProfileController>();
     final sections = context.watch<SettingsController>().visibleHomeSections;
+    final home = context.watch<HomeController>();
     return SafeArea(
       bottom: false,
       child: RefreshIndicator(
@@ -59,14 +60,15 @@ class _HomePageState extends State<HomePage> {
         backgroundColor: YomiColors.surfaceHigh,
         onRefresh: () async {
           setState(() => _refresh++);
-          await Future<void>.delayed(const Duration(milliseconds: 500));
+          await context.read<HomeController>().refresh();
         },
         child: ListView(
           children: [
             _Header(name: profile.displayName(session.username)),
             const ContinueListening(),
             for (final id in sections) _section(id, session),
-            if (sections.isEmpty)
+            const _Shelves(),
+            if (sections.isEmpty && home.shelves.isEmpty && !home.isLoading)
               Padding(
                 padding: const EdgeInsets.all(48),
                 child: Text(
@@ -182,51 +184,49 @@ class _HomePageState extends State<HomePage> {
                         ),
                 ),
         );
-      case 'recent':
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const SectionTitle('Recently added'),
-            AsyncSection<List<Song>>(
-              key: ValueKey('recent-$_refresh'),
-              skeleton: const CardRowSkeleton(),
-              load: () => client.recentSongs(count: _recentCount),
-              builder: (context, songs) => songs.isEmpty
-                  ? const _Empty('Nothing yet')
-                  : CardRow(
-                      children: [
-                        for (var i = 0; i < songs.length; i++)
-                          AlbumCard.song(
-                            songs[i],
-                            () => player.playQueue(songs, startIndex: i),
-                          ),
-                      ],
-                    ),
-            ),
-          ],
-        );
-      case 'discover':
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const SectionTitle('Discover'),
-            AsyncSection<List<Song>>(
-              key: ValueKey('discover-$_refresh'),
-              load: () => client.randomSongs(size: 8),
-              builder: (context, songs) => Column(
-                children: [
-                  for (var i = 0; i < songs.length; i++)
-                    SongTile(
-                      song: songs[i],
-                      onTap: () => player.playQueue(songs, startIndex: i),
-                    ),
-                ],
-              ),
-            ),
-          ],
-        );
     }
     return const SizedBox.shrink();
+  }
+}
+
+/// The shelves that change with listening. See [HomeController].
+class _Shelves extends StatelessWidget {
+  const _Shelves();
+
+  @override
+  Widget build(BuildContext context) {
+    final home = context.watch<HomeController>();
+    final player = context.read<PlayerController>();
+    final shelves = home.shelves;
+    if (shelves.isEmpty) {
+      if (home.isLoading) {
+        return const Padding(
+          padding: EdgeInsets.only(top: YomiSpace.xl),
+          child: CardRowSkeleton(),
+        );
+      }
+      final error = home.error;
+      return error == null
+          ? const SizedBox.shrink()
+          : ErrorView(error: error, onRetry: home.refresh);
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        for (final shelf in shelves) ...[
+          SectionTitle(shelf.title),
+          CardRow(
+            children: [
+              for (var i = 0; i < shelf.songs.length; i++)
+                AlbumCard.song(
+                  shelf.songs[i],
+                  () => player.playQueue(shelf.songs, startIndex: i),
+                ),
+            ],
+          ),
+        ],
+      ],
+    );
   }
 }
 
@@ -338,23 +338,4 @@ class _ShuffleHero extends StatelessWidget {
       ),
     );
   }
-}
-
-class _Empty extends StatelessWidget {
-  const _Empty(this.message);
-
-  final String message;
-
-  @override
-  Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.symmetric(horizontal: kPagePadding, vertical: 8),
-    child: Text(
-      message,
-      style: yomiText(
-        14,
-        weight: FontWeight.w500,
-        color: YomiColors.textSecondary,
-      ),
-    ),
-  );
 }

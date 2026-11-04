@@ -124,14 +124,13 @@ class UploadQueue extends ChangeNotifier {
     required this.queueFile,
     required this.hashCacheFile,
     FileInspector? inspector,
-    Duration retryAfterUnreachable = kUnreachableRetryAfter,
-  }) : _inspector = inspector ?? inspectFile,
-       _retryAfterUnreachable = retryAfterUnreachable;
+    this.retryAfterUnreachable = kUnreachableRetryAfter,
+  }) : _inspector = inspector ?? inspectFile;
 
   final File queueFile;
   final File hashCacheFile;
   final FileInspector _inspector;
-  final Duration _retryAfterUnreachable;
+  final Duration retryAfterUnreachable;
 
   final Map<String, UploadItem> _items = {};
   final Map<String, double> _progress = {};
@@ -529,7 +528,7 @@ class UploadQueue extends ChangeNotifier {
   void _scheduleResumeIfWaiting() {
     _resumeTimer?.cancel();
     if (_pause != UploadPause.waitingForServer || _isDisposed) return;
-    _resumeTimer = Timer(_retryAfterUnreachable, () {
+    _resumeTimer = Timer(retryAfterUnreachable, () {
       if (_pause == UploadPause.waitingForServer) resume();
     });
   }
