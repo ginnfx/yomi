@@ -143,6 +143,7 @@ void main() {
       final first = newQueue()..attach(transport);
       await first.addFolder(music.path);
       await settle(first);
+      await first.save();
       first.dispose();
       // Pretend the app died with b unfinished by editing what was saved.
       final saved = newQueue();

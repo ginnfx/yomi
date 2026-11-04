@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 import '../../core/format.dart';
 import '../../core/models.dart';
 import '../../state/home_controller.dart';
+import '../../state/messages_controller.dart';
 import '../../state/player_controller.dart';
 import '../../state/profile_controller.dart';
 import '../../state/session.dart';
@@ -20,12 +21,16 @@ import '../widgets/compact_music_grid.dart';
 import '../widgets/shimmer.dart';
 import '../widgets/profile_panel.dart';
 import 'collection_page.dart';
+import 'messages_page.dart';
 
 const int _shuffleBatch = 60;
 const int _quickPickCount = 6;
 
 class HomePage extends StatefulWidget {
-  const HomePage({super.key});
+  const HomePage({super.key, this.greetingTime});
+
+  /// Fixes the greeting's time, for screenshots that shouldn't change by the hour.
+  final DateTime? greetingTime;
 
   @override
   State<HomePage> createState() => _HomePageState();
@@ -64,7 +69,10 @@ class _HomePageState extends State<HomePage> {
         },
         child: ListView(
           children: [
-            _Header(name: profile.displayName(session.username)),
+            _Header(
+              name: profile.displayName(session.username),
+              greetingTime: widget.greetingTime,
+            ),
             const ContinueListening(),
             for (final id in sections) _section(id, session),
             const _Shelves(),
@@ -231,12 +239,14 @@ class _Shelves extends StatelessWidget {
 }
 
 class _Header extends StatelessWidget {
-  const _Header({required this.name});
+  const _Header({required this.name, this.greetingTime});
 
   final String name;
+  final DateTime? greetingTime;
 
   @override
   Widget build(BuildContext context) {
+    final greeting = greetingFor(greetingTime ?? DateTime.now());
     return Padding(
       padding: const EdgeInsets.fromLTRB(
         kPagePadding,
@@ -259,14 +269,37 @@ class _Header extends StatelessWidget {
           ],
           Expanded(
             child: Text(
-              greetingFor(DateTime.now()),
+              greeting,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              semanticsLabel: '${greetingFor(DateTime.now())}, $name',
+              semanticsLabel: '$greeting, $name',
               style: yomiText(24, weight: FontWeight.w800, letterSpacing: -0.5),
             ),
           ),
+          const _MessagesButton(),
         ],
+      ),
+    );
+  }
+}
+
+class _MessagesButton extends StatelessWidget {
+  const _MessagesButton();
+
+  @override
+  Widget build(BuildContext context) {
+    final unread = context.select<MessagesController, int>(
+      (messages) => messages.unreadTotal,
+    );
+    return IconButton(
+      tooltip: unread > 0 ? 'Messages, $unread unread' : 'Messages',
+      onPressed: () => openMessages(context),
+      icon: Badge(
+        isLabelVisible: unread > 0,
+        backgroundColor: context.accent,
+        textColor: Colors.black,
+        label: Text('$unread'),
+        child: const Icon(Icons.chat_bubble_outline_rounded),
       ),
     );
   }

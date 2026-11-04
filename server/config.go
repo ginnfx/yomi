@@ -15,6 +15,7 @@ const (
 	defaultBatteryFile   = "/data/local/tmp/yomi/battery.json"
 	defaultTailscaleBin  = "/data/local/tmp/tailscale/tailscale"
 	defaultTailscaleSock = "/data/local/tmp/tailscale/tailscaled.sock"
+	defaultMessagesDir   = "/data/local/tmp/navidrome/yomi-messages"
 	defaultMaxFileMB     = 150
 	defaultScanDebounce  = 5 * time.Minute
 	maxConcurrentUploads = 2
@@ -39,6 +40,9 @@ type Config struct {
 	ReplicaApply    string
 	BackupCommand   string
 	BackupDir       string
+	MessagesDir     string
+	RelayURL        string
+	RelayKey        string
 	MaxFileBytes    int64
 	ScanDebounce    time.Duration
 }
@@ -62,6 +66,9 @@ func loadConfig() Config {
 		ReplicaApply:    os.Getenv("YOMI_REPLICA_APPLY"),
 		BackupCommand:   os.Getenv("YOMI_BACKUP_CMD"),
 		BackupDir:       os.Getenv("YOMI_BACKUP_DIR"),
+		MessagesDir:     envOr("YOMI_MESSAGES_DIR", defaultMessagesDir),
+		RelayURL:        os.Getenv("YOMI_RELAY_URL"),
+		RelayKey:        os.Getenv("YOMI_RELAY_KEY"),
 		MaxFileBytes:    int64(envInt("YOMI_MAX_FILE_MB", defaultMaxFileMB)) << 20,
 		ScanDebounce:    defaultScanDebounce,
 	}

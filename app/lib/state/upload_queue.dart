@@ -547,6 +547,10 @@ class UploadQueue extends ChangeNotifier {
     }
   }
 
+  /// Writes the queue now. Otherwise saving is batched, so a kill can lose a few
+  /// seconds of progress; the server's duplicate check makes that harmless.
+  Future<void> save() => _save();
+
   Future<void> _save() => _writeAtomically(
     queueFile,
     jsonEncode([for (final item in _items.values) item.toJson()]),

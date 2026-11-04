@@ -25,6 +25,14 @@ func main() {
 	server := newServer(cfg, auth, navidromeScan(cfg.NavidromeURL), index)
 	server.Status = newStatusReader(cfg, index)
 	server.Backups = newBackupSource(cfg)
+	messages, err := openMessageStore(cfg.MessagesDir, time.Now)
+	if err != nil {
+		// Music matters more than messages, so the server still starts.
+		log.Printf("messages disabled: %v", err)
+	} else {
+		server.Messages = messages
+		server.Relay = newPushRelay(cfg)
+	}
 	if cfg.Role == roleReplica {
 		if cfg.PrimaryURL == "" || cfg.ReplicaUser == "" || cfg.ReplicaPassword == "" || cfg.ReplicaDatabase == "" {
 			log.Fatal("replica needs YOMI_PRIMARY, YOMI_REPLICA_USER, YOMI_REPLICA_PASSWORD and YOMI_REPLICA_DB")

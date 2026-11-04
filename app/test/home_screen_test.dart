@@ -6,6 +6,7 @@ import 'package:provider/provider.dart';
 import 'package:yomi/core/models.dart';
 import 'package:yomi/core/recommendations.dart';
 import 'package:yomi/state/home_controller.dart';
+import 'package:yomi/state/messages_controller.dart';
 import 'package:yomi/state/playback_sync_controller.dart';
 import 'package:yomi/ui/pages/home_page.dart';
 import 'package:yomi/ui/settings/profile_section.dart';
@@ -64,8 +65,11 @@ void main() {
         ]),
       ),
       ChangeNotifierProvider<PlaybackSyncController>.value(value: _FakeSync()),
+      ChangeNotifierProvider<MessagesController>(
+        create: (_) => MessagesController(),
+      ),
     ],
-    child: const Material(child: HomePage()),
+    child: Material(child: HomePage(greetingTime: DateTime(2026, 1, 1, 15))),
   );
 
   final hideQuick = <String, Object>{

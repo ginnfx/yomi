@@ -216,6 +216,15 @@ class SubsonicClient {
     ).map(Album.fromJson).toList(growable: false);
   }
 
+  Future<Song> song(String songId) async {
+    final body = await _get('getSong', {'id': songId});
+    final json = body['song'];
+    if (json is! Map<String, dynamic>) {
+      throw const SubsonicException('That song is not on this server.');
+    }
+    return Song.fromJson(json);
+  }
+
   Future<List<Genre>> genres() async {
     final body = await _get('getGenres');
     return jsonList(

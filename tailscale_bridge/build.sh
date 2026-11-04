@@ -5,6 +5,7 @@ set -euo pipefail
 cd "$(dirname "$0")"
 export PATH="$PATH:$(go env GOPATH)/bin"
 command -v gomobile >/dev/null || go install golang.org/x/mobile/cmd/gomobile@latest
+command -v gobind >/dev/null || go install golang.org/x/mobile/cmd/gobind@latest
 # Same SDK the Flutter build uses, when nothing else says where it is.
 if [ -z "${ANDROID_HOME:-}" ] && [ -f ../app/android/local.properties ]; then
   ANDROID_HOME=$(sed -n 's/^sdk\.dir=//p' ../app/android/local.properties)

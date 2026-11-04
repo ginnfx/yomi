@@ -30,7 +30,7 @@ void main() {
     );
     await session.restore();
     await session.checkServer();
-    await Future<void>.delayed(const Duration(milliseconds: 200));
+    await Future<void>.delayed(const Duration(milliseconds: 20));
   }
 
   test(

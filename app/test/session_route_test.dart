@@ -83,13 +83,21 @@ void main() {
     final session = await signedIn();
     expect(session.serverUrl, home);
 
+    // Waits for the switch instead of a fixed time, which a busy machine can overrun.
+    Future<void> waitForUrl(String url) async {
+      final deadline = DateTime.now().add(const Duration(seconds: 10));
+      while (session.serverUrl != url && DateTime.now().isBefore(deadline)) {
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+      }
+    }
+
     network.add([ConnectivityResult.mobile]);
-    await Future<void>.delayed(const Duration(milliseconds: 900));
+    await waitForUrl(away);
     expect(session.serverUrl, away);
     expect(session.routeLabel, 'Away from home');
 
     network.add([ConnectivityResult.wifi]);
-    await Future<void>.delayed(const Duration(milliseconds: 900));
+    await waitForUrl(home);
     expect(session.serverUrl, home);
   });
 

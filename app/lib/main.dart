@@ -27,6 +27,7 @@ import 'state/connectivity_controller.dart';
 import 'state/download_manager.dart';
 import 'state/home_controller.dart';
 import 'state/listening_controller.dart';
+import 'state/messages_controller.dart';
 import 'state/player_controller.dart';
 import 'state/playback_sync_controller.dart';
 import 'state/profile_controller.dart';
@@ -154,12 +155,29 @@ Future<void> main() async {
     deviceId: deviceId,
     pollInterval: Duration(seconds: Platform.isMacOS ? 2 : 5),
   );
+  final messages = MessagesController();
+  String? messagingUrl;
+  void publishProfile() => unawaited(
+    messages.publishProfile(
+      displayName: profile.nickname,
+      bio: profile.bio,
+      avatar: profile.avatarFile,
+    ),
+  );
+  profile.addListener(publishProfile);
   session.addListener(() {
     final client = session.isSignedIn ? session.client : null;
     player.attach(client);
     downloads.attach(client);
     listening.attach(client);
     home.attach(client);
+    if (client == null) {
+      messages.attach(null);
+    } else if (client.baseUrl != messagingUrl) {
+      messagingUrl = client.baseUrl;
+      messages.attach(session.messaging);
+      publishProfile();
+    }
     uploads.attach(
       client == null ? null : session.uploader,
       loadSnapshot: client == null ? null : snapshotLoaderFor(client),
@@ -172,6 +190,7 @@ Future<void> main() async {
     onResume: () {
       unawaited(updates.check());
       unawaited(home.refreshIfDue());
+      unawaited(messages.refresh());
     },
   );
 
@@ -192,6 +211,7 @@ Future<void> main() async {
       uploads: uploads,
       home: home,
       tunnel: tunnel,
+      messages: messages,
     ),
   );
   unawaited(updates.check());
@@ -240,6 +260,7 @@ class YomiApp extends StatelessWidget {
     required this.uploads,
     required this.home,
     required this.tunnel,
+    required this.messages,
   });
 
   final UpdateController updates;
@@ -257,6 +278,7 @@ class YomiApp extends StatelessWidget {
   final UploadQueue uploads;
   final HomeController home;
   final TunnelController tunnel;
+  final MessagesController messages;
 
   @override
   Widget build(BuildContext context) {
@@ -264,6 +286,7 @@ class YomiApp extends StatelessWidget {
       providers: [
         ChangeNotifierProvider<UpdateController>.value(value: updates),
         ChangeNotifierProvider<UploadQueue>.value(value: uploads),
+        ChangeNotifierProvider<MessagesController>.value(value: messages),
         ChangeNotifierProvider<TunnelController>.value(value: tunnel),
         ChangeNotifierProvider<HomeController>.value(value: home),
         ChangeNotifierProvider<PlaybackSyncController>.value(value: sync),

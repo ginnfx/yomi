@@ -7,6 +7,7 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import '../core/connection_probe.dart';
 import '../core/lan_discovery.dart';
 import '../core/subsonic_client.dart';
+import '../core/messaging/messaging_api.dart';
 import '../core/server_role.dart';
 import '../core/upload/bulk_upload_api.dart';
 import 'connectivity_controller.dart';
@@ -150,6 +151,8 @@ class SessionController extends ChangeNotifier {
   bool get isSignedIn => _client != null;
   SubsonicClient get client => _client!;
   UploadTransport get uploader => _uploader!;
+  MessagingTransport get messaging =>
+      MessagingApi(serverUrl: serverUrl, auth: client, port: uploadServicePort);
   String get username => _user;
   String get serverUrl => _client?.baseUrl ?? '';
   String get awayUrl => _awayUrl ?? '';

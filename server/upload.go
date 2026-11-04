@@ -28,6 +28,8 @@ type Server struct {
 	Index     *HashIndex
 	Status    *StatusReader
 	Backups   *BackupSource
+	Messages  *MessageStore
+	Relay     *PushRelay
 	slots     chan struct{}
 	limits    *loginLimiter
 	scans     *scanDebouncer
@@ -59,6 +61,15 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("/upload", s.handleUpload)
 	mux.HandleFunc("POST /v1/check", s.handleCheck)
 	mux.HandleFunc("GET /v1/status", s.handleStatus)
+	mux.HandleFunc("POST /v1/messages", s.handleSend)
+	mux.HandleFunc("GET /v1/messages", s.handleThread)
+	mux.HandleFunc("POST /v1/messages/read", s.handleMarkRead)
+	mux.HandleFunc("GET /v1/conversations", s.handleConversations)
+	mux.HandleFunc("PUT /v1/profile", s.handleSaveProfile)
+	mux.HandleFunc("GET /v1/profiles", s.handleProfiles)
+	mux.HandleFunc("PUT /v1/profile/avatar", s.handleSaveAvatar)
+	mux.HandleFunc("GET /v1/profiles/{user}/avatar", s.handleAvatar)
+	mux.HandleFunc("POST /v1/devices", s.handleRegisterDevice)
 	mux.HandleFunc("GET /v1/replica/index", s.handleReplicaIndex)
 	mux.HandleFunc("GET /v1/replica/file/{sha256}", s.handleReplicaFile)
 	mux.HandleFunc("GET /v1/replica/database", s.handleReplicaDatabase)
