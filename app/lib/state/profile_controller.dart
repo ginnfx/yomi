@@ -98,4 +98,19 @@ class ProfileController extends ChangeNotifier {
     await _prefs.remove('avatarPath');
     notifyListeners();
   }
+
+  /// Whether there's anything worth publishing. Without this, signing in on a device with
+  /// a blank profile would wipe the one already on the server.
+  bool get hasContent =>
+      nickname.isNotEmpty || bio.isNotEmpty || avatarFile != null;
+
+  /// Forgets this person's profile on this device, on signing out.
+  Future<void> clear() async {
+    await _deleteFileAt('avatarPath');
+    await _deleteFileAt('bannerPath');
+    for (final key in const ['nickname', 'bio', 'avatarPath', 'bannerPath']) {
+      await _prefs.remove(key);
+    }
+    notifyListeners();
+  }
 }

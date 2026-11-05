@@ -38,7 +38,7 @@ class MessagesController extends ChangeNotifier {
   bool _isFlushing = false;
   bool _mayHaveOlder = true;
   Future<void> _writes = Future.value();
-  int _nextLocalId = -1;
+  int _lastLocalId = 0;
 
   final Duration inboxPollEvery;
   final Duration threadPollEvery;
@@ -125,7 +125,7 @@ class MessagesController extends ChangeNotifier {
         if (generation != _listenGeneration || _isDisposed) return;
         if (revision != _revision) {
           _revision = revision;
-          await Future.wait([refresh(), _pullThread(), flushPending()]);
+          await Future.wait([refresh(), refreshOpenThread(), flushPending()]);
         } else if (DateTime.now().difference(startedAt) < _eventMinWait) {
           // A real wait takes a while. An instant "nothing new" must not become a tight loop.
           await Future<void>.delayed(_eventMinWait);
@@ -185,7 +185,12 @@ class MessagesController extends ChangeNotifier {
 
   Future<void> openThread(String user) async {
     _openThread = user;
-    _thread = await _readSaved(user);
+    _thread = const [];
+    _threadTimer?.cancel();
+    final saved = await _readSaved(user);
+    // Left, or moved to another chat, while reading from disk.
+    if (user != _openThread) return;
+    _thread = saved;
     _mayHaveOlder = true;
     _pollCursor = _thread.isEmpty ? 0 : _thread.last.id;
     _error = null;
@@ -229,16 +234,38 @@ class MessagesController extends ChangeNotifier {
     }
   }
 
-  /// A polled reply can overlap one just sent, so messages are matched by id.
+  /// A polled reply can overlap one just sent, so messages are matched by id. The newer
+  /// copy wins, as it may carry new reactions.
   static List<ChatMessage> _merge(
     List<ChatMessage> existing,
     List<ChatMessage> fresh,
   ) {
-    final known = existing.map((message) => message.id).toSet();
-    return [
-      ...existing,
-      ...fresh.where((message) => !known.contains(message.id)),
-    ]..sort((a, b) => a.id.compareTo(b.id));
+    final byId = {
+      for (final message in existing) message.id: message,
+      for (final message in fresh) message.id: message,
+    };
+    return byId.values.toList()..sort((a, b) => a.id.compareTo(b.id));
+  }
+
+  /// Fetches the newest page again, to pick up changes to messages already here, such as
+  /// reactions. Polling for new messages alone would never see those.
+  Future<void> refreshOpenThread() async {
+    final user = _openThread;
+    final transport = _transport;
+    if (user == null || transport == null) return;
+    try {
+      final latest = await transport.thread(user);
+      if (user != _openThread || latest.isEmpty) return;
+      _thread = List.unmodifiable(_merge(_thread, latest));
+      _pollCursor = _thread.last.id;
+      _saveThread(user);
+      _changed();
+    } on MessagingUnavailable {
+      _isAvailable = false;
+      _changed();
+    } on MessagingException catch (error) {
+      debugPrint('Could not refresh this conversation: $error');
+    }
   }
 
   /// Fetches the page before what's showing. Once a page comes back empty, that's all.
@@ -344,7 +371,7 @@ class MessagesController extends ChangeNotifier {
     if (transport == null) return false;
     _error = null;
     final draft = ChatMessage(
-      id: _nextLocalId--,
+      id: _newLocalId(),
       from: me?.call() ?? '',
       to: user,
       text: text,
@@ -378,6 +405,14 @@ class MessagesController extends ChangeNotifier {
     }
     _changed();
     return false;
+  }
+
+  /// Negative, so it can't be mistaken for a server's ID, and based on the time, so it
+  /// can't repeat one saved before a restart.
+  int _newLocalId() {
+    final now = -DateTime.now().microsecondsSinceEpoch;
+    _lastLocalId = now < _lastLocalId ? now : _lastLocalId - 1;
+    return _lastLocalId;
   }
 
   Future<ChatMessage> _deliver(
@@ -487,9 +522,6 @@ class MessagesController extends ChangeNotifier {
       ...saved.where((message) => !known.contains(message.id)),
       ..._pending,
     ]);
-    if (saved.isNotEmpty) {
-      _nextLocalId = saved.map((m) => m.id).reduce((a, b) => a < b ? a : b) - 1;
-    }
   }
 
   static Future<void> _write(File file, List<ChatMessage> messages) async {

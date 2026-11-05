@@ -27,6 +27,7 @@ const (
 	tagWorkerAfterError   = 30 * time.Minute
 	tagBatchTimeout       = 5 * time.Minute
 	tagMaxArtistsInPrompt = 3000
+	tagMaxKnownArtists    = 20000
 	tagMaxSimilar         = 8
 )
 
@@ -75,13 +76,15 @@ type TagStore struct {
 	dir   string
 	state tagState
 	known map[string]bool
+
+	maxArtists int
 }
 
 func openTagStore(dir string) (*TagStore, error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, err
 	}
-	store := &TagStore{dir: dir, known: map[string]bool{}}
+	store := &TagStore{dir: dir, known: map[string]bool{}, maxArtists: tagMaxKnownArtists}
 	store.state.Songs = map[string]SongTag{}
 	store.state.Artists = map[string][]string{}
 	data, err := os.ReadFile(filepath.Join(dir, tagsFileName))
@@ -133,6 +136,7 @@ func (s *TagStore) Enqueue(songs []QueuedSong) (int, error) {
 		queued[song.Key] = true
 	}
 	added := 0
+	artistsBefore := len(s.state.KnownArtists)
 	for _, song := range songs {
 		if !song.isValid() || queued[song.Key] {
 			continue
@@ -149,7 +153,7 @@ func (s *TagStore) Enqueue(songs []QueuedSong) (int, error) {
 		s.state.Pending = append(s.state.Pending, song)
 		added++
 	}
-	if added == 0 && len(songs) == 0 {
+	if added == 0 && len(s.state.KnownArtists) == artistsBefore {
 		return 0, nil
 	}
 	return added, s.saveLocked()
@@ -168,7 +172,7 @@ func (s QueuedSong) isValid() bool {
 }
 
 func (s *TagStore) rememberArtistLocked(artist string) {
-	if !s.known[artist] {
+	if !s.known[artist] && len(s.state.KnownArtists) < s.maxArtists {
 		s.known[artist] = true
 		s.state.KnownArtists = append(s.state.KnownArtists, artist)
 	}

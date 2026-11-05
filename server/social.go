@@ -109,6 +109,9 @@ func (m *MessageStore) React(user string, id int64, emoji string) error {
 	if target == nil || (target.From != user && target.To != user) {
 		return errNoSuchMessage
 	}
+	if !m.allowLocked(user) {
+		return errRateLimited
+	}
 	line := reactionLine{ID: id, User: user, Emoji: emoji}
 	data, err := json.Marshal(line)
 	if err != nil {
@@ -234,6 +237,9 @@ func (s *Server) handleReact(w http.ResponseWriter, r *http.Request) {
 	switch err := s.Messages.React(user, request.ID, emoji); {
 	case errors.Is(err, errNoSuchMessage):
 		writeError(w, http.StatusNotFound, err.Error())
+	case errors.Is(err, errRateLimited):
+		w.Header().Set("Retry-After", "30")
+		writeError(w, http.StatusTooManyRequests, err.Error())
 	case err != nil:
 		log.Printf("messages: react: %v", err)
 		writeError(w, http.StatusInternalServerError, "could not save that")

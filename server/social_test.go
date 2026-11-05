@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -343,5 +344,54 @@ func TestStateFileRefusesPathsOutsideItsRoot(t *testing.T) {
 	resp.Body.Close()
 	if resp.StatusCode == http.StatusOK {
 		t.Fatal("an unknown root was served")
+	}
+}
+
+func TestReactionsShareTheSendLimit(t *testing.T) {
+	env := newSocialEnv(t, Config{})
+	message := sendTo(t, env, "keli", "sam", map[string]any{"text": "hi"})
+	var last int
+	for i := 0; i <= messagesPerMinute; i++ {
+		last, _ = env.call(t, http.MethodPost, "/v1/messages/react", "sam", map[string]any{"id": message.ID, "emoji": "🔥"})
+	}
+	if last != http.StatusTooManyRequests {
+		t.Fatalf("status %d", last)
+	}
+}
+
+func TestImportsHaveALimitPerPerson(t *testing.T) {
+	store := openTestHistory(t)
+	for i := 0; i < importMaxPerUser; i++ {
+		if err := store.SaveImport("alice", fmt.Sprintf("p%d", i), []byte(`{}`)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := store.SaveImport("alice", "one-more", []byte(`{}`)); !errors.Is(err, errTooManyImports) {
+		t.Fatalf("err = %v", err)
+	}
+	if err := store.SaveImport("alice", "p0", []byte(`{"changed":true}`)); err != nil {
+		t.Fatalf("replacing one must still work: %v", err)
+	}
+}
+
+func TestHistoryHasASizeLimitPerPerson(t *testing.T) {
+	store := openTestHistory(t)
+	store.maxLogBytes = 200
+	if _, err := store.Add("alice", []HistoryEvent{historyEvent("1"), historyEvent("2")}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Add("alice", []HistoryEvent{historyEvent("3")}); !errors.Is(err, errHistoryFull) {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestKnownArtistsAreCapped(t *testing.T) {
+	store := openTestTags(t, t.TempDir())
+	store.maxArtists = 2
+	if _, err := store.Enqueue([]QueuedSong{song("a", "A", "T"), song("b", "B", "T"), song("c", "C", "T")}); err != nil {
+		t.Fatal(err)
+	}
+	if got := len(store.KnownArtists()); got != 2 {
+		t.Fatalf("artists = %d", got)
 	}
 }

@@ -46,9 +46,11 @@ class OfflineKeeper extends ChangeNotifier {
     required this.cache,
     required this.currentSong,
     this.importedSongs,
+    this.isLibraryReady,
   }) {
+    _settingsSeen = _settingsThatMatter();
     connectivity.addListener(_onConditionsChanged);
-    settings.addListener(_onConditionsChanged);
+    settings.addListener(_onSettingsChanged);
   }
 
   final DownloadManager downloads;
@@ -61,6 +63,10 @@ class OfflineKeeper extends ChangeNotifier {
 
   /// Songs in imported playlists, which are kept along with your own.
   final List<Song> Function()? importedSongs;
+
+  /// False while the library is still loading, when imported songs merely look missing.
+  final bool Function()? isLibraryReady;
+  late Object _settingsSeen;
 
   SubsonicClient? _client;
   String _username = '';
@@ -89,6 +95,19 @@ class OfflineKeeper extends ChangeNotifier {
   }
 
   void _onConditionsChanged() => unawaited(run());
+
+  /// Only what affects saved songs. Settings tell everyone about every change, and a
+  /// reordered Home shouldn't make the server list every playlist again.
+  String _settingsThatMatter() =>
+      '${settings.keepPlaylistsOffline}|${settings.storageLimitBytes}|'
+      '${settings.wifiOnlyDownloads}|${settings.playlistKeepChoices}';
+
+  void _onSettingsChanged() {
+    final current = _settingsThatMatter();
+    if (current == _settingsSeen) return;
+    _settingsSeen = current;
+    unawaited(run());
+  }
 
   /// Whether this playlist is one Yomi keeps by itself: your own, unless you've said not.
   bool isKept(Playlist playlist) {
@@ -158,6 +177,7 @@ class OfflineKeeper extends ChangeNotifier {
         for (final song in importedSongs?.call() ?? const <Song>[])
           song.id: song,
     };
+    final isReady = isLibraryReady?.call() ?? true;
     final isManual = {
       for (final id in songs.keys)
         if (downloads.isDownloaded(id) && !ledger.isKept(id)) id,
@@ -178,9 +198,11 @@ class OfflineKeeper extends ChangeNotifier {
     final plan = planKeptSongs(
       capBytes: settings.storageLimitBytes,
       wanted: candidates,
+      // Nothing counts as unwanted until the library has loaded and can really say.
       unwanted: [
-        for (final id in ledger.keptIds)
-          if (!songs.containsKey(id) && downloads.isDownloaded(id)) id,
+        if (isReady)
+          for (final id in ledger.keptIds)
+            if (!songs.containsKey(id) && downloads.isDownloaded(id)) id,
       ],
       protect: {?playing},
     );
@@ -217,7 +239,7 @@ class OfflineKeeper extends ChangeNotifier {
   @override
   void dispose() {
     connectivity.removeListener(_onConditionsChanged);
-    settings.removeListener(_onConditionsChanged);
+    settings.removeListener(_onSettingsChanged);
     unawaited(_updates?.cancel());
     super.dispose();
   }

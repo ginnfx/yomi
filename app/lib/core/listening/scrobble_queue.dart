@@ -50,6 +50,16 @@ class ScrobbleQueue {
     }
   }
 
+  /// Forgets everything, so one person's plays can't be sent under the next one's login.
+  Future<void> clear() async {
+    _pending = const [];
+    try {
+      if (await file.exists()) await file.delete();
+    } on FileSystemException catch (error) {
+      debugPrint('Could not delete the scrobble queue: $error');
+    }
+  }
+
   Future<void> add(PendingScrobble scrobble) async {
     final grown = [..._pending, scrobble];
     _pending = List.unmodifiable(

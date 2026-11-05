@@ -29,7 +29,10 @@ const (
 	historyOldestYear  = 2000
 	historyFutureSlack = 48 * time.Hour
 	historyMinFree     = 20 << 20
+	historyMaxLogBytes = 64 << 20
 )
+
+var errHistoryFull = errors.New("this listening history has reached its size limit")
 
 // HistoryEvent is one play, carrying the song's names so stats still make sense after the
 // song has left the library.
@@ -61,16 +64,17 @@ func (e HistoryEvent) isValid(now time.Time) bool {
 // HistoryStore keeps each person's plays in an append-only log and never holds them in
 // memory. A reader's position is a byte offset, so it can't miss a play uploaded late.
 type HistoryStore struct {
-	mu  sync.Mutex
-	dir string
-	now func() time.Time
+	mu          sync.Mutex
+	dir         string
+	now         func() time.Time
+	maxLogBytes int64
 }
 
 func openHistoryStore(dir string) (*HistoryStore, error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, err
 	}
-	return &HistoryStore{dir: dir, now: time.Now}, nil
+	return &HistoryStore{dir: dir, now: time.Now, maxLogBytes: historyMaxLogBytes}, nil
 }
 
 func (h *HistoryStore) logFile(user string) string {
@@ -134,6 +138,9 @@ func (h *HistoryStore) Add(user string, events []HistoryEvent) (int, error) {
 	}
 	if !hasFreeSpace(h.dir, historyMinFree) {
 		return 0, errors.New("the server is out of space")
+	}
+	if info, err := os.Stat(h.logFile(user)); err == nil && info.Size()+int64(lines.Len()) > h.maxLogBytes {
+		return 0, errHistoryFull
 	}
 	file, err := os.OpenFile(h.logFile(user), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
@@ -251,6 +258,10 @@ func (s *Server) handleAddHistory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	added, err := s.History.Add(user, request.Events)
+	if errors.Is(err, errHistoryFull) {
+		writeError(w, http.StatusInsufficientStorage, err.Error())
+		return
+	}
 	if err != nil {
 		log.Printf("save history: %v", err)
 		writeError(w, http.StatusInternalServerError, "couldn't save your plays")

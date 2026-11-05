@@ -8,6 +8,10 @@ const int _minMsPlayed = 30000;
 const int _maxTopItems = 100;
 const int _hoursInDay = 24;
 
+/// Far bigger than any real history file. A zip can claim, and unpack to, almost any size,
+/// so anything beyond this isn't opened.
+const int maxExportEntryBytes = 256 << 20;
+
 /// One listen from a Spotify export, with nothing else from the record kept. Exports also
 /// hold things like IP addresses, which never leave the parser.
 @immutable
@@ -505,7 +509,7 @@ SpotifyExport readExport(String name, List<int> bytes) {
     final liked = <ExportTrack>[];
     final playlists = <ExportPlaylist>[];
     for (final file in archive.files) {
-      if (!file.isFile) continue;
+      if (!file.isFile || file.size > maxExportEntryBytes) continue;
       final part = _readNamedFile(file.name, () => file.content);
       history.addAll(part.history);
       liked.addAll(part.likedSongs);

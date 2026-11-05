@@ -15,7 +15,10 @@ import (
 const (
 	importMaxIDLength = 64
 	importMaxBody     = 4 << 20
+	importMaxPerUser  = 200
 )
+
+var errTooManyImports = errors.New("that's the most imported playlists one person can keep")
 
 var importIDPattern = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
 
@@ -37,6 +40,15 @@ func (h *HistoryStore) SaveImport(user, id string, data []byte) error {
 		return err
 	}
 	path := filepath.Join(dir, id+".json")
+	if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
+		existing, err := filepath.Glob(filepath.Join(dir, "*.json"))
+		if err != nil {
+			return err
+		}
+		if len(existing) >= importMaxPerUser {
+			return errTooManyImports
+		}
+	}
 	temp := path + ".tmp"
 	if err := os.WriteFile(temp, data, 0o600); err != nil {
 		return err
@@ -103,7 +115,12 @@ func (s *Server) handleSaveImport(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "send valid JSON")
 		return
 	}
-	if err := s.History.SaveImport(user, id, data); err != nil {
+	err = s.History.SaveImport(user, id, data)
+	if errors.Is(err, errTooManyImports) {
+		writeError(w, http.StatusConflict, err.Error())
+		return
+	}
+	if err != nil {
 		log.Printf("save import: %v", err)
 		writeError(w, http.StatusInternalServerError, "couldn't save that playlist")
 		return

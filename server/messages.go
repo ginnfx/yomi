@@ -197,18 +197,10 @@ var errRateLimited = errors.New("too many messages, slow down a little")
 func (m *MessageStore) Send(message Message) (Message, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	now := m.now()
-	recent := m.sent[message.From][:0]
-	for _, at := range m.sent[message.From] {
-		if now.Sub(at) < time.Minute {
-			recent = append(recent, at)
-		}
-	}
-	if len(recent) >= messagesPerMinute {
-		m.sent[message.From] = recent
+	if !m.allowLocked(message.From) {
 		return Message{}, errRateLimited
 	}
-	m.sent[message.From] = append(recent, now)
+	now := m.now()
 	message.ID = int64(len(m.messages)) + 1
 	if len(m.messages) > 0 {
 		message.ID = m.messages[len(m.messages)-1].ID + 1
@@ -229,6 +221,23 @@ func (m *MessageStore) Send(message Message) (Message, error) {
 	m.messages = append(m.messages, message)
 	m.bumpLocked(message.From, message.To)
 	return message, nil
+}
+
+// allowLocked counts one more message or reaction, if this user is within the limit.
+func (m *MessageStore) allowLocked(user string) bool {
+	now := m.now()
+	recent := m.sent[user][:0]
+	for _, at := range m.sent[user] {
+		if now.Sub(at) < time.Minute {
+			recent = append(recent, at)
+		}
+	}
+	if len(recent) >= messagesPerMinute {
+		m.sent[user] = recent
+		return false
+	}
+	m.sent[user] = append(recent, now)
+	return true
 }
 
 func isBetween(message Message, a, b string) bool {

@@ -166,10 +166,13 @@ class HomeController extends ChangeNotifier {
     if (held == null) return;
     _heldBack = null;
     _show(held);
+    unawaited(_saveCache(held));
     notifyListeners();
   }
 
   void _show(_HomeContent content) {
+    // Counted when it's really on screen, as a song shouldn't fade for shelves never seen.
+    _shown = _countShown(content.shelves);
     _shelves = content.shelves;
     _quickPlaylists = content.playlists;
     _quickSongs = content.songs;
@@ -220,7 +223,6 @@ class HomeController extends ChangeNotifier {
         importedTaste: importedTaste?.call() ?? const {},
         pastFavourites: pastFavouritesFor?.call(results[0]) ?? const {},
       ).build(keepOrder: order);
-      _shown = _countShown(shelves);
       final content = _HomeContent(
         List.unmodifiable(shelves),
         playlists,

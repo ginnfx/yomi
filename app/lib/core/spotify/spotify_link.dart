@@ -11,6 +11,7 @@ const String _browserAgent = 'Mozilla/5.0';
 
 /// The embed page shows about this many tracks at most.
 const int _embedLimit = 100;
+const int _maxPageBytes = 16 << 20;
 
 /// Why a link couldn't be imported, in words to show.
 class SpotifyLinkException implements Exception {
@@ -105,6 +106,17 @@ ExportPlaylist parseEmbedPage(String page) {
   }
 }
 
+Future<List<int>> _readLimited(Stream<List<int>> stream) async {
+  final bytes = <int>[];
+  await for (final chunk in stream) {
+    if (bytes.length + chunk.length > _maxPageBytes) {
+      throw const SpotifyLinkException("That page is too large to read.");
+    }
+    bytes.addAll(chunk);
+  }
+  return bytes;
+}
+
 /// Fetches a public playlist by its link.
 Future<LinkedPlaylist> fetchSpotifyPlaylist(
   String link, {
@@ -116,24 +128,28 @@ Future<LinkedPlaylist> fetchSpotifyPlaylist(
       'Paste a link like https://open.spotify.com/playlist/…',
     );
   }
-  final http.Response response;
+  final List<int> bytes;
   try {
-    response = await (client ?? http.Client())
-        .get(
-          Uri.https('open.spotify.com', '/embed/playlist/$id'),
-          headers: const {'User-Agent': _browserAgent},
-        )
+    final request = http.Request(
+      'GET',
+      Uri.https('open.spotify.com', '/embed/playlist/$id'),
+    )..headers['User-Agent'] = _browserAgent;
+    final response = await (client ?? http.Client())
+        .send(request)
         .timeout(_timeout);
+    if (response.statusCode != 200) {
+      throw const SpotifyLinkException(
+        "Spotify didn't share that playlist. It may be private.",
+      );
+    }
+    bytes = await _readLimited(response.stream).timeout(_timeout);
+  } on SpotifyLinkException {
+    rethrow;
   } on Object catch (error) {
     debugPrint('Could not reach Spotify: $error');
     throw const SpotifyLinkException("Couldn't reach Spotify.");
   }
-  if (response.statusCode != 200) {
-    throw const SpotifyLinkException(
-      "Spotify didn't share that playlist. It may be private.",
-    );
-  }
-  final playlist = parseEmbedPage(utf8.decode(response.bodyBytes));
+  final playlist = parseEmbedPage(utf8.decode(bytes));
   return LinkedPlaylist(
     playlist,
     mayBeIncomplete: playlist.tracks.length >= _embedLimit,

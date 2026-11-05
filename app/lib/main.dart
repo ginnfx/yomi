@@ -186,6 +186,7 @@ Future<void> main() async {
     cache: cache,
     currentSong: () => player.current,
     importedSongs: () => imports.songsIn(catalog.songs),
+    isLibraryReady: () => catalog.isLoaded,
   );
   catalog = CatalogController(
     directory: Directory('${supportDir.path}/catalog/songs'),
@@ -249,13 +250,29 @@ Future<void> main() async {
   player.addListener(sharePlaying);
   settings.addListener(sharePlaying);
   String? messagingUrl;
-  void publishProfile() => unawaited(
-    messages.publishProfile(
-      displayName: profile.nickname,
-      bio: profile.bio,
-      avatar: profile.avatarFile,
-    ),
-  );
+  void publishProfile() {
+    if (!profile.hasContent) return;
+    unawaited(
+      messages.publishProfile(
+        displayName: profile.nickname,
+        bio: profile.bio,
+        avatar: profile.avatarFile,
+      ),
+    );
+  }
+
+  // After signing back in, take the name and bio from the server, as signing out cleared
+  // them here. Only once, and only if nothing's been typed in the meantime.
+  var needsProfileFromServer = !profile.hasContent;
+  messages.addListener(() {
+    if (!needsProfileFromServer || messages.people.isEmpty) return;
+    needsProfileFromServer = false;
+    final mine = messages.profileOf(session.username);
+    if (profile.hasContent) return;
+    if (mine.displayName.isNotEmpty)
+      unawaited(profile.setNickname(mine.displayName));
+    if (mine.bio.isNotEmpty) unawaited(profile.setBio(mine.bio));
+  });
   profile.addListener(publishProfile);
   var wasReachable = false;
   String? aiUrl;
@@ -268,6 +285,13 @@ Future<void> main() async {
     if (account != historyAccount) {
       final wasSignedIn = historyAccount != null;
       historyAccount = account;
+      if (account == null && wasSignedIn) {
+        // What belongs to the person leaving mustn't reach whoever signs in next.
+        unawaited(scrobbles.clear());
+        unawaited(profile.clear());
+        unawaited(settings.clearPersonal());
+        needsProfileFromServer = true;
+      }
       unawaited(
         account == null
             ? history.clear()
@@ -329,6 +353,7 @@ Future<void> main() async {
     wasReachable = isReachable;
     if (client == null) {
       messages.attach(null);
+      messagingUrl = null;
     } else if (client.baseUrl != messagingUrl) {
       messagingUrl = client.baseUrl;
       messages.attach(session.messaging);
@@ -341,11 +366,15 @@ Future<void> main() async {
     sync.attach(client);
   }
 
+  var wasCatalogLoaded = false;
   catalog.addListener(() {
     if (catalog.isLoaded) {
       unawaited(ai.queueMissing(catalog.songs));
       unawaited(imports.rematch(catalog.songs));
+      // Imported songs only count as kept once the library that holds them has loaded.
+      if (!wasCatalogLoaded) unawaited(keeper.run());
     }
+    wasCatalogLoaded = catalog.isLoaded;
   });
   session.addListener(followSession);
   followSession();

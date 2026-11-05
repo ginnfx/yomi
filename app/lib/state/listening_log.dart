@@ -36,13 +36,21 @@ class ListeningLog extends ChangeNotifier {
 
   /// Plays made on other devices, for suggestions on this one.
   List<PlayEvent> get remotePlays {
+    final cached = _remotePlays;
+    if (cached != null && identical(_remotePlaysFrom, history.events)) {
+      return cached;
+    }
     final local = {for (final event in history.events) _idOf(event)};
-    return [
+    _remotePlaysFrom = history.events;
+    return _remotePlays = List.unmodifiable([
       for (final event in _merged)
         if (!local.contains(event.id))
           PlayEvent(event.songId, event.at, event.kind),
-    ];
+    ]);
   }
+
+  List<PlayEvent>? _remotePlays;
+  List<PlayEvent>? _remotePlaysFrom;
 
   File _fileFor(String account) => File('${_directory.path}/log-$account.json');
   File _importedFileFor(String account) =>
@@ -108,6 +116,7 @@ class ListeningLog extends ChangeNotifier {
 
   void _setEvents(Map<String, ListenEvent> byId) {
     _byId = byId;
+    _remotePlays = null;
     _merged = List.unmodifiable(
       byId.values.toList()..sort((a, b) => a.at.compareTo(b.at)),
     );
@@ -156,13 +165,12 @@ class ListeningLog extends ChangeNotifier {
     _setEvents(next);
   }
 
+  /// Sends everything from the last upload's time on. Including that exact moment means a
+  /// play in the same millisecond isn't missed; the server ignores what it already has.
   Future<void> _upload(HistoryApi api) async {
-    final local = {for (final event in history.events) _idOf(event)};
     final waiting = [
       for (final event in _merged)
-        if (local.contains(event.id) &&
-            event.at.millisecondsSinceEpoch > _uploadedUntilMs)
-          event,
+        if (event.at.millisecondsSinceEpoch >= _uploadedUntilMs) event,
     ];
     for (var at = 0; at < waiting.length; at += _uploadBatch) {
       final end = at + _uploadBatch;
@@ -178,6 +186,9 @@ class ListeningLog extends ChangeNotifier {
   Future<void> _download(HistoryApi api) async {
     while (true) {
       final page = await api.read(_cursor);
+      // Going backwards means the server's log was replaced. It's lost what it had, so
+      // everything goes up again on the next sync.
+      if (page.next < _cursor) _uploadedUntilMs = 0;
       if (page.events.isEmpty && page.next == _cursor) return;
       _setEvents({..._byId, for (final event in page.events) event.id: event});
       final isDone = page.next == _cursor || page.events.isEmpty;

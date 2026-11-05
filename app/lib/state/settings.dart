@@ -80,6 +80,38 @@ class SettingsController extends ChangeNotifier {
   Future<void> setShareListening(bool value) =>
       _set(() => _prefs.setBool('shareListening', value));
 
+  /// Choices made for individual playlists, as a stable piece of text for comparing.
+  String get playlistKeepChoices =>
+      (_prefs
+              .getKeys()
+              .where((key) => key.startsWith('keepPlaylist.'))
+              .map((key) => '$key=${_prefs.getBool(key)}')
+              .toList()
+            ..sort())
+          .join(',');
+
+  /// Forgets what belongs to the person signing out. Device preferences such as Wi-Fi only
+  /// and the storage limit stay, because they're about this device.
+  Future<void> clearPersonal() => _set(() async {
+    final keys = _prefs.getKeys().where(
+      (key) =>
+          key.startsWith('keepPlaylist.') ||
+          const {
+            'shareListening',
+            'recentSearches',
+            'lessArtists',
+            'lessSongs',
+            'homeOrder',
+            'homeHidden',
+            'playlistOrder',
+          }.contains(key),
+    );
+    for (final key in keys.toList()) {
+      await _prefs.remove(key);
+    }
+    return true;
+  });
+
   bool get wifiOnlyDownloads => _prefs.getBool('wifiOnlyDownloads') ?? true;
 
   /// Home screen sections, in the order shown. Unknown or missing ids are repaired.

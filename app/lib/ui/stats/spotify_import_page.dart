@@ -117,7 +117,11 @@ class _SpotifyImportPageState extends State<SpotifyImportPage> {
     }
   }
 
+  /// A real export is far smaller. Reading anything much bigger would run out of memory.
+  static const int _maxFileBytes = 1 << 30;
+
   static SpotifyExport _readFile(String name, String path) {
+    if (File(path).lengthSync() > _maxFileBytes) return const SpotifyExport();
     if (name.toLowerCase().endsWith('.csv')) {
       final title = name.substring(0, name.length - '.csv'.length);
       final playlist = parsePlaylistCsv(title, File(path).readAsStringSync());
