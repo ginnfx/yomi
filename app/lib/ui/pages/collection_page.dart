@@ -8,6 +8,7 @@ import '../../state/offline_keeper.dart';
 import '../../state/player_controller.dart';
 import '../../state/session.dart';
 import '../theme.dart';
+import '../widgets/send_to_sheet.dart';
 import '../widgets/cover_art.dart';
 import '../widgets/error_view.dart';
 import '../widgets/mini_player.dart';
@@ -113,9 +114,17 @@ class _CollectionPageState extends State<CollectionPage> {
           actions: [
             if (widget.playlist != null)
               PopupMenuButton<String>(
-                onSelected: (value) =>
-                    value == 'rename' ? _rename() : _delete(),
+                onSelected: (value) => switch (value) {
+                  'rename' => _rename(),
+                  'send' => showSendTo(
+                    context,
+                    title: _title,
+                    playlistId: widget.playlist!.id,
+                  ),
+                  _ => _delete(),
+                },
                 itemBuilder: (_) => const [
+                  PopupMenuItem(value: 'send', child: Text('Send to…')),
                   PopupMenuItem(value: 'rename', child: Text('Rename')),
                   PopupMenuItem(
                     value: 'delete',

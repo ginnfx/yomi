@@ -22,6 +22,7 @@ import '../widgets/compact_music_grid.dart';
 import '../widgets/error_view.dart';
 import '../widgets/genre_filter_bar.dart';
 import '../widgets/shimmer.dart';
+import '../widgets/send_to_sheet.dart';
 import '../widgets/song_tile.dart';
 import 'collection_page.dart';
 
@@ -676,6 +677,11 @@ class _LocalResults extends StatelessWidget {
             ),
             subtitle: Text('Album · ${album.artist}'),
             onTap: () => _openAlbum(context, album),
+            onLongPress: () => showSendTo(
+              context,
+              title: '${album.name} · ${album.artist}',
+              albumId: album.id,
+            ),
           ),
       ],
     );

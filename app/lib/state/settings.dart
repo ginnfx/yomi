@@ -75,6 +75,11 @@ class SettingsController extends ChangeNotifier {
   Future<void> clearRecentSearches() =>
       _set(() => _prefs.remove('recentSearches'));
 
+  /// Whether friends can see what you're playing, and you theirs. Off until you choose it.
+  bool get shareListening => _prefs.getBool('shareListening') ?? false;
+  Future<void> setShareListening(bool value) =>
+      _set(() => _prefs.setBool('shareListening', value));
+
   bool get wifiOnlyDownloads => _prefs.getBool('wifiOnlyDownloads') ?? true;
 
   /// Home screen sections, in the order shown. Unknown or missing ids are repaired.

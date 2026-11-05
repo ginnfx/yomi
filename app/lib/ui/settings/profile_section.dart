@@ -6,6 +6,7 @@ import 'package:provider/provider.dart';
 
 import '../../state/profile_controller.dart';
 import '../../state/session.dart';
+import '../../state/settings.dart';
 import '../theme.dart';
 import 'settings_widgets.dart';
 
@@ -105,6 +106,18 @@ class _ProfileSectionState extends State<ProfileSection> {
     return SettingsGroup(
       title: 'Profile',
       children: [
+        Builder(
+          builder: (context) {
+            final settings = context.watch<SettingsController>();
+            return SettingsSwitch(
+              title: 'Share what I play with friends',
+              subtitle:
+                  'Also shows what friends who share are playing, on Home.',
+              value: settings.shareListening,
+              onChanged: settings.setShareListening,
+            );
+          },
+        ),
         Padding(
           padding: const EdgeInsets.symmetric(vertical: 10),
           child: Row(

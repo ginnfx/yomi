@@ -8,6 +8,9 @@ import '../subsonic_client.dart';
 
 const Duration _timeout = Duration(seconds: 15);
 
+/// Longer than the server waits before answering that nothing has happened.
+const Duration _eventsTimeout = Duration(seconds: 40);
+
 @immutable
 class ChatMessage {
   const ChatMessage({
@@ -18,6 +21,11 @@ class ChatMessage {
     required this.sentAt,
     this.songId,
     this.songTitle,
+    this.albumId,
+    this.playlistId,
+    this.replyTo,
+    this.reactions = const {},
+    this.isPending = false,
   });
 
   factory ChatMessage.fromJson(Map<String, dynamic> json) => ChatMessage(
@@ -30,6 +38,15 @@ class ChatMessage {
     ),
     songId: json['songId'] as String?,
     songTitle: json['songTitle'] as String?,
+    albumId: json['albumId'] as String?,
+    playlistId: json['playlistId'] as String?,
+    replyTo: (json['replyTo'] as num?)?.toInt(),
+    reactions: {
+      for (final entry
+          in ((json['reactions'] as Map<String, dynamic>?) ?? const {}).entries)
+        entry.key: entry.value as String,
+    },
+    isPending: json['pending'] == true,
   );
 
   final int id;
@@ -39,6 +56,48 @@ class ChatMessage {
   final DateTime sentAt;
   final String? songId;
   final String? songTitle;
+  final String? albumId;
+  final String? playlistId;
+  final int? replyTo;
+
+  /// Who reacted, and with what.
+  final Map<String, String> reactions;
+
+  /// Written here and still on its way to the server.
+  final bool isPending;
+
+  bool get isShare => songId != null || albumId != null || playlistId != null;
+
+  Map<String, Object?> toJson() => {
+    'id': id,
+    'from': from,
+    'to': to,
+    'text': text,
+    'sentMs': sentAt.millisecondsSinceEpoch,
+    'songId': songId,
+    'songTitle': songTitle,
+    'albumId': albumId,
+    'playlistId': playlistId,
+    'replyTo': replyTo,
+    'reactions': reactions,
+    'pending': isPending,
+  };
+}
+
+/// What someone who chose to share is listening to.
+@immutable
+class FriendPlaying {
+  const FriendPlaying({required this.songId, this.title, this.artist});
+
+  factory FriendPlaying.fromJson(Map<String, dynamic> json) => FriendPlaying(
+    songId: json['songId'] as String,
+    title: json['title'] as String?,
+    artist: json['artist'] as String?,
+  );
+
+  final String songId;
+  final String? title;
+  final String? artist;
 }
 
 @immutable
@@ -48,6 +107,7 @@ class ChatProfile {
     this.displayName = '',
     this.bio = '',
     this.hasAvatar = false,
+    this.nowPlaying,
   });
 
   factory ChatProfile.fromJson(Map<String, dynamic> json) => ChatProfile(
@@ -55,12 +115,16 @@ class ChatProfile {
     displayName: (json['displayName'] as String?) ?? '',
     bio: (json['bio'] as String?) ?? '',
     hasAvatar: json['hasAvatar'] == true,
+    nowPlaying: json['nowPlaying'] == null
+        ? null
+        : FriendPlaying.fromJson(json['nowPlaying'] as Map<String, dynamic>),
   );
 
   final String user;
   final String displayName;
   final String bio;
   final bool hasAvatar;
+  final FriendPlaying? nowPlaying;
 
   String get name => displayName.isEmpty ? user : displayName;
 }
@@ -100,16 +164,34 @@ class MessagingException implements Exception {
   String toString() => message;
 }
 
+/// The server couldn't be reached, so a message can wait and try again later.
+class MessagingOffline extends MessagingException {
+  const MessagingOffline(super.message);
+}
+
 /// What the controller needs from the server. A separate type so it can be faked.
 abstract interface class MessagingTransport {
   Future<List<ChatConversation>> conversations();
-  Future<List<ChatMessage>> thread(String withUser, {int after = 0});
+  Future<List<ChatMessage>> thread(
+    String withUser, {
+    int after = 0,
+    int before = 0,
+  });
   Future<ChatMessage> send(
     String to, {
     String text = '',
     String? songId,
     String? songTitle,
+    String? albumId,
+    String? playlistId,
+    int? replyTo,
   });
+  Future<void> react(int messageId, String emoji);
+
+  /// Waits until something new concerns this user, then returns the revision to pass next
+  /// time. Returns sooner if nothing happened for a while.
+  Future<int> waitForChange(int revision);
+  Future<void> setPlaying({String? songId, String? title, String? artist});
   Future<void> markRead(String withUser, int upTo);
   Future<List<ChatProfile>> profiles();
   Future<void> saveProfile({required String displayName, required String bio});
@@ -132,7 +214,8 @@ class MessagingApi implements MessagingTransport {
       Uri.parse(serverUrl.replaceAll(RegExp(r'/+$'), '')).replace(
         port: port,
         path: path,
-        queryParameters: {...auth.authParams(), ...extra},
+        // Stable, so repeated requests use the server's recent-login cache.
+        queryParameters: {...auth.authParams(stable: true), ...extra},
       );
 
   Future<Map<String, dynamic>> _call(
@@ -140,6 +223,7 @@ class MessagingApi implements MessagingTransport {
     Uri uri, {
     Object? body,
     List<int>? bytes,
+    Duration timeout = _timeout,
   }) async {
     final client = HttpClient()..connectionTimeout = _timeout;
     try {
@@ -151,18 +235,18 @@ class MessagingApi implements MessagingTransport {
         request.contentLength = bytes.length;
         request.add(bytes);
       }
-      final response = await request.close().timeout(_timeout);
+      final response = await request.close().timeout(timeout);
       final text = await response
           .transform(utf8.decoder)
           .join()
-          .timeout(_timeout);
+          .timeout(timeout);
       return _decode(response.statusCode, text);
     } on SocketException {
-      throw const MessagingException("Can't reach the server.");
+      throw const MessagingOffline("Can't reach the server.");
     } on TimeoutException {
-      throw const MessagingException("The server didn't answer in time.");
+      throw const MessagingOffline("The server didn't answer in time.");
     } on HttpException {
-      throw const MessagingException('The connection was interrupted.');
+      throw const MessagingOffline('The connection was interrupted.');
     } finally {
       client.close(force: true);
     }
@@ -210,10 +294,18 @@ class MessagingApi implements MessagingTransport {
   }
 
   @override
-  Future<List<ChatMessage>> thread(String withUser, {int after = 0}) async {
+  Future<List<ChatMessage>> thread(
+    String withUser, {
+    int after = 0,
+    int before = 0,
+  }) async {
     final json = await _call(
       'GET',
-      _uri('/v1/messages', {'with': withUser, 'after': '$after'}),
+      _uri('/v1/messages', {
+        'with': withUser,
+        'after': '$after',
+        if (before > 0) 'before': '$before',
+      }),
     );
     return List.unmodifiable(
       (json['messages'] as List<dynamic>).cast<Map<String, dynamic>>().map(
@@ -223,11 +315,46 @@ class MessagingApi implements MessagingTransport {
   }
 
   @override
+  Future<void> react(int messageId, String emoji) async {
+    await _call(
+      'POST',
+      _uri('/v1/messages/react'),
+      body: {'id': messageId, 'emoji': emoji},
+    );
+  }
+
+  @override
+  Future<int> waitForChange(int revision) async {
+    final json = await _call(
+      'GET',
+      _uri('/v1/events', {'rev': '$revision'}),
+      timeout: _eventsTimeout,
+    );
+    return (json['rev'] as num).toInt();
+  }
+
+  @override
+  Future<void> setPlaying({
+    String? songId,
+    String? title,
+    String? artist,
+  }) async {
+    await _call(
+      'PUT',
+      _uri('/v1/profile/playing'),
+      body: {'songId': songId ?? '', 'title': ?title, 'artist': ?artist},
+    );
+  }
+
+  @override
   Future<ChatMessage> send(
     String to, {
     String text = '',
     String? songId,
     String? songTitle,
+    String? albumId,
+    String? playlistId,
+    int? replyTo,
   }) async {
     final json = await _call(
       'POST',
@@ -237,6 +364,9 @@ class MessagingApi implements MessagingTransport {
         'text': text,
         'songId': ?songId,
         'songTitle': ?songTitle,
+        'albumId': ?albumId,
+        'playlistId': ?playlistId,
+        'replyTo': ?replyTo,
       },
     );
     return ChatMessage.fromJson(json);

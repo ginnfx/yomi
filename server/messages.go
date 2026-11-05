@@ -46,6 +46,14 @@ type Message struct {
 	SongID    string `json:"songId,omitempty"`
 	SongTitle string `json:"songTitle,omitempty"`
 	SentMs    int64  `json:"sentMs"`
+
+	// A shared album or playlist, named by SongTitle.
+	AlbumID    string `json:"albumId,omitempty"`
+	PlaylistID string `json:"playlistId,omitempty"`
+	ReplyTo    int64  `json:"replyTo,omitempty"`
+
+	// Who reacted with what. Added when sending to the app, never saved in the message.
+	Reactions map[string]string `json:"reactions,omitempty"`
 }
 
 // Profile is what others see of a user.
@@ -54,6 +62,9 @@ type Profile struct {
 	DisplayName string `json:"displayName"`
 	Bio         string `json:"bio"`
 	HasAvatar   bool   `json:"hasAvatar"`
+
+	// Only present while someone who chose to share is listening. Never saved.
+	NowPlaying *NowPlaying `json:"nowPlaying,omitempty"`
 }
 
 // Conversation summarises a thread for the list screen.
@@ -80,6 +91,11 @@ type MessageStore struct {
 	messages []Message
 	state    socialState
 	sent     map[string][]time.Time
+
+	reactions map[int64]map[string]string
+	revisions map[string]int64
+	changed   chan struct{}
+	playing   map[string]NowPlaying
 }
 
 func openMessageStore(dir string, now func() time.Time) (*MessageStore, error) {
@@ -94,9 +110,16 @@ func openMessageStore(dir string, now func() time.Time) (*MessageStore, error) {
 			ReadUpTo: make(map[string]int64),
 			Devices:  make(map[string][]string),
 		},
-		sent: make(map[string][]time.Time),
+		sent:      make(map[string][]time.Time),
+		reactions: make(map[int64]map[string]string),
+		revisions: make(map[string]int64),
+		changed:   make(chan struct{}),
+		playing:   make(map[string]NowPlaying),
 	}
 	if err := store.loadMessages(); err != nil {
+		return nil, err
+	}
+	if err := store.loadReactions(); err != nil {
 		return nil, err
 	}
 	if err := store.loadState(); err != nil {
@@ -204,6 +227,7 @@ func (m *MessageStore) Send(message Message) (Message, error) {
 		return Message{}, err
 	}
 	m.messages = append(m.messages, message)
+	m.bumpLocked(message.From, message.To)
 	return message, nil
 }
 
@@ -212,16 +236,17 @@ func isBetween(message Message, a, b string) bool {
 }
 
 // Thread returns up to one page of messages between two users, oldest first. With no
-// after, it returns the most recent page.
-func (m *MessageStore) Thread(user, with string, after int64) []Message {
+// after, it returns the most recent page, or the page just older than before if set.
+func (m *MessageStore) Thread(user, with string, after, before int64) []Message {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	found := make([]Message, 0)
 	for _, message := range m.messages {
-		if message.ID > after && isBetween(message, user, with) {
-			found = append(found, message)
+		if message.ID > after && (before == 0 || message.ID < before) && isBetween(message, user, with) {
+			found = append(found, m.withReactionsLocked(message))
 		}
 	}
+	// Without a starting point, the page nearest the newest message is what's wanted.
 	if after == 0 && len(found) > maxThreadPage {
 		return found[len(found)-maxThreadPage:]
 	}
@@ -253,7 +278,7 @@ func (m *MessageStore) Conversations(user string) []Conversation {
 			conversation = &Conversation{With: partner}
 			byPartner[partner] = conversation
 		}
-		conversation.Last = message
+		conversation.Last = m.withReactionsLocked(message)
 		if message.To == user && message.ID > m.state.ReadUpTo[readKey(user, partner)] {
 			conversation.Unread++
 		}
@@ -301,6 +326,7 @@ func (m *MessageStore) Profiles() []Profile {
 	defer m.mu.RUnlock()
 	result := make([]Profile, 0, len(m.state.Profiles))
 	for _, profile := range m.state.Profiles {
+		profile.NowPlaying = m.currentPlayingLocked(profile.User)
 		result = append(result, profile)
 	}
 	sort.Slice(result, func(a, b int) bool { return result[a].User < result[b].User })
@@ -473,10 +499,13 @@ func (s *Server) handleSend(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var request struct {
-		To        string `json:"to"`
-		Text      string `json:"text"`
-		SongID    string `json:"songId"`
-		SongTitle string `json:"songTitle"`
+		To         string `json:"to"`
+		Text       string `json:"text"`
+		SongID     string `json:"songId"`
+		SongTitle  string `json:"songTitle"`
+		AlbumID    string `json:"albumId"`
+		PlaylistID string `json:"playlistId"`
+		ReplyTo    int64  `json:"replyTo"`
 	}
 	if !decodeBody(w, r, &request) {
 		return
@@ -487,13 +516,14 @@ func (s *Server) handleSend(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	text := strings.TrimSpace(request.Text)
-	if (text == "" && request.SongID == "") || utf8.RuneCountInString(text) > maxMessageChars ||
+	if (text == "" && request.SongID == "" && request.AlbumID == "" && request.PlaylistID == "") || utf8.RuneCountInString(text) > maxMessageChars ||
 		utf8.RuneCountInString(request.SongTitle) > maxNameChars*5 {
 		writeError(w, http.StatusBadRequest, "a message needs text or a song, up to 4000 characters")
 		return
 	}
 	message, err := s.Messages.Send(Message{
 		From: user, To: to, Text: text, SongID: request.SongID, SongTitle: request.SongTitle,
+		AlbumID: request.AlbumID, PlaylistID: request.PlaylistID, ReplyTo: request.ReplyTo,
 	})
 	switch {
 	case errors.Is(err, errRateLimited):
@@ -533,7 +563,7 @@ func (s *Server) pushNewMessage(to, from string) {
 }
 
 func (s *Server) handleThread(w http.ResponseWriter, r *http.Request) {
-	user, ok := s.socialUser(w, r)
+	user, ok := s.socialReader(w, r)
 	if !ok {
 		return
 	}
@@ -546,11 +576,15 @@ func (s *Server) handleThread(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		after = 0
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"messages": s.Messages.Thread(user, with, after)})
+	before, err := strconv.ParseInt(r.URL.Query().Get("before"), 10, 64)
+	if err != nil {
+		before = 0
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"messages": s.Messages.Thread(user, with, after, before)})
 }
 
 func (s *Server) handleConversations(w http.ResponseWriter, r *http.Request) {
-	user, ok := s.socialUser(w, r)
+	user, ok := s.socialReader(w, r)
 	if !ok {
 		return
 	}

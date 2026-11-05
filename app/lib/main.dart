@@ -227,7 +227,27 @@ Future<void> main() async {
     deviceId: deviceId,
     pollInterval: Duration(seconds: Platform.isMacOS ? 2 : 5),
   );
-  final messages = MessagesController();
+  final messages = MessagesController(
+    savedChats: Directory('${supportDir.path}/chats'),
+    me: () => session.username,
+    listenForEvents: true,
+  );
+  String? sharedSongId;
+  void sharePlaying() {
+    final song = settings.shareListening ? player.current : null;
+    if (song?.id == sharedSongId) return;
+    sharedSongId = song?.id;
+    unawaited(
+      messages.sharePlaying(
+        songId: song?.id,
+        title: song?.title,
+        artist: song?.artist,
+      ),
+    );
+  }
+
+  player.addListener(sharePlaying);
+  settings.addListener(sharePlaying);
   String? messagingUrl;
   void publishProfile() => unawaited(
     messages.publishProfile(
@@ -304,6 +324,7 @@ Future<void> main() async {
     player.isServerDown = !isReachable;
     if (client != null && isReachable && !wasReachable) {
       unawaited(client.flushOutbox());
+      unawaited(messages.flushPending());
     }
     wasReachable = isReachable;
     if (client == null) {

@@ -12,6 +12,7 @@ import 'cover_art.dart';
 import 'download_badge.dart';
 import 'equalizer.dart';
 import 'playlist_sheet.dart';
+import 'send_to_sheet.dart';
 
 const double _unavailableOpacity = 0.4;
 
@@ -212,6 +213,15 @@ Future<void> showSongMenu(
         player.addToQueue(song);
         tell('Added to queue');
       },
+    ),
+    SongAction(
+      icon: Icons.send_rounded,
+      label: 'Send to…',
+      onSelected: () => showSendTo(
+        context,
+        title: '${song.title} · ${song.artist}',
+        songId: song.id,
+      ),
     ),
     SongAction(
       icon: Icons.playlist_add_rounded,

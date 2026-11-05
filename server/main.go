@@ -37,7 +37,17 @@ func main() {
 		if cfg.PrimaryURL == "" || cfg.ReplicaUser == "" || cfg.ReplicaPassword == "" || cfg.ReplicaDatabase == "" {
 			log.Fatal("replica needs YOMI_PRIMARY, YOMI_REPLICA_USER, YOMI_REPLICA_PASSWORD and YOMI_REPLICA_DB")
 		}
-		go newReplicaSync(cfg, index).Run(context.Background())
+		sync := newReplicaSync(cfg, index)
+		sync.State = &StateSync{
+			PrimaryURL: sync.PrimaryURL,
+			Login:      sync.Login,
+			Client:     sync.Client,
+			Roots:      map[string]string{stateRootMessages: cfg.MessagesDir, stateRootHistory: cfg.HistoryDir},
+		}
+		if server.Messages != nil {
+			sync.State.OnChanged = server.Messages.Reload
+		}
+		go sync.Run(context.Background())
 	}
 	if cfg.CoversOn {
 		startCovers(cfg)

@@ -167,6 +167,7 @@ type ReplicaSync struct {
 	Root         string
 	Index        *HashIndex
 	DatabaseFile string
+	State        *StateSync
 	Apply        func(context.Context) error
 	Client       *http.Client
 	HasRoomFor   func(int64) bool
@@ -252,6 +253,13 @@ func (r *ReplicaSync) Sync(ctx context.Context) error {
 	if failures > 0 {
 		// The database has to wait: it would list songs this server doesn't have.
 		return fmt.Errorf("%d files failed, first: %w", failures, redactURL(firstFailure))
+	}
+	if r.State != nil {
+		// Chats and history are extras here: failing to copy them can wait for the next
+		// sync, and shouldn't hold back the library.
+		if err := r.State.Run(ctx); err != nil {
+			log.Printf("replica state: %v", redactURL(err))
+		}
 	}
 	return r.syncDatabase(ctx)
 }

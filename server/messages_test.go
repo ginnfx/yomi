@@ -222,7 +222,7 @@ func TestMessagesAndStateSurviveRestart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	thread := reopened.Thread("keli", "sam", 0)
+	thread := reopened.Thread("keli", "sam", 0, 0)
 	if len(thread) != 1 || thread[0].Text != "keep me" {
 		t.Fatalf("thread = %+v", thread)
 	}

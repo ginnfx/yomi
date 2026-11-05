@@ -10,6 +10,17 @@ import 'package:yomi/ui/pages/messages_page.dart';
 import 'support/screen_harness.dart';
 
 class FakeTransport implements MessagingTransport {
+  @override
+  Future<void> react(int messageId, String emoji) async {}
+  @override
+  Future<int> waitForChange(int revision) async => revision;
+  @override
+  Future<void> setPlaying({
+    String? songId,
+    String? title,
+    String? artist,
+  }) async {}
+
   final List<ChatMessage> messages = [];
   List<ChatProfile> people = const [
     ChatProfile(user: 'demo'),
@@ -48,7 +59,11 @@ class FakeTransport implements MessagingTransport {
   }
 
   @override
-  Future<List<ChatMessage>> thread(String withUser, {int after = 0}) async {
+  Future<List<ChatMessage>> thread(
+    String withUser, {
+    int after = 0,
+    int before = 0,
+  }) async {
     final error = failure;
     if (error != null) throw error;
     return messages.where((m) => m.id > after).toList();
@@ -60,6 +75,9 @@ class FakeTransport implements MessagingTransport {
     String text = '',
     String? songId,
     String? songTitle,
+    String? albumId,
+    String? playlistId,
+    int? replyTo,
   }) async {
     final error = failure;
     if (error != null) throw error;

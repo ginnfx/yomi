@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 
 import '../../core/format.dart';
 import '../../core/models.dart';
+import '../../state/catalog_controller.dart';
 import '../../state/home_controller.dart';
 import '../../state/messages_controller.dart';
 import '../../state/player_controller.dart';
@@ -87,6 +88,7 @@ class _HomePageState extends State<HomePage> {
               ),
             ),
           for (final id in sections) () => _section(id, session),
+          ..._friendsPlaying(),
           ..._shelfBuilders(home),
           () => Center(
             child: TextButton.icon(
@@ -121,6 +123,39 @@ class _HomePageState extends State<HomePage> {
     itemCount: items.length,
     itemBuilder: (_, i) => items[i](),
   );
+
+  /// What friends are playing, only if you've chosen to share with each other.
+  List<Widget Function()> _friendsPlaying() {
+    if (!context.watch<SettingsController>().shareListening) return const [];
+    final friends = context.watch<MessagesController>().friendsPlaying;
+    if (friends.isEmpty) return const [];
+    final library = {
+      for (final song in context.watch<CatalogController>().songs)
+        song.id: song,
+    };
+    final songs = [
+      for (final friend in friends) ?library[friend.nowPlaying!.songId],
+    ];
+    if (songs.isEmpty) return const [];
+    final player = context.read<PlayerController>();
+    return [
+      () => Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const SectionTitle('What friends are playing'),
+          CardRow(
+            children: [
+              for (var i = 0; i < songs.length; i++)
+                AlbumCard.song(
+                  songs[i],
+                  () => player.playQueue(songs, startIndex: i),
+                ),
+            ],
+          ),
+        ],
+      ),
+    ];
+  }
 
   /// One builder per shelf. See [HomeController].
   List<Widget Function()> _shelfBuilders(HomeController home) {

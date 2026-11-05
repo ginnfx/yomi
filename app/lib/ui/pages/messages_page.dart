@@ -8,6 +8,7 @@ import '../../state/messages_controller.dart';
 import '../../state/player_controller.dart';
 import '../../state/session.dart';
 import '../theme.dart';
+import 'collection_page.dart';
 
 void openMessages(BuildContext context) {
   Navigator.of(
@@ -250,6 +251,7 @@ class _ThreadPageState extends State<ThreadPage> {
   final _text = TextEditingController();
   late final MessagesController _messages = context.read<MessagesController>();
   bool _isSending = false;
+  ChatMessage? _replyingTo;
 
   @override
   void initState() {
@@ -271,10 +273,13 @@ class _ThreadPageState extends State<ThreadPage> {
     final text = _text.text.trim();
     if (text.isEmpty || _isSending) return;
     setState(() => _isSending = true);
-    final isSent = await _messages.send(text: text);
+    final isSent = await _messages.send(text: text, replyTo: _replyingTo?.id);
     if (!mounted) return;
-    // A failed message stays in the box, so nothing typed is lost.
-    if (isSent) _text.clear();
+    // A refused message stays in the box, so nothing typed is lost.
+    if (isSent) {
+      _text.clear();
+      _replyingTo = null;
+    }
     setState(() => _isSending = false);
   }
 
@@ -289,10 +294,53 @@ class _ThreadPageState extends State<ThreadPage> {
     if (mounted) setState(() => _isSending = false);
   }
 
+  void _showActions(ChatMessage message) {
+    if (message.isPending) return;
+    final me = context.read<SessionController>().username;
+    showModalBottomSheet<void>(
+      context: context,
+      builder: (sheet) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Padding(
+              padding: const EdgeInsets.all(YomiSpace.s),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                children: [
+                  for (final emoji in _reactions)
+                    IconButton(
+                      icon: Text(emoji, style: const TextStyle(fontSize: 26)),
+                      onPressed: () {
+                        Navigator.pop(sheet);
+                        final isSame = message.reactions[me] == emoji;
+                        unawaited(
+                          _messages.react(message.id, isSame ? '' : emoji),
+                        );
+                      },
+                    ),
+                ],
+              ),
+            ),
+            ListTile(
+              leading: const Icon(Icons.reply_rounded),
+              title: const Text('Reply'),
+              onTap: () {
+                Navigator.pop(sheet);
+                setState(() => _replyingTo = message);
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final messages = context.watch<MessagesController>();
     final thread = messages.thread;
+    final replying = _replyingTo;
     final hasSong = context.select<PlayerController, bool>(
       (player) => player.current != null,
     );
@@ -310,11 +358,27 @@ class _ThreadPageState extends State<ThreadPage> {
               child: ListView.builder(
                 reverse: true,
                 padding: const EdgeInsets.all(YomiSpace.l),
-                itemCount: thread.length,
-                itemBuilder: (_, i) => _Bubble(
-                  message: thread[thread.length - 1 - i],
-                  isMine: thread[thread.length - 1 - i].to == widget.user,
-                ),
+                itemCount: thread.length + (messages.mayHaveOlder ? 1 : 0),
+                itemBuilder: (_, i) {
+                  if (i == thread.length) {
+                    return Center(
+                      child: TextButton(
+                        onPressed: messages.loadOlder,
+                        child: const Text('Load earlier messages'),
+                      ),
+                    );
+                  }
+                  final message = thread[thread.length - 1 - i];
+                  return _Bubble(
+                    key: ValueKey(message.id),
+                    message: message,
+                    isMine: message.to == widget.user,
+                    repliedTo: thread
+                        .where((other) => other.id == message.replyTo)
+                        .firstOrNull,
+                    onLongPress: () => _showActions(message),
+                  );
+                },
               ),
             ),
             if (messages.error != null)
@@ -327,6 +391,21 @@ class _ThreadPageState extends State<ThreadPage> {
                     weight: FontWeight.w600,
                     color: YomiColors.danger,
                   ),
+                ),
+              ),
+            if (replying != null)
+              ListTile(
+                dense: true,
+                leading: const Icon(Icons.reply_rounded),
+                title: Text(
+                  _preview(replying),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                trailing: IconButton(
+                  tooltip: 'Cancel reply',
+                  icon: const Icon(Icons.close_rounded),
+                  onPressed: () => setState(() => _replyingTo = null),
                 ),
               ),
             Padding(
@@ -373,25 +452,61 @@ class _ThreadPageState extends State<ThreadPage> {
   }
 }
 
+const List<String> _reactions = ['❤️', '🔥', '😂', '😮', '😢', '👍'];
+
+String _preview(ChatMessage message) =>
+    message.text.isNotEmpty ? message.text : (message.songTitle ?? 'A share');
+
 class _Bubble extends StatelessWidget {
-  const _Bubble({required this.message, required this.isMine});
+  const _Bubble({
+    super.key,
+    required this.message,
+    required this.isMine,
+    this.repliedTo,
+    this.onLongPress,
+  });
 
   final ChatMessage message;
   final bool isMine;
+  final ChatMessage? repliedTo;
+  final VoidCallback? onLongPress;
 
-  Future<void> _playSong(BuildContext context) async {
-    final songId = message.songId;
-    if (songId == null) return;
+  /// Plays a shared song, or opens a shared album or playlist.
+  Future<void> _openShare(BuildContext context) async {
     final messenger = ScaffoldMessenger.of(context);
     final player = context.read<PlayerController>();
     final client = context.read<SessionController>().client;
+    final navigator = Navigator.of(context);
+    final title = message.songTitle ?? 'Shared with you';
     try {
-      await player.playQueue([await client.song(songId)]);
+      if (message.songId case final id?) {
+        await player.playQueue([await client.song(id)]);
+      } else if (message.albumId case final id?) {
+        await navigator.push(
+          MaterialPageRoute<void>(
+            builder: (_) => CollectionPage(
+              title: title,
+              subtitle: '',
+              savedSongs: client.cachedAlbumSongs(id),
+              loadSongs: () => client.albumSongs(id),
+            ),
+          ),
+        );
+      } else if (message.playlistId case final id?) {
+        await navigator.push(
+          MaterialPageRoute<void>(
+            builder: (_) => CollectionPage(
+              title: title,
+              subtitle: '',
+              savedSongs: client.cachedPlaylistSongs(id),
+              loadSongs: () => client.playlistSongs(id),
+            ),
+          ),
+        );
+      }
     } on Exception {
       messenger.showSnackBar(
-        const SnackBar(
-          content: Text("That song isn't on this server anymore."),
-        ),
+        const SnackBar(content: Text("That isn't on this server anymore.")),
       );
     }
   }
@@ -399,7 +514,13 @@ class _Bubble extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final foreground = isMine ? Colors.black : YomiColors.textPrimary;
-    final hasSong = message.songId != null;
+    final hasShare = message.isShare;
+    final quoted = repliedTo;
+    final shareIcon = message.songId != null
+        ? Icons.play_circle_rounded
+        : message.albumId != null
+        ? Icons.album_rounded
+        : Icons.queue_music_rounded;
     return Align(
       alignment: isMine ? Alignment.centerRight : Alignment.centerLeft,
       child: ConstrainedBox(
@@ -413,7 +534,8 @@ class _Bubble extends StatelessWidget {
             borderRadius: BorderRadius.circular(YomiRadius.sheet),
             clipBehavior: Clip.antiAlias,
             child: InkWell(
-              onTap: hasSong ? () => _playSong(context) : null,
+              onTap: hasShare ? () => _openShare(context) : null,
+              onLongPress: onLongPress,
               child: Padding(
                 padding: const EdgeInsets.symmetric(
                   horizontal: YomiSpace.m,
@@ -422,19 +544,29 @@ class _Bubble extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    if (hasSong)
+                    if (quoted != null)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: YomiSpace.xs),
+                        child: Text(
+                          _preview(quoted),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: yomiText(
+                            12.5,
+                            weight: FontWeight.w500,
+                            color: foreground.withValues(alpha: 0.7),
+                          ),
+                        ),
+                      ),
+                    if (hasShare)
                       Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          Icon(
-                            Icons.play_circle_rounded,
-                            size: 20,
-                            color: foreground,
-                          ),
+                          Icon(shareIcon, size: 20, color: foreground),
                           const SizedBox(width: YomiSpace.xs),
                           Flexible(
                             child: Text(
-                              message.songTitle ?? 'A song',
+                              message.songTitle ?? 'Shared with you',
                               style: yomiText(
                                 14,
                                 weight: FontWeight.w700,
@@ -452,6 +584,37 @@ class _Bubble extends StatelessWidget {
                           weight: FontWeight.w500,
                           height: 1.3,
                           color: foreground,
+                        ),
+                      ),
+                    if (message.reactions.isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.only(top: YomiSpace.xs),
+                        child: Text(
+                          message.reactions.values.join(' '),
+                          style: const TextStyle(fontSize: 14),
+                        ),
+                      ),
+                    if (message.isPending)
+                      Padding(
+                        padding: const EdgeInsets.only(top: YomiSpace.xs),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              Icons.schedule_rounded,
+                              size: 12,
+                              color: foreground.withValues(alpha: 0.7),
+                            ),
+                            const SizedBox(width: 4),
+                            Text(
+                              'Sending when connected',
+                              style: yomiText(
+                                11,
+                                weight: FontWeight.w500,
+                                color: foreground.withValues(alpha: 0.7),
+                              ),
+                            ),
+                          ],
                         ),
                       ),
                   ],
