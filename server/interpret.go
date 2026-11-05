@@ -45,6 +45,7 @@ type Interpreter struct {
 	order []string
 	calls map[string][]time.Time
 	now   func() time.Time
+	names *answerCache[[]MixName]
 }
 
 func newInterpreter(llm *LLMClient, tags *TagStore) *Interpreter {
@@ -54,6 +55,7 @@ func newInterpreter(llm *LLMClient, tags *TagStore) *Interpreter {
 		cache: map[string]SearchFilters{},
 		calls: map[string][]time.Time{},
 		now:   time.Now,
+		names: newAnswerCache[[]MixName](),
 	}
 }
 

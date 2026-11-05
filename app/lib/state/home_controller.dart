@@ -8,6 +8,7 @@ import 'package:flutter/foundation.dart';
 import '../core/listening/play_history.dart';
 import '../core/models.dart';
 import '../core/recommendations.dart';
+import '../core/taste.dart';
 import '../core/subsonic_client.dart';
 import 'settings.dart';
 
@@ -65,6 +66,7 @@ class HomeController extends ChangeNotifier {
   final DateTime Function() _now;
   SubsonicClient? _client;
   List<HomeShelf> _shelves = const [];
+  TasteProfile _taste = TasteProfile.empty;
   List<Playlist> _quickPlaylists = const [];
   List<Song> _quickSongs = const [];
   _HomeContent? _heldBack;
@@ -82,6 +84,9 @@ class HomeController extends ChangeNotifier {
   Object? _error;
 
   bool get isLoading => _isLoading;
+
+  /// What this person likes, from the last time Home was worked out.
+  TasteProfile get taste => _taste;
 
   /// The top of Home. Saved with the shelves, so these stay put when the app reopens.
   List<Playlist> get quickPlaylists => _quickPlaylists;
@@ -155,6 +160,7 @@ class HomeController extends ChangeNotifier {
     }
     if (client == null) {
       _shelves = const [];
+      _taste = TasteProfile.empty;
       _quickPlaylists = const [];
       _quickSongs = const [];
       _heldBack = null;
@@ -292,7 +298,7 @@ class HomeController extends ChangeNotifier {
                 ?ShelfKind.values.asNameMap()[id],
             ]
           : null;
-      final shelves = HomeBuilder(
+      final builder = HomeBuilder(
         events: [...?otherDevicePlays?.call(), ...history.events],
         pool: {
           for (final song in [...history.songs, ...results[0], ...results[2]])
@@ -310,7 +316,9 @@ class HomeController extends ChangeNotifier {
         similarArtists: similarArtists?.call() ?? const {},
         importedTaste: importedTaste?.call() ?? const {},
         pastFavourites: pastFavouritesFor?.call(results[0]) ?? const {},
-      ).build(keepOrder: order);
+      );
+      final shelves = builder.build(keepOrder: order);
+      _taste = builder.taste();
       final content = _HomeContent(
         List.unmodifiable(shelves),
         playlists,

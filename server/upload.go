@@ -34,10 +34,13 @@ type Server struct {
 	Tags        *TagStore
 	LLM         *LLMClient
 	interpreter *Interpreter
-	slots       chan struct{}
-	limits      *loginLimiter
-	scans       *scanDebouncer
-	publishMu   sync.Mutex
+
+	PlaylistCovers *PlaylistCoverStore
+	PlaylistOwner  func(ctx context.Context, query url.Values, id string) (string, error)
+	slots          chan struct{}
+	limits         *loginLimiter
+	scans          *scanDebouncer
+	publishMu      sync.Mutex
 }
 
 func newServer(cfg Config, auth Authenticator, scan func(context.Context, url.Values), index *HashIndex) *Server {
@@ -75,6 +78,7 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("GET /v1/replica/state", s.handleStateIndex)
 	mux.HandleFunc("GET /v1/replica/state/file", s.handleStateFile)
 	mux.HandleFunc("PUT /v1/profile", s.handleSaveProfile)
+	mux.HandleFunc("PUT /v1/profile/taste", s.handleSaveTaste)
 	mux.HandleFunc("GET /v1/profiles", s.handleProfiles)
 	mux.HandleFunc("PUT /v1/profile/avatar", s.handleSaveAvatar)
 	mux.HandleFunc("GET /v1/profiles/{user}/avatar", s.handleAvatar)
@@ -93,6 +97,11 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("GET /v1/tags", s.handleTags)
 	mux.HandleFunc("POST /v1/tags/songs", s.handleQueueTags)
 	mux.HandleFunc("POST /v1/search/interpret", s.handleInterpret)
+	mux.HandleFunc("GET /v1/playlist-covers", s.handlePlaylistCovers)
+	mux.HandleFunc("GET /v1/playlists/{id}/cover", s.handlePlaylistCover)
+	mux.HandleFunc("PUT /v1/playlists/{id}/cover", s.handleSavePlaylistCover)
+	mux.HandleFunc("DELETE /v1/playlists/{id}/cover", s.handleDeletePlaylistCover)
+	mux.HandleFunc("POST /v1/ai/names", s.handleMixNames)
 	return mux
 }
 

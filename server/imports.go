@@ -56,6 +56,17 @@ func (h *HistoryStore) SaveImport(user, id string, data []byte) error {
 	return os.Rename(temp, path)
 }
 
+// HasImport reports whether user imported a playlist with this ID.
+func (h *HistoryStore) HasImport(user, id string) bool {
+	if !validImportID(id) {
+		return false
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	_, err := os.Stat(filepath.Join(h.importsDir(user), id+".json"))
+	return err == nil
+}
+
 // DeleteImport removes one imported playlist. Removing one that's already gone is fine.
 func (h *HistoryStore) DeleteImport(user, id string) error {
 	h.mu.Lock()

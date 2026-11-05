@@ -598,6 +598,13 @@ class SubsonicClient {
         'songId': songIds,
       }, _playlistEndpoints);
 
+  /// Replaces a playlist's songs with [songIds], in that order.
+  Future<void> replacePlaylistSongs(String playlistId, List<String> songIds) =>
+      _write('createPlaylist', {
+        'playlistId': playlistId,
+        'songId': songIds,
+      }, _playlistEndpoints);
+
   Future<void> addToPlaylist(String playlistId, List<String> songIds) => _write(
     'updatePlaylist',
     {'playlistId': playlistId, 'songIdToAdd': songIds},

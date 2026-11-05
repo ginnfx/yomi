@@ -5,6 +5,12 @@ import 'package:yomi/core/messaging/messaging_api.dart';
 import 'package:yomi/state/messages_controller.dart';
 
 class _Server implements MessagingTransport {
+  @override
+  Future<void> saveTaste({
+    required List<String> topArtists,
+    required List<String> topMoods,
+  }) async {}
+
   final List<ChatMessage> messages = [];
   final List<ChatProfile> people = const [ChatProfile(user: 'sam')];
   final reacted = <(int, String)>[];

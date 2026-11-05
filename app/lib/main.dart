@@ -10,6 +10,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'core/mixes.dart';
 import 'core/ai/ai_api.dart';
 import 'core/apk_installer.dart';
 import 'core/app_update.dart';
@@ -45,6 +46,7 @@ import 'state/listening_controller.dart';
 import 'state/listening_log.dart';
 import 'state/messages_controller.dart';
 import 'state/player_controller.dart';
+import 'state/playlist_covers_controller.dart';
 import 'state/playback_sync_controller.dart';
 import 'state/profile_controller.dart';
 import 'state/session.dart';
@@ -176,6 +178,7 @@ Future<void> main() async {
   );
   final ai = AiController(file: File('$listeningDir/ai-labels.json'));
   await ai.load();
+  final playlistCovers = PlaylistCoversController();
   final imports = ImportsController(
     file: File('$listeningDir/imported-playlists.json'),
   );
@@ -259,6 +262,27 @@ Future<void> main() async {
 
   player.addListener(sharePlaying);
   settings.addListener(sharePlaying);
+  // Friends see your top artists and moods, never single plays, and only while you
+  // share what you're listening to.
+  void shareTaste() {
+    final isSharing = settings.shareListening;
+    final taste = home.taste;
+    unawaited(
+      messages.shareTaste(
+        topArtists: isSharing ? topArtistsOf(taste) : const [],
+        topMoods: isSharing
+            ? topMoodsOf(
+                library: catalog.songs,
+                taste: taste,
+                tagFor: ai.tagFor,
+              )
+            : const [],
+      ),
+    );
+  }
+
+  home.addListener(shareTaste);
+  settings.addListener(shareTaste);
   String? messagingUrl;
   void publishProfile() {
     if (!profile.hasContent) return;
@@ -319,6 +343,17 @@ Future<void> main() async {
     } else if (client.baseUrl != aiUrl) {
       ai.attach(
         AiApi(
+          serverUrl: client.baseUrl,
+          auth: client,
+          port: session.uploadServicePort,
+        ),
+      );
+    }
+    if (client == null) {
+      playlistCovers.attach(null);
+    } else if (client.baseUrl != aiUrl) {
+      playlistCovers.attach(
+        PlaylistCoversApi(
           serverUrl: client.baseUrl,
           auth: client,
           port: session.uploadServicePort,
@@ -469,6 +504,7 @@ Future<void> main() async {
       ai: ai,
       listeningLog: listeningLog,
       imports: imports,
+      playlistCovers: playlistCovers,
       tunnel: tunnel,
       messages: messages,
     ),
@@ -575,6 +611,7 @@ class YomiApp extends StatelessWidget {
     required this.ai,
     required this.listeningLog,
     required this.imports,
+    required this.playlistCovers,
     required this.tunnel,
     required this.messages,
   });
@@ -598,6 +635,7 @@ class YomiApp extends StatelessWidget {
   final AiController ai;
   final ListeningLog listeningLog;
   final ImportsController imports;
+  final PlaylistCoversController playlistCovers;
   final TunnelController tunnel;
   final MessagesController messages;
 
@@ -615,6 +653,9 @@ class YomiApp extends StatelessWidget {
         ChangeNotifierProvider<AiController>.value(value: ai),
         ChangeNotifierProvider<ListeningLog>.value(value: listeningLog),
         ChangeNotifierProvider<ImportsController>.value(value: imports),
+        ChangeNotifierProvider<PlaylistCoversController>.value(
+          value: playlistCovers,
+        ),
         ChangeNotifierProvider<PlaybackSyncController>.value(value: sync),
         ChangeNotifierProvider<SessionController>.value(value: session),
         ChangeNotifierProvider<PlayerController>.value(value: player),

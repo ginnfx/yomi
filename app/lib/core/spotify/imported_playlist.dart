@@ -92,6 +92,9 @@ class ImportedPlaylist {
 
   int get matchedCount => entries.where((e) => e.songId != null).length;
 
+  ImportedPlaylist renamed(String next) =>
+      ImportedPlaylist(id: id, name: next, entries: entries);
+
   ImportedPlaylist withEntries(List<ImportEntry> next) =>
       ImportedPlaylist(id: id, name: name, entries: List.unmodifiable(next));
 

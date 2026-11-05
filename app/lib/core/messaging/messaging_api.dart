@@ -108,6 +108,7 @@ class ChatProfile {
     this.bio = '',
     this.hasAvatar = false,
     this.nowPlaying,
+    this.taste,
   });
 
   factory ChatProfile.fromJson(Map<String, dynamic> json) => ChatProfile(
@@ -118,6 +119,9 @@ class ChatProfile {
     nowPlaying: json['nowPlaying'] == null
         ? null
         : FriendPlaying.fromJson(json['nowPlaying'] as Map<String, dynamic>),
+    taste: json['taste'] == null
+        ? null
+        : SharedTaste.fromJson(json['taste'] as Map<String, dynamic>),
   );
 
   final String user;
@@ -126,7 +130,28 @@ class ChatProfile {
   final bool hasAvatar;
   final FriendPlaying? nowPlaying;
 
+  /// Their top artists and moods, if they share them.
+  final SharedTaste? taste;
+
   String get name => displayName.isEmpty ? user : displayName;
+}
+
+/// What someone shares about their listening: a few names, never individual plays.
+@immutable
+class SharedTaste {
+  const SharedTaste({this.topArtists = const [], this.topMoods = const []});
+
+  factory SharedTaste.fromJson(Map<String, dynamic> json) => SharedTaste(
+    topArtists: List.unmodifiable(
+      (json['topArtists'] as List<dynamic>? ?? const []).whereType<String>(),
+    ),
+    topMoods: List.unmodifiable(
+      (json['topMoods'] as List<dynamic>? ?? const []).whereType<String>(),
+    ),
+  );
+
+  final List<String> topArtists;
+  final List<String> topMoods;
 }
 
 @immutable
@@ -195,6 +220,12 @@ abstract interface class MessagingTransport {
   Future<void> markRead(String withUser, int upTo);
   Future<List<ChatProfile>> profiles();
   Future<void> saveProfile({required String displayName, required String bio});
+
+  /// Shares your top artists and moods with friends. Empty lists stop sharing.
+  Future<void> saveTaste({
+    required List<String> topArtists,
+    required List<String> topMoods,
+  });
   Future<void> saveAvatar(File image);
   Uri avatarUri(String user);
 }
@@ -397,6 +428,16 @@ class MessagingApi implements MessagingTransport {
     'PUT',
     _uri('/v1/profile'),
     body: {'displayName': displayName, 'bio': bio},
+  );
+
+  @override
+  Future<void> saveTaste({
+    required List<String> topArtists,
+    required List<String> topMoods,
+  }) => _call(
+    'PUT',
+    _uri('/v1/profile/taste'),
+    body: {'topArtists': topArtists, 'topMoods': topMoods},
   );
 
   @override

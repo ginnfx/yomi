@@ -92,6 +92,7 @@ class MessagesController extends ChangeNotifier {
   /// Connects to a server, or stops everything with null.
   void attach(MessagingTransport? transport) {
     _transport = transport;
+    _sharedTasteKey = null;
     _inboxTimer?.cancel();
     _listenGeneration++;
     if (transport == null) {
@@ -555,6 +556,26 @@ class MessagesController extends ChangeNotifier {
       );
     } on MessagingException catch (error) {
       debugPrint('Could not share what is playing: $error');
+    }
+  }
+
+  String? _sharedTasteKey;
+
+  /// Shares your top artists and moods with friends, only when they've changed. Empty
+  /// lists stop sharing.
+  Future<void> shareTaste({
+    required List<String> topArtists,
+    required List<String> topMoods,
+  }) async {
+    final transport = _transport;
+    final key = '${topArtists.join('|')}#${topMoods.join('|')}';
+    if (transport == null || key == _sharedTasteKey) return;
+    _sharedTasteKey = key;
+    try {
+      await transport.saveTaste(topArtists: topArtists, topMoods: topMoods);
+    } on MessagingException catch (error) {
+      _sharedTasteKey = null;
+      debugPrint('Could not share your taste: $error');
     }
   }
 

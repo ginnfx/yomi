@@ -11,6 +11,12 @@ import 'support/screen_harness.dart';
 
 class FakeTransport implements MessagingTransport {
   @override
+  Future<void> saveTaste({
+    required List<String> topArtists,
+    required List<String> topMoods,
+  }) async {}
+
+  @override
   Future<void> react(int messageId, String emoji) async {}
   @override
   Future<int> waitForChange(int revision) async => revision;
@@ -254,7 +260,8 @@ void main() {
         await controller.refresh();
       });
       await pumpScreen(tester, wrap(const MessagesPage()), size: phoneSize);
-      expect(find.text('Sam'), findsOneWidget);
+      // Once in the friends row, once in the list. You never appear yourself.
+      expect(find.text('Sam'), findsNWidgets(2));
       expect(find.text('demo'), findsNothing);
       expect(find.textContaining('end-to-end'), findsOneWidget);
     });

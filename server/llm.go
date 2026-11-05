@@ -96,6 +96,8 @@ func (c *LLMClient) complete(ctx context.Context, system, user string) (string, 
 		"model":           c.Model,
 		"max_tokens":      llmMaxTokens,
 		"response_format": map[string]string{"type": "json_object"},
+		// Thinking is DeepSeek's default and would spend the reply on hidden reasoning.
+		"thinking": map[string]string{"type": "disabled"},
 		"messages": []map[string]string{
 			{"role": "system", "content": system},
 			{"role": "user", "content": user},

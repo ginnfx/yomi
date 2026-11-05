@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';
 import 'package:yomi/core/models.dart';
 import 'package:yomi/core/recommendations.dart';
+import 'package:yomi/core/taste.dart';
 import 'package:yomi/state/home_controller.dart';
 import 'package:yomi/state/messages_controller.dart';
 import 'package:yomi/state/playback_sync_controller.dart';
@@ -29,6 +30,8 @@ class _FakeHome extends ChangeNotifier implements HomeController {
   @override
   List<Song> get quickSongs => _songs('Quick');
 
+  @override
+  TasteProfile get taste => TasteProfile.empty;
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }

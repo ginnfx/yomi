@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'genres.dart';
 import 'listening/play_history.dart';
 import 'models.dart';
+import 'taste.dart';
 
 const int kShelfSize = 12;
 const int kMinShelfSongs = 3;
@@ -259,10 +260,26 @@ class HomeBuilder {
   }
 
   /// How much the user seems to like a song. Skips count against it.
-  double scoreOf(Song song) =>
-      (_plays[song.id] ?? _serverPlays[song.id] ?? 0) -
-      (_skips[song.id] ?? 0) * _skipPenalty +
-      (starred.contains(song.id) ? _starBonus : 0);
+  double scoreOf(Song song) => _scoreOfId(song.id);
+
+  double _scoreOfId(String id) =>
+      (_plays[id] ?? _serverPlays[id] ?? 0) -
+      (_skips[id] ?? 0) * _skipPenalty +
+      (starred.contains(id) ? _starBonus : 0);
+
+  /// This person's taste, for ordering things outside Home by it too.
+  TasteProfile taste() => TasteProfile(
+    songs: Map.unmodifiable({
+      for (final id in {
+        ..._plays.keys,
+        ..._serverPlays.keys,
+        ..._skips.keys,
+        ...starred,
+      })
+        id: _scoreOfId(id),
+    }),
+    artists: Map.unmodifiable(_artistTaste()),
+  );
 
   /// Total taste per artist or genre, from plays, server counts and likes.
   Map<String, double> _affinity(String? Function(Song) groupOf) {

@@ -27,6 +27,9 @@ class AiController extends ChangeNotifier {
   bool get isAvailable => _isAvailable;
   Map<String, List<String>> get similarArtists => _similar;
 
+  /// How many songs have labels, so screens can tell when more arrive.
+  int get labelledCount => _songs.length;
+
   SongTag? tagFor(Song song) => tagForNames(song.artist, song.title);
 
   SongTag? tagForNames(String artist, String title) =>
@@ -161,5 +164,28 @@ class AiController extends ChangeNotifier {
       debugPrint('Could not interpret a search: $error');
       return null;
     }
+  }
+
+  final Map<String, MixName> _mixNames = {};
+
+  /// Names for [mixes], remembered for the session. Any the AI can't name stay missing,
+  /// so callers fall back to plain names.
+  Future<Map<String, MixName>> nameMixes(List<MixRequest> mixes) async {
+    final api = _api;
+    final missing = [
+      for (final mix in mixes)
+        if (!_mixNames.containsKey(mix.key)) mix,
+    ];
+    if (api != null && _isAvailable && missing.isNotEmpty) {
+      try {
+        final names = await api.nameMixes(missing);
+        for (var i = 0; i < missing.length && i < names.length; i++) {
+          if (names[i].name.isNotEmpty) _mixNames[missing[i].key] = names[i];
+        }
+      } on Object catch (error) {
+        debugPrint('Could not name mixes: $error');
+      }
+    }
+    return {for (final mix in mixes) mix.key: ?_mixNames[mix.key]};
   }
 }

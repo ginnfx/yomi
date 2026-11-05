@@ -7,6 +7,9 @@ import 'package:http/http.dart' as http;
 import '../models.dart';
 import '../search_index.dart';
 import '../subsonic_client.dart';
+import 'playlist_ideas.dart';
+
+export 'playlist_ideas.dart';
 
 const Duration _tagsTimeout = Duration(seconds: 30);
 const Duration _interpretTimeout = Duration(seconds: 35);
@@ -177,5 +180,32 @@ class AiApi {
     return SearchFilters.fromJson(
       jsonDecode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>,
     );
+  }
+
+  Future<Map<String, dynamic>> _post(String path, Object body) async {
+    final response = await _http
+        .post(
+          _uri(path),
+          headers: const {'Content-Type': 'application/json'},
+          body: jsonEncode(body),
+        )
+        .timeout(_interpretTimeout);
+    if (response.statusCode != 200) {
+      throw http.ClientException('$path answered ${response.statusCode}');
+    }
+    return jsonDecode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
+  }
+
+  /// One name per mix, in the same order.
+  Future<List<MixName>> nameMixes(List<MixRequest> mixes) async {
+    final json = await _post('/v1/ai/names', {
+      'mixes': [for (final mix in mixes) mix.toJson()],
+    });
+    return [
+      for (final item
+          in ((json['names'] as List<dynamic>?) ?? const [])
+              .cast<Map<String, dynamic>>())
+        MixName.fromJson(item),
+    ];
   }
 }

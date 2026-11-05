@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"path/filepath"
 	"time"
 )
 
@@ -24,6 +25,12 @@ func main() {
 	go index.Seed()
 	server := newServer(cfg, auth, navidromeScan(cfg.NavidromeURL), index)
 	server.Status = newStatusReader(cfg, index)
+	if covers, err := openPlaylistCoverStore(filepath.Join(cfg.MessagesDir, "playlist-covers")); err != nil {
+		log.Printf("playlist pictures disabled: %v", err)
+	} else {
+		server.PlaylistCovers = covers
+		server.PlaylistOwner = navidromePlaylistOwner(cfg.NavidromeURL, &http.Client{Timeout: playlistOwnerTimeout})
+	}
 	server.Backups = newBackupSource(cfg)
 	messages, err := openMessageStore(cfg.MessagesDir, time.Now)
 	if err != nil {

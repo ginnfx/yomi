@@ -8,7 +8,10 @@ import '../../state/messages_controller.dart';
 import '../../state/player_controller.dart';
 import '../../state/session.dart';
 import '../theme.dart';
+import '../widgets/person_avatar.dart';
+import '../widgets/song_picker_sheet.dart';
 import 'collection_page.dart';
+import 'friend_profile_page.dart';
 
 void openMessages(BuildContext context) {
   Navigator.of(
@@ -47,6 +50,12 @@ class MessagesPage extends StatelessWidget {
                   bottom: MediaQuery.paddingOf(context).bottom + YomiSpace.xl,
                 ),
                 children: [
+                  _FriendsRow(
+                    people: [
+                      for (final person in messages.people)
+                        if (person.user != me) person,
+                    ],
+                  ),
                   for (final conversation in messages.conversations)
                     _ConversationTile(conversation: conversation),
                   if (others.isNotEmpty) ...[
@@ -67,7 +76,7 @@ class MessagesPage extends StatelessWidget {
                         contentPadding: const EdgeInsets.symmetric(
                           horizontal: kPagePadding,
                         ),
-                        leading: _PersonAvatar(profile: person),
+                        leading: PersonAvatar(profile: person),
                         title: Text(
                           person.name,
                           style: yomiText(15, weight: FontWeight.w700),
@@ -125,6 +134,45 @@ class MessagesPage extends StatelessWidget {
   }
 }
 
+/// Everyone on the server, to open their profile in one tap.
+class _FriendsRow extends StatelessWidget {
+  const _FriendsRow({required this.people});
+
+  final List<ChatProfile> people;
+
+  @override
+  Widget build(BuildContext context) {
+    if (people.isEmpty) return const SizedBox.shrink();
+    return SizedBox(
+      height: 104,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.fromLTRB(kPagePadding, 12, kPagePadding, 8),
+        itemCount: people.length,
+        separatorBuilder: (_, _) => const SizedBox(width: 16),
+        itemBuilder: (context, i) => GestureDetector(
+          onTap: () => openProfile(context, people[i].user),
+          child: SizedBox(
+            width: 64,
+            child: Column(
+              children: [
+                PersonAvatar(profile: people[i], radius: 28),
+                const SizedBox(height: 6),
+                Text(
+                  people[i].name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: yomiText(12, weight: FontWeight.w700),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 void _openThread(BuildContext context, String user) {
   Navigator.of(context)
       .push(MaterialPageRoute<void>(builder: (_) => ThreadPage(user: user)));
@@ -152,33 +200,6 @@ class _Unavailable extends StatelessWidget {
   );
 }
 
-class _PersonAvatar extends StatelessWidget {
-  const _PersonAvatar({required this.profile});
-
-  static const double _radius = 20;
-
-  final ChatProfile profile;
-
-  @override
-  Widget build(BuildContext context) {
-    final transport = context.read<MessagesController>().transport;
-    final initial = profile.name.isEmpty
-        ? '?'
-        : profile.name.characters.first.toUpperCase();
-    return CircleAvatar(
-      radius: _radius,
-      backgroundColor: YomiColors.surfaceHigh,
-      foregroundImage: profile.hasAvatar && transport != null
-          ? NetworkImage(transport.avatarUri(profile.user).toString())
-          : null,
-      child: Text(
-        initial,
-        style: yomiText(_radius * 0.8, weight: FontWeight.w700),
-      ),
-    );
-  }
-}
-
 String _previewOf(ChatMessage message) => message.text.isNotEmpty
     ? message.text
     : '♪ ${message.songTitle ?? 'A song'}';
@@ -196,7 +217,10 @@ class _ConversationTile extends StatelessWidget {
     final hasUnread = conversation.unread > 0;
     return ListTile(
       contentPadding: const EdgeInsets.symmetric(horizontal: kPagePadding),
-      leading: _PersonAvatar(profile: profile),
+      leading: GestureDetector(
+        onTap: () => openProfile(context, profile.user),
+        child: PersonAvatar(profile: profile),
+      ),
       title: Text(profile.name, style: yomiText(15, weight: FontWeight.w700)),
       subtitle: Text(
         _previewOf(conversation.last),
@@ -283,9 +307,10 @@ class _ThreadPageState extends State<ThreadPage> {
     setState(() => _isSending = false);
   }
 
-  Future<void> _shareNowPlaying() async {
-    final song = context.read<PlayerController>().current;
-    if (song == null || _isSending) return;
+  Future<void> _sendASong() async {
+    if (_isSending) return;
+    final song = await pickSongToSend(context);
+    if (song == null || !mounted) return;
     setState(() => _isSending = true);
     await _messages.send(
       songId: song.id,
@@ -341,15 +366,35 @@ class _ThreadPageState extends State<ThreadPage> {
     final messages = context.watch<MessagesController>();
     final thread = messages.thread;
     final replying = _replyingTo;
-    final hasSong = context.select<PlayerController, bool>(
-      (player) => player.current != null,
-    );
     return Scaffold(
       appBar: AppBar(
-        title: Text(
-          messages.profileOf(widget.user).name,
-          style: yomiText(18, weight: FontWeight.w800),
+        title: GestureDetector(
+          onTap: () => openProfile(context, widget.user),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              PersonAvatar(
+                profile: messages.profileOf(widget.user),
+                radius: 16,
+              ),
+              const SizedBox(width: 10),
+              Flexible(
+                child: Text(
+                  messages.profileOf(widget.user).name,
+                  overflow: TextOverflow.ellipsis,
+                  style: yomiText(18, weight: FontWeight.w800),
+                ),
+              ),
+            ],
+          ),
         ),
+        actions: [
+          IconButton(
+            tooltip: 'View profile',
+            icon: const Icon(Icons.person_outline_rounded),
+            onPressed: () => openProfile(context, widget.user),
+          ),
+        ],
       ),
       body: SafeArea(
         child: Column(
@@ -417,12 +462,11 @@ class _ThreadPageState extends State<ThreadPage> {
               ),
               child: Row(
                 children: [
-                  if (hasSong)
-                    IconButton(
-                      tooltip: 'Share what is playing',
-                      icon: const Icon(Icons.music_note_rounded),
-                      onPressed: _isSending ? null : _shareNowPlaying,
-                    ),
+                  IconButton(
+                    tooltip: 'Send a song',
+                    icon: const Icon(Icons.music_note_rounded),
+                    onPressed: _isSending ? null : _sendASong,
+                  ),
                   Expanded(
                     child: TextField(
                       controller: _text,

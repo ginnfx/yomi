@@ -80,6 +80,27 @@ func TestLLMSendsKeyModelAndJSONMode(t *testing.T) {
 	}
 }
 
+// DeepSeek thinks by default, which spends the reply on hidden reasoning: in a real check,
+// 197 of 200 tokens went there and the JSON was cut off.
+func TestLLMTurnsThinkingOff(t *testing.T) {
+	ai := &fakeAI{replies: []string{`{}`}}
+	var out map[string]any
+	if err := newTestLLM(t, ai).JSON(context.Background(), "system", "user", &out); err != nil {
+		t.Fatal(err)
+	}
+	var sent struct {
+		Thinking struct {
+			Type string `json:"type"`
+		} `json:"thinking"`
+	}
+	if err := json.Unmarshal([]byte(ai.requests[0]), &sent); err != nil {
+		t.Fatal(err)
+	}
+	if sent.Thinking.Type != "disabled" {
+		t.Fatalf("thinking = %q, want disabled: %s", sent.Thinking.Type, ai.requests[0])
+	}
+}
+
 func TestLLMRetriesBlankReplies(t *testing.T) {
 	ai := &fakeAI{replies: []string{"   ", "", `{"ok":true}`}}
 	var out struct {

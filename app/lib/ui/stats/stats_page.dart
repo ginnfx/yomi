@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../../core/listening/wrapped_window.dart';
+
 import '../../core/listening/history_api.dart';
 import '../../core/listening/listening_stats.dart';
 import '../../state/ai_controller.dart';
@@ -88,7 +90,9 @@ class _StatsPageState extends State<StatsPage> {
                 ),
               )
             else ...[
-              if (year != null && _range.month == null)
+              if (year != null &&
+                  _range.month == null &&
+                  isWrappedOpen(year, DateTime.now()))
                 Padding(
                   padding: const EdgeInsets.fromLTRB(
                     kPagePadding,

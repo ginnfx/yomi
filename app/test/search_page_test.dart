@@ -12,6 +12,8 @@ import 'package:yomi/core/subsonic_client.dart';
 import 'package:yomi/state/ai_controller.dart';
 import 'package:yomi/state/catalog_controller.dart';
 import 'package:yomi/state/connectivity_controller.dart';
+import 'package:yomi/core/taste.dart';
+import 'package:yomi/core/ai/ai_api.dart';
 import 'package:yomi/state/home_controller.dart';
 import 'package:yomi/ui/pages/search_page.dart';
 
@@ -20,6 +22,8 @@ import 'support/screen_harness.dart';
 class _Home extends ChangeNotifier implements HomeController {
   @override
   List<HomeShelf> get shelves => const [];
+  @override
+  TasteProfile get taste => TasteProfile.empty;
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
@@ -41,19 +45,33 @@ void main() {
         final path = request.url.path;
         if (path.endsWith('search3')) searchesOnServer++;
         return http.Response.bytes(
-          utf8.encode(jsonEncode({
-            'subsonic-response': {
-              'status': 'ok',
-              'scanStatus': {'scanning': false, 'lastScan': 'x', 'count': 2},
-              'starred2': {},
-              'searchResult3': {
-                'song': [
-                  {'id': '1', 'title': 'Digital Love', 'artist': 'Daft Punk', 'album': 'Discovery', 'albumId': 'd'},
-                  {'id': '2', 'title': 'Halo', 'artist': 'Beyoncé', 'album': 'Fierce', 'albumId': 'f'},
-                ],
+          utf8.encode(
+            jsonEncode({
+              'subsonic-response': {
+                'status': 'ok',
+                'scanStatus': {'scanning': false, 'lastScan': 'x', 'count': 2},
+                'starred2': {},
+                'searchResult3': {
+                  'song': [
+                    {
+                      'id': '1',
+                      'title': 'Digital Love',
+                      'artist': 'Daft Punk',
+                      'album': 'Discovery',
+                      'albumId': 'd',
+                    },
+                    {
+                      'id': '2',
+                      'title': 'Halo',
+                      'artist': 'Beyoncé',
+                      'album': 'Fierce',
+                      'albumId': 'f',
+                    },
+                  ],
+                },
               },
-            },
-          })),
+            }),
+          ),
           200,
         );
       }),
@@ -65,13 +83,16 @@ void main() {
 
   tearDown(() => dir.delete(recursive: true));
 
-  Widget page() => MultiProvider(
+  Widget page({AiController? ai}) => MultiProvider(
     providers: [
       ChangeNotifierProvider<CatalogController>.value(value: catalog),
       ChangeNotifierProvider<HomeController>.value(value: _Home()),
-      ChangeNotifierProvider<AiController>(
-        create: (_) => AiController(file: File('${dir.path}/labels.json')),
-      ),
+      if (ai != null)
+        ChangeNotifierProvider<AiController>.value(value: ai)
+      else
+        ChangeNotifierProvider<AiController>(
+          create: (_) => AiController(file: File('${dir.path}/labels.json')),
+        ),
       ChangeNotifierProvider(
         create: (_) => ConnectivityController(
           changes: const Stream<List<ConnectivityResult>>.empty(),
@@ -95,6 +116,61 @@ void main() {
     expect(find.text('Halo'), findsNothing);
     expect(searchesOnServer, 0);
     // Lets the top result's artwork lookup finish in test time.
+    await tester.pump(const Duration(minutes: 1));
+  });
+
+  Future<AiController> labelled(WidgetTester tester) async {
+    final ai = AiController(file: File('${dir.path}/labels.json'));
+    await tester.runAsync(() async {
+      await File('${dir.path}/labels.json').writeAsString(
+        jsonEncode({
+          'available': true,
+          'songs': {
+            songTagKey('Daft Punk', 'Digital Love'): {
+              'moods': ['happy', 'dreamy'],
+              'energy': 'medium',
+            },
+            songTagKey('Beyoncé', 'Halo'): {
+              'moods': ['romantic'],
+              'energy': 'medium',
+            },
+          },
+          'artists': {},
+        }),
+      );
+      await ai.load();
+    });
+    return ai;
+  }
+
+  testWidgets('a mood word finds songs with that mood, not that title', (
+    tester,
+  ) async {
+    final ai = await labelled(tester);
+    await pumpScreen(tester, page(ai: ai), size: phoneSize);
+
+    await tester.enterText(find.byType(TextField), 'happy');
+    await tester.pump();
+
+    expect(find.text('Feels happy'), findsOneWidget);
+    expect(find.text('Digital Love'), findsWidgets);
+    expect(find.text('Halo'), findsNothing);
+    expect(searchesOnServer, 0);
+    await tester.pump(const Duration(minutes: 1));
+  });
+
+  testWidgets('mood chips appear once the AI is on, and search by mood', (
+    tester,
+  ) async {
+    final ai = await labelled(tester);
+    await pumpScreen(tester, page(ai: ai), size: phoneSize);
+
+    expect(find.text('Moods'), findsOneWidget);
+    await tester.tap(find.text('Happy'));
+    await tester.pump();
+
+    expect(find.text('Feels happy'), findsOneWidget);
+    expect(find.text('Digital Love'), findsWidgets);
     await tester.pump(const Duration(minutes: 1));
   });
 

@@ -5,9 +5,13 @@ import 'package:provider/provider.dart';
 
 import '../../core/genres.dart';
 import '../../core/models.dart';
+import '../../core/song_sort.dart';
+import '../../core/taste.dart';
+import '../../core/spotify/imported_playlist.dart';
 import '../../core/subsonic_client.dart';
 import '../../state/catalog_controller.dart';
 import '../../state/connectivity_controller.dart';
+import '../../state/home_controller.dart';
 import '../../state/imports_controller.dart';
 import '../../state/player_controller.dart';
 import '../../state/settings.dart';
@@ -18,8 +22,11 @@ import '../widgets/async_section.dart';
 import '../widgets/cover_art.dart';
 import '../widgets/downloaded_songs.dart';
 import '../widgets/error_view.dart';
+import '../stats/spotify_import_page.dart';
 import '../widgets/genre_filter_bar.dart';
+import '../widgets/made_for_you.dart';
 import '../widgets/playlist_sheet.dart';
+import '../widgets/playlist_cover.dart';
 import '../widgets/shimmer.dart';
 import '../widgets/song_tile.dart';
 import 'collection_page.dart';
@@ -29,6 +36,8 @@ bool _matches(String text, String query) =>
     query.isEmpty || text.toLowerCase().contains(query.toLowerCase());
 
 enum _Tab { playlists, songs, artists, downloaded }
+
+enum _NewKind { empty, spotify }
 
 /// The most songs one tap queues. Playing the whole library at once would make every
 /// later queue change slow, and nobody hears 500 songs in a sitting.
@@ -76,6 +85,19 @@ class _LibraryPageState extends State<LibraryPage> {
     });
   }
 
+  void _startNew(_NewKind kind) {
+    switch (kind) {
+      case _NewKind.empty:
+        unawaited(_newPlaylist());
+      case _NewKind.spotify:
+        unawaited(
+          Navigator.of(context).push(
+            MaterialPageRoute<void>(builder: (_) => const SpotifyImportPage()),
+          ),
+        );
+    }
+  }
+
   Future<void> _newPlaylist() async {
     final session = context.read<SessionController>();
     final name = await promptForName(context);
@@ -120,10 +142,27 @@ class _LibraryPageState extends State<LibraryPage> {
                   tooltip: 'Search library',
                   onPressed: _toggleSearch,
                 ),
-                IconButton(
+                PopupMenuButton<_NewKind>(
                   icon: const Icon(Icons.add_rounded, size: 30),
                   tooltip: 'New playlist',
-                  onPressed: _newPlaylist,
+                  onSelected: _startNew,
+                  itemBuilder: (context) => [
+                    const PopupMenuItem(
+                      value: _NewKind.empty,
+                      child: ListTile(
+                        leading: Icon(Icons.playlist_add_rounded),
+                        title: Text('New playlist'),
+                      ),
+                    ),
+                    const PopupMenuItem(
+                      value: _NewKind.spotify,
+                      child: ListTile(
+                        leading: Icon(Icons.download_rounded),
+                        title: Text('Import from Spotify'),
+                        subtitle: Text('Link or export file, same order'),
+                      ),
+                    ),
+                  ],
                 ),
                 IconButton(
                   icon: const Icon(Icons.tune_rounded),
@@ -290,6 +329,35 @@ class _SongsTabState extends State<_SongsTab> {
   List<Song> _filterSource = const [];
   Set<String> _filterSelection = const {};
   List<Song> _filtered = const [];
+  SongSort _sort = SongSort.recentlyAdded;
+  bool _likedOnly = false;
+  bool _unplayedOnly = false;
+  List<Song>? _shown;
+  Object? _shownKey;
+
+  /// Filtered and sorted, worked out again only when something it depends on changes.
+  List<Song> _ordered(List<Song> base, TasteProfile taste) {
+    final key = (base, _sort, _likedOnly, _unplayedOnly, taste);
+    final shown = _shown;
+    if (shown != null && _sameKey(key, _shownKey)) return shown;
+    _shownKey = key;
+    return _shown = sortSongs(
+      filterSongs(base, likedOnly: _likedOnly, unplayedOnly: _unplayedOnly),
+      _sort,
+      taste: taste,
+    );
+  }
+
+  static bool _sameKey(
+    (List<Song>, SongSort, bool, bool, TasteProfile) key,
+    Object? other,
+  ) =>
+      other is (List<Song>, SongSort, bool, bool, TasteProfile) &&
+      identical(key.$1, other.$1) &&
+      key.$2 == other.$2 &&
+      key.$3 == other.$3 &&
+      key.$4 == other.$4 &&
+      identical(key.$5, other.$5);
 
   @override
   void initState() {
@@ -362,13 +430,43 @@ class _SongsTabState extends State<_SongsTab> {
           label: Text('Shuffle', style: yomiText(15, weight: FontWeight.w700)),
         ),
         const Spacer(),
-        Text(
-          '${songs.length} songs',
-          style: yomiText(
-            12.5,
-            weight: FontWeight.w600,
-            color: YomiColors.textSecondary,
+        PopupMenuButton<SongSort>(
+          tooltip: 'Sort songs',
+          initialValue: _sort,
+          onSelected: (sort) => setState(() => _sort = sort),
+          itemBuilder: (_) => [
+            for (final sort in SongSort.values)
+              PopupMenuItem(value: sort, child: Text(sort.label)),
+          ],
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.sort_rounded, size: 18),
+              const SizedBox(width: 4),
+              Text(_sort.label, style: yomiText(13, weight: FontWeight.w700)),
+            ],
           ),
+        ),
+      ],
+    ),
+  );
+
+  Widget _quickFilters() => SizedBox(
+    height: 40,
+    child: ListView(
+      scrollDirection: Axis.horizontal,
+      padding: const EdgeInsets.symmetric(horizontal: kPagePadding),
+      children: [
+        FilterChip(
+          label: const Text('Liked'),
+          selected: _likedOnly,
+          onSelected: (on) => setState(() => _likedOnly = on),
+        ),
+        const SizedBox(width: 8),
+        FilterChip(
+          label: const Text('Not played yet'),
+          selected: _unplayedOnly,
+          onSelected: (on) => setState(() => _unplayedOnly = on),
         ),
       ],
     ),
@@ -386,7 +484,10 @@ class _SongsTabState extends State<_SongsTab> {
               children: [ErrorView(error: error, onRetry: catalog.sync)],
             );
     }
-    final songs = _songsFrom(catalog.songs);
+    final songs = _ordered(
+      _songsFrom(catalog.songs),
+      context.watch<HomeController>().taste,
+    );
     return _pullToRefresh(
       onRefresh: () => catalog.sync(force: true),
       child: ListView.builder(
@@ -396,6 +497,8 @@ class _SongsTabState extends State<_SongsTab> {
             return Column(
               children: [
                 _actions(player, songs),
+                _quickFilters(),
+                const SizedBox(height: 6),
                 GenreFilterBar(
                   groups: _genres,
                   selected: _selectedGenres,
@@ -433,6 +536,18 @@ class _PlaylistsTabState extends State<_PlaylistsTab> {
   List<Playlist>? _source;
   List<Playlist>? _ordered;
 
+  /// The first cover among an imported playlist's songs that are in the library.
+  String? _firstCover(ImportedPlaylist playlist) {
+    final byId = {
+      for (final song in context.read<CatalogController>().songs) song.id: song,
+    };
+    for (final entry in playlist.entries) {
+      final cover = byId[entry.songId]?.coverArtId;
+      if (cover != null) return cover;
+    }
+    return null;
+  }
+
   void _reorder(int from, int to) {
     final list = [..._ordered!];
     list.insert(to, list.removeAt(from));
@@ -469,23 +584,26 @@ class _PlaylistsTabState extends State<_PlaylistsTab> {
         ];
         return ListView(
           children: [
+            if (widget.query.isEmpty) const MadeForYou(),
             for (final playlist in imported)
               ListTile(
                 contentPadding: const EdgeInsets.symmetric(
                   horizontal: kPagePadding,
                   vertical: 4,
                 ),
-                leading: const Icon(Icons.library_music_rounded),
+                leading: PlaylistCover(
+                  playlistId: playlist.id,
+                  coverArtId: _firstCover(playlist),
+                  size: 56,
+                  seed: playlist.name,
+                ),
                 title: Text(
                   playlist.name,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: yomiText(16, weight: FontWeight.w700),
                 ),
-                subtitle: Text(
-                  'Imported · ${playlist.matchedCount} of '
-                  '${playlist.entries.length} in your library',
-                ),
+                subtitle: Text('Playlist · ${playlist.entries.length} songs'),
                 onTap: () => Navigator.of(context).push(
                   MaterialPageRoute<void>(
                     builder: (_) =>
@@ -560,10 +678,10 @@ class _PlaylistsTabState extends State<_PlaylistsTab> {
                     horizontal: kPagePadding,
                     vertical: 4,
                   ),
-                  leading: CoverArt(
+                  leading: PlaylistCover(
+                    playlistId: playlist.id,
                     coverArtId: playlist.coverArtId,
                     size: 56,
-                    radius: 12,
                     seed: playlist.name,
                   ),
                   title: Text(

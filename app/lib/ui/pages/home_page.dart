@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/format.dart';
+import '../../core/listening/wrapped_window.dart';
 import '../../core/models.dart';
 import '../../state/catalog_controller.dart';
 import '../../state/home_controller.dart';
@@ -17,6 +18,7 @@ import '../stats/wrapped_page.dart';
 import '../theme.dart';
 import '../widgets/album_card.dart';
 import '../widgets/cover_art.dart';
+import '../widgets/playlist_cover.dart';
 import '../widgets/error_view.dart';
 import '../widgets/continue_listening.dart';
 import '../widgets/compact_music_grid.dart';
@@ -72,8 +74,10 @@ class _HomePageState extends State<HomePage> {
             greetingTime: widget.greetingTime,
           ),
           () => const ContinueListening(),
-          if ((widget.greetingTime ?? DateTime.now()).month ==
-              DateTime.december)
+          if (isWrappedOpen(
+            DateTime.now().year,
+            widget.greetingTime ?? DateTime.now(),
+          ))
             () => Padding(
               padding: const EdgeInsets.fromLTRB(
                 kPagePadding,
@@ -266,6 +270,7 @@ class _HomePageState extends State<HomePage> {
           '${playlist.songCount} songs · Playlist',
           playlist.coverArtId,
           () => openPlaylist(context, playlist),
+          playlistId: playlist.id,
         ),
       for (var i = 0; i < songs.length; i++)
         _QuickPick(
@@ -403,12 +408,21 @@ class _MessagesButton extends StatelessWidget {
 }
 
 class _QuickPick {
-  const _QuickPick(this.title, this.subtitle, this.coverArtId, this.onTap);
+  const _QuickPick(
+    this.title,
+    this.subtitle,
+    this.coverArtId,
+    this.onTap, {
+    this.playlistId,
+  });
 
   final String title;
   final String subtitle;
   final String? coverArtId;
   final VoidCallback onTap;
+
+  /// Set for a playlist, so its chosen picture shows.
+  final String? playlistId;
 }
 
 class _QuickTile extends StatelessWidget {
@@ -429,12 +443,21 @@ class _QuickTile extends StatelessWidget {
         },
         child: Row(
           children: [
-            CoverArt(
-              coverArtId: pick.coverArtId,
-              size: 60,
-              radius: 0,
-              seed: pick.title,
-            ),
+            if (pick.playlistId case final id?)
+              PlaylistCover(
+                playlistId: id,
+                coverArtId: pick.coverArtId,
+                size: 60,
+                radius: 0,
+                seed: pick.title,
+              )
+            else
+              CoverArt(
+                coverArtId: pick.coverArtId,
+                size: 60,
+                radius: 0,
+                seed: pick.title,
+              ),
             const SizedBox(width: 12),
             Expanded(
               child: Text(

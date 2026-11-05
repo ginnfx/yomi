@@ -302,7 +302,13 @@ void main() {
       final history = PlayHistory(File('${dir.path}/h.json'));
       for (final (i, id) in const ['s', 't'].indexed) {
         await history.record(
-          Song(id: id, title: 'T', artist: 'A', album: 'B', durationSeconds: 100),
+          Song(
+            id: id,
+            title: 'T',
+            artist: 'A',
+            album: 'B',
+            durationSeconds: 100,
+          ),
           PlayKind.completed,
           DateTime.now().subtract(Duration(days: 2 - i)),
         );
@@ -438,6 +444,12 @@ void main() {
 }
 
 class _Chat implements MessagingTransport {
+  @override
+  Future<void> saveTaste({
+    required List<String> topArtists,
+    required List<String> topMoods,
+  }) async {}
+
   final List<ChatMessage> messages = [];
   final List<ChatMessage> sent = [];
   Exception? failure;

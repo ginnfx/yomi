@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../../state/messages_controller.dart';
 import '../../state/session.dart';
 import '../theme.dart';
+import 'person_avatar.dart';
 
 /// Asks who to send something to, then sends it. Works for a song, album or playlist.
 Future<void> showSendTo(
@@ -16,10 +17,22 @@ Future<void> showSendTo(
   final messenger = ScaffoldMessenger.of(context);
   final messages = context.read<MessagesController>();
   final me = context.read<SessionController>().username;
-  final people = [
-    for (final person in messages.people)
-      if (person.user != me) person,
-  ];
+  // People you talked to most recently come first, so a share is usually one tap.
+  final lastTalked = {
+    for (final chat in messages.conversations) chat.withUser: chat.last.sentAt,
+  };
+  final people =
+      [
+        for (final person in messages.people)
+          if (person.user != me) person,
+      ]..sort((a, b) {
+        final first = lastTalked[a.user];
+        final second = lastTalked[b.user];
+        if (first == null || second == null) {
+          return (first == null ? 1 : 0) - (second == null ? 1 : 0);
+        }
+        return second.compareTo(first);
+      });
   return showModalBottomSheet<void>(
     context: context,
     builder: (sheet) => SafeArea(
@@ -50,8 +63,12 @@ Future<void> showSendTo(
                 ),
                 for (final person in people)
                   ListTile(
-                    leading: const Icon(Icons.person_rounded),
-                    title: Text(person.name),
+                    leading: PersonAvatar(profile: person),
+                    title: Text(
+                      person.name,
+                      style: yomiText(15, weight: FontWeight.w700),
+                    ),
+                    trailing: Icon(Icons.send_rounded, color: context.accent),
                     onTap: () async {
                       Navigator.pop(sheet);
                       final isSent = await messages.sendTo(

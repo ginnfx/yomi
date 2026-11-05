@@ -196,6 +196,15 @@ void main() {
     expect(shelfIds(home), isNot(before));
   });
 
+  test('keeps the taste it built, and forgets it on sign-out', () async {
+    final home = await built();
+    expect(home.taste.isEmpty, isFalse);
+    expect(home.taste.of(library.first), greaterThan(0));
+
+    home.attach(null);
+    expect(home.taste.isEmpty, isTrue);
+  });
+
   test('new plays still count once the history is full', () async {
     await history.clear();
     final file = File('${dir.path}/history.json');

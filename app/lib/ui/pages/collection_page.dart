@@ -8,16 +8,20 @@ import '../../core/models.dart';
 import '../../state/download_manager.dart';
 import '../../state/offline_keeper.dart';
 import '../../state/player_controller.dart';
+import '../../state/playlist_covers_controller.dart';
 import '../../state/session.dart';
 import '../theme.dart';
 import '../widgets/send_to_sheet.dart';
 import '../widgets/cover_art.dart';
 import '../widgets/error_view.dart';
 import '../widgets/mini_player.dart';
+import '../widgets/playlist_recommendations.dart';
 import '../widgets/playlist_sheet.dart';
+import '../widgets/playlist_cover.dart';
 import '../widgets/shimmer.dart';
 import '../widgets/song_tile.dart';
 import '../widgets/tinted_background.dart';
+import 'reorder_page.dart';
 
 const double _heroCover = 230;
 
@@ -92,6 +96,51 @@ class _CollectionPageState extends State<CollectionPage> {
     super.dispose();
   }
 
+  Future<void> _changePicture() =>
+      pickPlaylistPicture(context, widget.playlist!.id);
+
+  Future<void> _changeOrder() async {
+    final messenger = ScaffoldMessenger.of(context);
+    final client = context.read<SessionController>().client;
+    final songs = await _songs;
+    if (!mounted || songs.length < 2) return;
+    final order = await reorderSongs(
+      context,
+      title: _title,
+      items: [
+        for (final song in songs)
+          ReorderItem(
+            title: song.title,
+            subtitle: song.artist,
+            coverArtId: song.coverArtId,
+          ),
+      ],
+    );
+    if (order == null) return;
+    try {
+      await client.replacePlaylistSongs(widget.playlist!.id, [
+        for (final i in order) songs[i].id,
+      ]);
+      if (mounted) _reload();
+    } on Exception catch (error) {
+      if (!mounted) return;
+      messenger.showSnackBar(
+        SnackBar(content: Text(describeFailure(context, error).title)),
+      );
+    }
+  }
+
+  Future<void> _removePicture() async {
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      await context.read<PlaylistCoversController>().removeCover(
+        widget.playlist!.id,
+      );
+    } on Object catch (error) {
+      messenger.showSnackBar(SnackBar(content: Text('$error')));
+    }
+  }
+
   Future<void> _rename() async {
     final client = context.read<SessionController>().client;
     final name = await promptForName(
@@ -154,6 +203,9 @@ class _CollectionPageState extends State<CollectionPage> {
             if (widget.playlist != null)
               PopupMenuButton<String>(
                 onSelected: (value) => switch (value) {
+                  'picture' => _changePicture(),
+                  'order' => _changeOrder(),
+                  'removePicture' => _removePicture(),
                   'rename' => _rename(),
                   'send' => showSendTo(
                     context,
@@ -162,8 +214,23 @@ class _CollectionPageState extends State<CollectionPage> {
                   ),
                   _ => _delete(),
                 },
-                itemBuilder: (_) => const [
-                  PopupMenuItem(value: 'send', child: Text('Send to…')),
+                itemBuilder: (_) => [
+                  const PopupMenuItem(
+                    value: 'picture',
+                    child: Text('Choose picture'),
+                  ),
+                  if (context.read<PlaylistCoversController>().hasCover(
+                    widget.playlist!.id,
+                  ))
+                    const PopupMenuItem(
+                      value: 'removePicture',
+                      child: Text('Remove picture'),
+                    ),
+                  const PopupMenuItem(
+                    value: 'order',
+                    child: Text('Change order'),
+                  ),
+                  const PopupMenuItem(value: 'send', child: Text('Send to…')),
                   PopupMenuItem(value: 'rename', child: Text('Rename')),
                   PopupMenuItem(
                     value: 'delete',
@@ -190,15 +257,27 @@ class _CollectionPageState extends State<CollectionPage> {
             return ListView(
               children: [
                 Center(
-                  child: CoverArt(
-                    coverArtId:
-                        widget.coverArtId ??
-                        (songs.isEmpty ? null : songs.first.coverArtId),
-                    size: _heroCover,
-                    radius: 20,
-                    elevated: true,
-                    seed: _title,
-                  ),
+                  child: widget.playlist != null
+                      ? PlaylistCover(
+                          playlistId: widget.playlist!.id,
+                          onPick: _changePicture,
+                          coverArtId:
+                              widget.coverArtId ??
+                              (songs.isEmpty ? null : songs.first.coverArtId),
+                          size: _heroCover,
+                          radius: 20,
+                          elevated: true,
+                          seed: _title,
+                        )
+                      : CoverArt(
+                          coverArtId:
+                              widget.coverArtId ??
+                              (songs.isEmpty ? null : songs.first.coverArtId),
+                          size: _heroCover,
+                          radius: 20,
+                          elevated: true,
+                          seed: _title,
+                        ),
                 ),
                 Padding(
                   padding: const EdgeInsets.fromLTRB(
@@ -377,6 +456,17 @@ class _CollectionPageState extends State<CollectionPage> {
                             onTap: () => player.playQueue(songs, startIndex: i),
                           ),
                         ),
+                if (widget.playlist != null)
+                  PlaylistRecommendations(
+                    key: ValueKey('recommended-${widget.playlist!.id}'),
+                    songs: songs,
+                    onAdd: (song) async {
+                      await client.addToPlaylist(widget.playlist!.id, [
+                        song.id,
+                      ]);
+                      _reload();
+                    },
+                  ),
                 const SizedBox(height: 32),
               ],
             );

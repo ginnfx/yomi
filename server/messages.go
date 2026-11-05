@@ -63,6 +63,9 @@ type Profile struct {
 	Bio         string `json:"bio"`
 	HasAvatar   bool   `json:"hasAvatar"`
 
+	// What they share about their listening, if anything.
+	Taste *Taste `json:"taste,omitempty"`
+
 	// Only present while someone who chose to share is listening. Never saved.
 	NowPlaying *NowPlaying `json:"nowPlaying,omitempty"`
 }
@@ -325,6 +328,7 @@ func (m *MessageStore) SaveProfile(profile Profile) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	profile.HasAvatar = m.state.Profiles[profile.User].HasAvatar
+	profile.Taste = m.state.Profiles[profile.User].Taste
 	m.state.Profiles[profile.User] = profile
 	return m.saveStateLocked()
 }
