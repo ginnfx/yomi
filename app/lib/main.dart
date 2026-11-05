@@ -549,7 +549,7 @@ class YomiApp extends StatelessWidget {
         Provider<AudioCache>.value(value: cache),
         Provider<CoverPalette>(create: (_) => CoverPalette()),
         Provider<LyricsService>.value(value: lyrics),
-        Provider<PlayHistory>.value(value: history),
+        ChangeNotifierProvider<PlayHistory>.value(value: history),
       ],
       child: Consumer<AppearanceController>(
         builder: (context, look, _) => MaterialApp(
