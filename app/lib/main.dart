@@ -17,6 +17,8 @@ import 'core/audio/yomi_audio_handler.dart';
 import 'core/catalog_cache.dart';
 import 'core/cover_palette.dart';
 import 'core/listening/auto_download_ledger.dart';
+import 'core/listening/history_api.dart';
+import 'core/listening/past_favourites.dart';
 import 'core/listening/play_history.dart';
 import 'core/listening/scrobble_queue.dart';
 import 'core/lyrics.dart';
@@ -35,6 +37,7 @@ import 'state/catalog_controller.dart';
 import 'state/home_controller.dart';
 import 'state/offline_keeper.dart';
 import 'state/listening_controller.dart';
+import 'state/listening_log.dart';
 import 'state/messages_controller.dart';
 import 'state/player_controller.dart';
 import 'state/playback_sync_controller.dart';
@@ -161,6 +164,10 @@ Future<void> main() async {
   player.onUpcomingSong = (client, song) {
     unawaited(lyrics.forSong(client, song));
   };
+  final listeningLog = ListeningLog(
+    directory: Directory(listeningDir),
+    history: history,
+  );
   final ai = AiController(file: File('$listeningDir/ai-labels.json'));
   await ai.load();
   final keeper = OfflineKeeper(
@@ -185,6 +192,9 @@ Future<void> main() async {
         entry.key: entry.value.moods,
     },
     similarArtists: () => ai.similarArtists,
+    otherDevicePlays: () => listeningLog.remotePlays,
+    importedTaste: () => listeningLog.imported.artistTaste,
+    pastFavouritesFor: (songs) => pastFavourites(listeningLog.imported, songs),
   );
   await home.loadCache();
   player.suggestNext = () =>
@@ -253,6 +263,21 @@ Future<void> main() async {
         ),
       );
     }
+    if (client == null) {
+      unawaited(listeningLog.attach(null, null));
+    } else if (client.baseUrl != aiUrl) {
+      final api = HistoryApi(
+        serverUrl: client.baseUrl,
+        auth: client,
+        port: session.uploadServicePort,
+      );
+      unawaited(
+        listeningLog
+            .attach(api, account)
+            .then((_) => listeningLog.sync())
+            .then((_) => home.refreshIfDue()),
+      );
+    }
     aiUrl = client?.baseUrl;
     final isReachable = session.isServerReachable;
     player.isServerDown = !isReachable;
@@ -301,6 +326,7 @@ Future<void> main() async {
       unawaited(catalog.sync());
       unawaited(keeper.run());
       unawaited(ai.refresh());
+      unawaited(listeningLog.sync());
       unawaited(messages.refresh());
     },
   );
@@ -324,6 +350,7 @@ Future<void> main() async {
       catalog: catalog,
       keeper: keeper,
       ai: ai,
+      listeningLog: listeningLog,
       tunnel: tunnel,
       messages: messages,
     ),
@@ -391,6 +418,7 @@ class YomiApp extends StatelessWidget {
     required this.catalog,
     required this.keeper,
     required this.ai,
+    required this.listeningLog,
     required this.tunnel,
     required this.messages,
   });
@@ -412,6 +440,7 @@ class YomiApp extends StatelessWidget {
   final CatalogController catalog;
   final OfflineKeeper keeper;
   final AiController ai;
+  final ListeningLog listeningLog;
   final TunnelController tunnel;
   final MessagesController messages;
 
@@ -427,6 +456,7 @@ class YomiApp extends StatelessWidget {
         ChangeNotifierProvider<CatalogController>.value(value: catalog),
         ChangeNotifierProvider<OfflineKeeper>.value(value: keeper),
         ChangeNotifierProvider<AiController>.value(value: ai),
+        ChangeNotifierProvider<ListeningLog>.value(value: listeningLog),
         ChangeNotifierProvider<PlaybackSyncController>.value(value: sync),
         ChangeNotifierProvider<SessionController>.value(value: session),
         ChangeNotifierProvider<PlayerController>.value(value: player),

@@ -37,6 +37,9 @@ const int _topCandidates = 10;
 /// Songs played within this long are counted as "recent", not as fresh.
 const Duration _recentPlay = Duration(days: 14);
 
+/// An imported play is years old, so it's a hint rather than a current favourite.
+const double _importedPlayWeight = 0.3;
+
 /// Moods that weigh on a shelf when there are too many of them.
 const Set<String> _heavyMoods = {'sad', 'dark', 'angry'};
 
@@ -81,6 +84,7 @@ enum ShelfKind {
   artistsYouLove,
   newToYou,
   mood,
+  pastYears,
 }
 
 @immutable
@@ -139,6 +143,8 @@ class HomeBuilder {
     this.lessSongs = const {},
     this.moodsById = const {},
     this.similarArtists = const {},
+    this.importedTaste = const {},
+    this.pastFavourites = const {},
   }) : pool = [
          for (final song in pool)
            if (!lessSongs.contains(song.id) &&
@@ -186,6 +192,12 @@ class HomeBuilder {
 
   /// Artists the AI says are alike. Every name here is in the library.
   final Map<String, List<String>> similarArtists;
+
+  /// Plays per artist from elsewhere, such as a Spotify export.
+  final Map<String, double> importedTaste;
+
+  /// Songs you played a lot in past years, by year.
+  final Map<int, List<Song>> pastFavourites;
   final Random _random;
   late final Map<String, Song> _songsById;
   final Map<String, double> _plays = {};
@@ -218,6 +230,20 @@ class HomeBuilder {
     for (final id in starred) {
       add(_songsById[id], _starTaste);
     }
+    return totals;
+  }
+
+  /// Taste per artist in the library, including what was imported from elsewhere.
+  Map<String, double> _artistTaste() {
+    final totals = _affinity(_artistOf);
+    if (importedTaste.isEmpty) return totals;
+    final inLibrary = pool.map(_artistOf).whereType<String>().toSet();
+    importedTaste.forEach((artist, plays) {
+      if (inLibrary.contains(artist)) {
+        totals[artist] =
+            (totals[artist] ?? 0) + log(1 + plays) * _importedPlayWeight;
+      }
+    });
     return totals;
   }
 
@@ -460,7 +486,7 @@ class HomeBuilder {
 
   /// One song each from artists you've never played.
   HomeShelf? _newToYou() {
-    final played = _affinity(_artistOf).keys.toSet();
+    final played = _artistTaste().keys.toSet();
     final byArtist = <String, List<Song>>{};
     for (final song in pool) {
       final artist = _artistOf(song);
@@ -474,6 +500,23 @@ class HomeBuilder {
       for (final artist in artists.take(kShelfSize))
         byArtist[artist]![_random.nextInt(byArtist[artist]!.length)],
     ]);
+  }
+
+  /// Songs you loved in a past year, a different year on different days.
+  HomeShelf? _pastYear() {
+    final years =
+        pastFavourites.keys
+            .where((year) => pastFavourites[year]!.length >= kMinShelfSongs)
+            .toList()
+          ..sort();
+    if (years.isEmpty) return null;
+    final year = years[_random.nextInt(years.length)];
+    final songs = [...pastFavourites[year]!]..shuffle(_random);
+    return _shelf(
+      ShelfKind.pastYears,
+      'You played these a lot in $year',
+      _varied(songs),
+    );
   }
 
   /// A shelf for each of a few moods, different ones on different days.
@@ -539,19 +582,18 @@ class HomeBuilder {
   /// [keepOrder] holds the user's own arrangement of each kind of shelf.
   List<HomeShelf> build({List<ShelfKind>? keepOrder}) {
     final recent = _recentlyAddedShelf();
-    final hasTaste = _affinity(_artistOf).isNotEmpty;
+    final taste = _artistTaste();
+    final hasTaste = taste.isNotEmpty;
     final completedPlays =
         events.where((event) => event.kind == PlayKind.completed).length +
-        _serverPlays.length;
+        _serverPlays.length +
+        importedTaste.length;
     if (completedPlays < kMinPlaysForPersonal || !hasTaste) {
       return List.unmodifiable(
         [_jumpBack(), recent, _discover(), _newToYou()].whereType<HomeShelf>(),
       );
     }
-    final favourites = _favourites(
-      _affinity(_artistOf),
-      count: _shelvesPerFamily * 2,
-    );
+    final favourites = _favourites(taste, count: _shelvesPerFamily * 2);
     final rotating = [
       ..._becauseYouPlayed(favourites.take(_shelvesPerFamily).toList()),
       ..._moreFrom(favourites.skip(_shelvesPerFamily).toList()),
@@ -562,6 +604,7 @@ class HomeBuilder {
       _discover(),
       _newToYou(),
       ..._moodShelves(),
+      _pastYear(),
     ].whereType<HomeShelf>().toList()..shuffle(_random);
     final shelves = [?_jumpBack(), ...rotating].take(kMaxShelves).toList();
     if (keepOrder == null) return List.unmodifiable(shelves);

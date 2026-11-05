@@ -48,6 +48,7 @@ type Config struct {
 	LLMKey          string
 	LLMModel        string
 	TagsDir         string
+	HistoryDir      string
 	MaxFileBytes    int64
 	ScanDebounce    time.Duration
 }
@@ -78,6 +79,7 @@ func loadConfig() Config {
 		LLMKey:          os.Getenv("YOMI_LLM_KEY"),
 		LLMModel:        os.Getenv("YOMI_LLM_MODEL"),
 		TagsDir:         envOr("YOMI_TAGS_DIR", defaultTagsDir),
+		HistoryDir:      envOr("YOMI_HISTORY_DIR", defaultHistoryDir),
 		MaxFileBytes:    int64(envInt("YOMI_MAX_FILE_MB", defaultMaxFileMB)) << 20,
 		ScanDebounce:    defaultScanDebounce,
 	}

@@ -43,6 +43,13 @@ func main() {
 		startCovers(cfg)
 	}
 	startAI(cfg, server)
+	history, err := openHistoryStore(cfg.HistoryDir)
+	if err != nil {
+		// Music matters more than stats, so the server still starts.
+		log.Printf("listening history disabled: %v", err)
+	} else {
+		server.History = history
+	}
 	httpServer := &http.Server{
 		Addr:              cfg.Listen,
 		Handler:           server.routes(),

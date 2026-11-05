@@ -61,6 +61,11 @@ const Map<String, (String, String, IconData)> homeSectionInfo = {
     'Shelves for a feeling, when AI is set up on your server',
     Icons.mood_rounded,
   ),
+  'pastYears': (
+    'Past favourites',
+    'What you played a lot in past years on Spotify',
+    Icons.history_edu_rounded,
+  ),
   'discover': (
     'Something different',
     "Songs you haven't played yet",

@@ -12,6 +12,7 @@ import '../../state/session.dart';
 import '../../state/settings.dart';
 import '../settings/profile_section.dart';
 import '../settings/home_layout_section.dart';
+import '../stats/wrapped_page.dart';
 import '../theme.dart';
 import '../widgets/album_card.dart';
 import '../widgets/cover_art.dart';
@@ -70,6 +71,21 @@ class _HomePageState extends State<HomePage> {
             greetingTime: widget.greetingTime,
           ),
           () => const ContinueListening(),
+          if ((widget.greetingTime ?? DateTime.now()).month ==
+              DateTime.december)
+            () => Padding(
+              padding: const EdgeInsets.fromLTRB(
+                kPagePadding,
+                16,
+                kPagePadding,
+                0,
+              ),
+              child: FilledButton.tonalIcon(
+                onPressed: () => openWrapped(context, DateTime.now().year),
+                icon: const Icon(Icons.auto_awesome_rounded),
+                label: Text('Your ${DateTime.now().year} Wrapped is ready'),
+              ),
+            ),
           for (final id in sections) () => _section(id, session),
           ..._shelfBuilders(home),
           () => Center(

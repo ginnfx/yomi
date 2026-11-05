@@ -27,6 +27,9 @@ class HomeController extends ChangeNotifier {
     this.catalogSongs,
     this.moodsFor,
     this.similarArtists,
+    this.otherDevicePlays,
+    this.importedTaste,
+    this.pastFavouritesFor,
     DateTime Function()? now,
   }) : _now = now ?? DateTime.now {
     history.addListener(_onHistoryChanged);
@@ -43,6 +46,13 @@ class HomeController extends ChangeNotifier {
   /// AI labels for songs and artists, when there are any.
   final Map<String, List<String>> Function(List<Song> songs)? moodsFor;
   final Map<String, List<String>> Function()? similarArtists;
+
+  /// Plays from your other devices, which is what lets a new one start personal.
+  final List<PlayEvent> Function()? otherDevicePlays;
+
+  /// What's known from a Spotify export.
+  final Map<String, double> Function()? importedTaste;
+  final Map<int, List<Song>> Function(List<Song> songs)? pastFavouritesFor;
   final DateTime Function() _now;
   SubsonicClient? _client;
   List<HomeShelf> _shelves = const [];
@@ -194,7 +204,7 @@ class HomeController extends ChangeNotifier {
             ]
           : null;
       final shelves = HomeBuilder(
-        events: history.events,
+        events: [...?otherDevicePlays?.call(), ...history.events],
         pool: {
           for (final song in [...history.songs, ...results[0], ...results[2]])
             song.id: song,
@@ -207,6 +217,8 @@ class HomeController extends ChangeNotifier {
         lessSongs: settings.lessSongs,
         moodsById: moodsFor?.call(results[0]) ?? const {},
         similarArtists: similarArtists?.call() ?? const {},
+        importedTaste: importedTaste?.call() ?? const {},
+        pastFavourites: pastFavouritesFor?.call(results[0]) ?? const {},
       ).build(keepOrder: order);
       _shown = _countShown(shelves);
       final content = _HomeContent(

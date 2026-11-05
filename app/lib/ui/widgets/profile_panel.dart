@@ -6,6 +6,7 @@ import '../../state/session.dart';
 import '../pages/dashboard_page.dart';
 import '../pages/settings_page.dart';
 import '../settings/profile_section.dart';
+import '../stats/stats_page.dart';
 import '../theme.dart';
 
 const double _panelWidth = 320;
@@ -134,6 +135,20 @@ class _ProfilePanel extends StatelessWidget {
                 final navigator = Navigator.of(context);
                 navigator.pop();
                 openDashboard(navigator.context);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.insights_rounded),
+              title: Text(
+                'Stats and Wrapped',
+                style: yomiText(15, weight: FontWeight.w600),
+              ),
+              onTap: () {
+                final navigator = Navigator.of(context);
+                navigator.pop();
+                navigator.push(
+                  MaterialPageRoute<void>(builder: (_) => const StatsPage()),
+                );
               },
             ),
             ListTile(

@@ -30,6 +30,7 @@ type Server struct {
 	Backups     *BackupSource
 	Messages    *MessageStore
 	Relay       *PushRelay
+	History     *HistoryStore
 	Tags        *TagStore
 	LLM         *LLMClient
 	interpreter *Interpreter
@@ -77,6 +78,10 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("GET /v1/replica/file/{sha256}", s.handleReplicaFile)
 	mux.HandleFunc("GET /v1/replica/database", s.handleReplicaDatabase)
 	mux.HandleFunc("PUT /v1/upload/{sha256}", s.handleBulkUpload)
+	mux.HandleFunc("POST /v1/history", s.handleAddHistory)
+	mux.HandleFunc("GET /v1/history", s.handleReadHistory)
+	mux.HandleFunc("PUT /v1/history/imported", s.handleSaveImported)
+	mux.HandleFunc("GET /v1/history/imported", s.handleReadImported)
 	mux.HandleFunc("GET /v1/tags", s.handleTags)
 	mux.HandleFunc("POST /v1/tags/songs", s.handleQueueTags)
 	mux.HandleFunc("POST /v1/search/interpret", s.handleInterpret)

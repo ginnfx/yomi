@@ -10,6 +10,7 @@ import '../settings/listening_sync_section.dart';
 import '../settings/profile_section.dart';
 import '../settings/settings_widgets.dart';
 import '../settings/storage_section.dart';
+import '../stats/spotify_import_page.dart';
 import '../theme.dart';
 
 void openSettings(BuildContext context) {
@@ -48,6 +49,19 @@ class SettingsPage extends StatelessWidget {
               icon: Icons.sd_storage_rounded,
               title: 'Storage',
               page: const StorageSection(),
+            ),
+            ListTile(
+              leading: const Icon(Icons.library_music_rounded),
+              title: Text(
+                'Import from Spotify',
+                style: yomiText(16, weight: FontWeight.w700),
+              ),
+              trailing: const Icon(Icons.chevron_right_rounded),
+              onTap: () => Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (_) => const SpotifyImportPage(),
+                ),
+              ),
             ),
             _SettingsRow(
               icon: Icons.tune_rounded,

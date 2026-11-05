@@ -27,7 +27,10 @@ class AiController extends ChangeNotifier {
   bool get isAvailable => _isAvailable;
   Map<String, List<String>> get similarArtists => _similar;
 
-  SongTag? tagFor(Song song) => _songs[songTagKey(song.artist, song.title)];
+  SongTag? tagFor(Song song) => tagForNames(song.artist, song.title);
+
+  SongTag? tagForNames(String artist, String title) =>
+      _songs[songTagKey(artist, title)];
 
   /// Labels by song ID, for building Home.
   Map<String, SongTag> tagsById(Iterable<Song> songs) => {
