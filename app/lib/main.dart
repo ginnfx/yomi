@@ -27,6 +27,7 @@ import 'core/offline/cover_warmer.dart';
 import 'core/offline/download_store.dart';
 import 'core/offline/outbox.dart';
 import 'core/tunnel/tunnel_bridge.dart';
+import 'core/spotify/imported_playlist.dart';
 import 'core/subsonic_client.dart';
 import 'dev_hooks.dart';
 import 'state/appearance_controller.dart';
@@ -35,6 +36,7 @@ import 'state/download_manager.dart';
 import 'state/ai_controller.dart';
 import 'state/catalog_controller.dart';
 import 'state/home_controller.dart';
+import 'state/imports_controller.dart';
 import 'state/offline_keeper.dart';
 import 'state/listening_controller.dart';
 import 'state/listening_log.dart';
@@ -170,6 +172,11 @@ Future<void> main() async {
   );
   final ai = AiController(file: File('$listeningDir/ai-labels.json'));
   await ai.load();
+  final imports = ImportsController(
+    file: File('$listeningDir/imported-playlists.json'),
+  );
+  await imports.load();
+  late final CatalogController catalog;
   final keeper = OfflineKeeper(
     downloads: downloads,
     ledger: ledger,
@@ -178,8 +185,9 @@ Future<void> main() async {
     history: history,
     cache: cache,
     currentSong: () => player.current,
+    importedSongs: () => imports.songsIn(catalog.songs),
   );
-  final catalog = CatalogController(
+  catalog = CatalogController(
     directory: Directory('${supportDir.path}/catalog/songs'),
   );
   final home = HomeController(
@@ -264,6 +272,19 @@ Future<void> main() async {
       );
     }
     if (client == null) {
+      unawaited(imports.attach(null));
+    } else if (client.baseUrl != aiUrl) {
+      unawaited(
+        imports.attach(
+          ImportsApi(
+            serverUrl: client.baseUrl,
+            auth: client,
+            port: session.uploadServicePort,
+          ),
+        ),
+      );
+    }
+    if (client == null) {
       unawaited(listeningLog.attach(null, null));
     } else if (client.baseUrl != aiUrl) {
       final api = HistoryApi(
@@ -300,7 +321,10 @@ Future<void> main() async {
   }
 
   catalog.addListener(() {
-    if (catalog.isLoaded) unawaited(ai.queueMissing(catalog.songs));
+    if (catalog.isLoaded) {
+      unawaited(ai.queueMissing(catalog.songs));
+      unawaited(imports.rematch(catalog.songs));
+    }
   });
   session.addListener(followSession);
   followSession();
@@ -327,6 +351,7 @@ Future<void> main() async {
       unawaited(keeper.run());
       unawaited(ai.refresh());
       unawaited(listeningLog.sync());
+      unawaited(imports.sync());
       unawaited(messages.refresh());
     },
   );
@@ -351,6 +376,7 @@ Future<void> main() async {
       keeper: keeper,
       ai: ai,
       listeningLog: listeningLog,
+      imports: imports,
       tunnel: tunnel,
       messages: messages,
     ),
@@ -419,6 +445,7 @@ class YomiApp extends StatelessWidget {
     required this.keeper,
     required this.ai,
     required this.listeningLog,
+    required this.imports,
     required this.tunnel,
     required this.messages,
   });
@@ -441,6 +468,7 @@ class YomiApp extends StatelessWidget {
   final OfflineKeeper keeper;
   final AiController ai;
   final ListeningLog listeningLog;
+  final ImportsController imports;
   final TunnelController tunnel;
   final MessagesController messages;
 
@@ -457,6 +485,7 @@ class YomiApp extends StatelessWidget {
         ChangeNotifierProvider<OfflineKeeper>.value(value: keeper),
         ChangeNotifierProvider<AiController>.value(value: ai),
         ChangeNotifierProvider<ListeningLog>.value(value: listeningLog),
+        ChangeNotifierProvider<ImportsController>.value(value: imports),
         ChangeNotifierProvider<PlaybackSyncController>.value(value: sync),
         ChangeNotifierProvider<SessionController>.value(value: session),
         ChangeNotifierProvider<PlayerController>.value(value: player),

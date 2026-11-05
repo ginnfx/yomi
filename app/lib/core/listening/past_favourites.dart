@@ -26,3 +26,34 @@ Map<int, List<Song>> pastFavourites(
       ].take(_maxPerYear).toList(),
   };
 }
+
+const int _maxMissing = 30;
+
+/// What you played most on Spotify that isn't in your library, most played first.
+List<TrackTotal> missingFavourites(
+  ImportedHistory imported,
+  List<Song> library,
+) {
+  if (imported.isEmpty) return const [];
+  final owned = {for (final song in library) _keyOf(song.artist, song.title)};
+  final totals = <String, TrackTotal>{};
+  for (final year in imported.years) {
+    for (final track in imported.topTracks(year)) {
+      final key = _keyOf(track.artist, track.track);
+      if (owned.contains(key)) continue;
+      final current = totals[key];
+      totals[key] = current == null
+          ? track
+          : TrackTotal(
+              track: track.track,
+              artist: track.artist,
+              plays: current.plays + track.plays,
+              ms: current.ms + track.ms,
+            );
+    }
+  }
+  return (totals.values.where((track) => track.plays >= _minPlays).toList()
+        ..sort((a, b) => b.plays.compareTo(a.plays)))
+      .take(_maxMissing)
+      .toList();
+}

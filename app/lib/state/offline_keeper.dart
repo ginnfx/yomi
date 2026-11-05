@@ -45,6 +45,7 @@ class OfflineKeeper extends ChangeNotifier {
     required this.history,
     required this.cache,
     required this.currentSong,
+    this.importedSongs,
   }) {
     connectivity.addListener(_onConditionsChanged);
     settings.addListener(_onConditionsChanged);
@@ -57,6 +58,9 @@ class OfflineKeeper extends ChangeNotifier {
   final PlayHistory history;
   final AudioCache cache;
   final Song? Function() currentSong;
+
+  /// Songs in imported playlists, which are kept along with your own.
+  final List<Song> Function()? importedSongs;
 
   SubsonicClient? _client;
   String _username = '';
@@ -150,6 +154,9 @@ class OfflineKeeper extends ChangeNotifier {
     final songs = <String, Song>{
       for (final list in _kept.values)
         for (final song in list) song.id: song,
+      if (settings.keepPlaylistsOffline)
+        for (final song in importedSongs?.call() ?? const <Song>[])
+          song.id: song,
     };
     final isManual = {
       for (final id in songs.keys)

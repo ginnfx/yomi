@@ -8,9 +8,11 @@ import '../../core/models.dart';
 import '../../core/subsonic_client.dart';
 import '../../state/catalog_controller.dart';
 import '../../state/connectivity_controller.dart';
+import '../../state/imports_controller.dart';
 import '../../state/player_controller.dart';
 import '../../state/settings.dart';
 import '../../state/session.dart';
+import '../imports/imported_playlist_page.dart';
 import '../theme.dart';
 import '../widgets/async_section.dart';
 import '../widgets/cover_art.dart';
@@ -456,6 +458,10 @@ class _PlaylistsTabState extends State<_PlaylistsTab> {
           _source = loaded;
           _ordered = settings.orderPlaylists(loaded);
         }
+        final imported = [
+          for (final playlist in context.watch<ImportsController>().playlists)
+            if (_matches(playlist.name, widget.query)) playlist,
+        ];
         final isFiltering = widget.query.isNotEmpty;
         final shown = [
           for (final p in _ordered!)
@@ -463,6 +469,30 @@ class _PlaylistsTabState extends State<_PlaylistsTab> {
         ];
         return ListView(
           children: [
+            for (final playlist in imported)
+              ListTile(
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: kPagePadding,
+                  vertical: 4,
+                ),
+                leading: const Icon(Icons.library_music_rounded),
+                title: Text(
+                  playlist.name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: yomiText(16, weight: FontWeight.w700),
+                ),
+                subtitle: Text(
+                  'Imported · ${playlist.matchedCount} of '
+                  '${playlist.entries.length} in your library',
+                ),
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    builder: (_) =>
+                        ImportedPlaylistPage(playlistId: playlist.id),
+                  ),
+                ),
+              ),
             if (!isFiltering)
               ListTile(
                 contentPadding: const EdgeInsets.symmetric(
