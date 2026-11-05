@@ -156,11 +156,181 @@ void main() {
       (s) => s.kind == ShelfKind.discover,
     );
     final shown = {for (final song in first.songs) song.id: kShownLimit};
-    final next = builder(shown: shown).build().firstWhere(
-      (s) => s.kind == ShelfKind.discover,
-    );
+    final next = builder(shown: shown)
+        .build()
+        .firstWhere((s) => s.kind == ShelfKind.discover);
     final repeats = next.songs.where((s) => shown.containsKey(s.id));
     expect(repeats, isEmpty);
+  });
+
+  Set<String> suggestions(List<HomeShelf> shelves) => {
+    for (final shelf in shelves)
+      if (shelf.kind != ShelfKind.jumpBack)
+        for (final song in shelf.songs) song.id,
+  };
+
+  test('the next Home mostly avoids what the last one showed', () {
+    final first = suggestions(builder().build());
+    final next = suggestions(
+      HomeBuilder(
+        events: oneArtistHeavy,
+        pool: library,
+        recentlyAdded: library.take(40).toList(),
+        now: now,
+        recentlyShown: first,
+        seed: 7,
+      ).build(),
+    );
+    final overlap = next.intersection(first).length / next.length;
+    expect(overlap, lessThan(0.5));
+  });
+
+  test('a song rarely appears on more than one shelf', () {
+    final shelves = builder().build().where(
+      (shelf) => shelf.kind != ShelfKind.jumpBack,
+    );
+    final all = [
+      for (final shelf in shelves)
+        for (final song in shelf.songs) song.id,
+    ];
+    expect(all.toSet().length / all.length, greaterThan(0.8));
+  });
+
+  test('different seeds give different shelves from the same history', () {
+    Set<String> withSeed(int seed) => suggestions(
+      HomeBuilder(
+        events: oneArtistHeavy,
+        pool: library,
+        recentlyAdded: library.take(40).toList(),
+        now: now,
+        seed: seed,
+      ).build(),
+    );
+    expect(withSeed(1), isNot(withSeed(2)));
+  });
+
+  test('a small library still fills its shelves with repeats', () {
+    final small = library.take(6).toList();
+    final next = HomeBuilder(
+      events: const [],
+      pool: small,
+      recentlyAdded: small,
+      now: now,
+      recentlyShown: {for (final song in small) song.id},
+    ).build();
+    expect(next, isNotEmpty);
+  });
+
+  test(
+    'Recently added always includes the newest albums, and rotates the rest',
+    () {
+      Song song(int album, int track) => Song(
+        id: 'a$album-$track',
+        title: 'T',
+        artist: 'Artist $album',
+        album: 'Album $album',
+        albumId: 'album-$album',
+        durationSeconds: 100,
+      );
+      final recent = [
+        for (var album = 0; album < 20; album++)
+          for (var track = 0; track < 4; track++) song(album, track),
+      ];
+      HomeShelf shelf({Set<String> shown = const {}, int seed = 1}) =>
+          HomeBuilder(
+            events: const [],
+            pool: recent,
+            recentlyAdded: recent,
+            now: now,
+            recentlyShown: shown,
+            seed: seed,
+          ).build().firstWhere((s) => s.kind == ShelfKind.recentlyAdded);
+
+      final first = shelf();
+      final firstIds = first.songs.map((s) => s.id).toSet();
+      expect(first.songs.map((s) => s.album).take(3), [
+        'Album 0',
+        'Album 1',
+        'Album 2',
+      ]);
+
+      final next = shelf(shown: firstIds, seed: 2);
+      expect(next.songs.map((s) => s.album).take(3), [
+        'Album 0',
+        'Album 1',
+        'Album 2',
+      ]);
+      final repeats = next.songs.where((s) => firstIds.contains(s.id)).length;
+      expect(repeats, lessThan(next.songs.length ~/ 2));
+    },
+  );
+
+  test('one big upload cannot push every other new album out', () {
+    Song track(String album, int i, DateTime at) => Song(
+      id: '$album-$i',
+      title: 'T',
+      artist: album,
+      album: album,
+      albumId: album,
+      durationSeconds: 1,
+      addedAt: at,
+    );
+    final songs = newestSongs([
+      for (var i = 0; i < 500; i++) track('box set', i, DateTime(2026, 2)),
+      track('older one', 0, DateTime(2026, 1)),
+    ]);
+    expect(songs.first.album, 'box set');
+    final withRoom = newestSongs([
+      for (var i = 0; i < 100; i++) track('box set', i, DateTime(2026, 2)),
+      track('older one', 0, DateTime(2026, 1)),
+    ]);
+    expect(withRoom.map((s) => s.album), contains('older one'));
+  });
+
+  test('songs with no album are not treated as one big album', () {
+    final untagged = [
+      for (var i = 0; i < 12; i++)
+        Song(
+          id: 'u$i',
+          title: 'T',
+          artist: 'Artist $i',
+          album: '[Unknown Album]',
+          albumId: 'same',
+          durationSeconds: 1,
+        ),
+    ];
+    final shelf = HomeBuilder(
+      events: const [],
+      pool: untagged,
+      recentlyAdded: untagged,
+      now: now,
+    ).build().firstWhere((s) => s.kind == ShelfKind.recentlyAdded);
+    expect(shelf.songs, hasLength(12));
+  });
+
+  test('favourites keep their share of a shelf', () {
+    final shelf = builder().build().firstWhere(
+      (s) => s.kind == ShelfKind.becauseYouPlayed,
+    );
+    final played = {for (final event in oneArtistHeavy) event.songId};
+    expect(shelf.songs.where((s) => played.contains(s.id)), isNotEmpty);
+  });
+
+  test('the newest songs come first, and undated ones are left out', () {
+    Song dated(String id, DateTime? at) => Song(
+      id: id,
+      title: id,
+      artist: 'A',
+      album: 'B',
+      durationSeconds: 1,
+      addedAt: at,
+    );
+    final songs = newestSongs([
+      dated('old', DateTime(2020)),
+      dated('none', null),
+      dated('new', DateTime(2026)),
+    ]);
+    expect(songs.map((s) => s.id), ['new', 'old']);
   });
 
   test('"show less" removes an artist and a song from suggestions', () {
@@ -194,9 +364,9 @@ void main() {
       ...plays(habit, at: morning),
       ...plays([for (var a = 6; a < 12; a++) '$a-0-0'], at: evening),
     ];
-    final mix = builder(events: events).build().firstWhere(
-      (s) => s.kind == ShelfKind.timeOfDay,
-    );
+    final mix = builder(events: events)
+        .build()
+        .firstWhere((s) => s.kind == ShelfKind.timeOfDay);
     expect(mix.title, 'Morning mix');
     expect(mix.songs.where((s) => habit.contains(s.id)), isNotEmpty);
     expect(
@@ -211,9 +381,9 @@ void main() {
         for (var s = 0; s < 12; s++)
           _song('r$album-$s', artist: 'New $album', album: 'New $album'),
     ];
-    final shelf = builder(recent: recent).build().firstWhere(
-      (s) => s.kind == ShelfKind.recentlyAdded,
-    );
+    final shelf = builder(recent: recent)
+        .build()
+        .firstWhere((s) => s.kind == ShelfKind.recentlyAdded);
     expect(shelf.songs.map((s) => s.album).toSet().length, greaterThan(5));
 
     final later = builder(
@@ -285,17 +455,19 @@ void main() {
           for (var b = 0; b < 3; b++)
             for (var s = 0; s < 6; s++) '$a-$b-$s': const ['happy'],
       };
-      final recent = shelvesWith(moods).firstWhere(
-        (shelf) => shelf.kind == ShelfKind.recentlyAdded,
-      );
+      final recent = shelvesWith(moods)
+          .firstWhere((shelf) => shelf.kind == ShelfKind.recentlyAdded);
       final heavy = recent.songs.where((s) => moods[s.id]!.contains('sad'));
       expect(heavy.length, lessThanOrEqualTo(3));
     });
 
     test('similar artists replace the genre guess', () {
-      final shelves = shelvesWith(const {}, similar: {
-        for (var a = 0; a < 12; a++) 'Artist $a': const ['Artist 11'],
-      });
+      final shelves = shelvesWith(
+        const {},
+        similar: {
+          for (var a = 0; a < 12; a++) 'Artist $a': const ['Artist 11'],
+        },
+      );
       final because = shelves.where(
         (shelf) =>
             shelf.kind == ShelfKind.becauseYouPlayed &&

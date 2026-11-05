@@ -25,8 +25,20 @@ const int kMaxPerArtist = 2;
 /// The most shelves Home shows.
 const int kMaxShelves = 20;
 
-/// A song shown this many times without being played is dropped until it's played.
+/// A song shown this many times without being played is rested for [kShownRest].
 const int kShownLimit = 4;
+
+/// After this long a song rested for being shown too often comes back.
+const Duration kShownRest = Duration(days: 21);
+
+/// How many of the newest albums always have a song on the Recently added shelf.
+const int _newestAlbumsKept = 3;
+
+/// How many of the newest albums Recently added chooses from, however big they are.
+const int kRecentAlbumPool = 30;
+
+/// A limit for libraries where albums aren't much use, such as all untagged.
+const int _recentSongLimit = 400;
 
 /// How many artists and genres get their own shelves each day.
 const int _shelvesPerFamily = 3;
@@ -116,6 +128,35 @@ class HomeShelf {
 String homeRotationKey(DateTime now, int playCount) =>
     '${now.year}-${now.month}-${now.day}/${playCount ~/ kPlaysPerRefresh}';
 
+/// The day Home was last rebuilt for: Home changes at least once for each of these.
+String homeDayKey(DateTime now) => '${now.year}-${now.month}-${now.day}';
+
+/// What groups a song with others on a shelf. Songs with no real album aren't related
+/// to each other, even though the server files them all under the same "unknown" one.
+String _albumKey(Song song) =>
+    song.album.toLowerCase().contains('unknown album')
+    ? song.id
+    : song.albumId ?? song.album;
+
+/// The songs of the newest albums, newest first. Counting albums rather than songs means
+/// one big upload can't push out every other new album. Empty if the server gave no dates.
+List<Song> newestSongs(List<Song> library, {int albums = kRecentAlbumPool}) {
+  final dated = [
+    for (final song in library)
+      if (song.addedAt != null) song,
+  ]..sort((a, b) => b.addedAt!.compareTo(a.addedAt!));
+  final seen = <String>{};
+  final picked = <Song>[];
+  for (final song in dated) {
+    final album = _albumKey(song);
+    if (!seen.contains(album) && seen.length >= albums) break;
+    seen.add(album);
+    picked.add(song);
+    if (picked.length >= _recentSongLimit) break;
+  }
+  return List.unmodifiable(picked);
+}
+
 int _seedFor(String key) => key.codeUnits.fold(17, (hash, unit) {
   return (hash * 31 + unit) & 0x7fffffff;
 });
@@ -145,13 +186,15 @@ class HomeBuilder {
     this.similarArtists = const {},
     this.importedTaste = const {},
     this.pastFavourites = const {},
+    this.recentlyShown = const {},
+    int? seed,
   }) : pool = [
          for (final song in pool)
            if (!lessSongs.contains(song.id) &&
                !lessArtists.contains(song.artist))
              song,
        ],
-       _random = Random(_seedFor(homeRotationKey(now, events.length))) {
+       _random = Random(seed ?? _seedFor(homeRotationKey(now, events.length))) {
     _songsById = {for (final song in this.pool) song.id: song};
     for (final event in events) {
       final weight = _decay(event.at);
@@ -198,6 +241,11 @@ class HomeBuilder {
 
   /// Songs you played a lot in past years, by year.
   final Map<int, List<Song>> pastFavourites;
+
+  /// What Home was showing until now. These only return if there's nothing else to show,
+  /// so a new Home looks new.
+  final Set<String> recentlyShown;
+  final Set<String> _onOtherShelves = {};
   final Random _random;
   late final Map<String, Song> _songsById;
   final Map<String, double> _plays = {};
@@ -267,22 +315,47 @@ class HomeBuilder {
   bool _isHeavy(Song song) =>
       moodsById[song.id]?.any(_heavyMoods.contains) ?? false;
 
+  /// Songs not seen lately first, then those on the Home being replaced, and last those
+  /// already on another shelf. Otherwise keeps the order, so ranking still counts.
+  List<Song> _unseenFirst(Iterable<Song> songs) {
+    int tier(Song song) => _onOtherShelves.contains(song.id)
+        ? 2
+        : recentlyShown.contains(song.id)
+        ? 1
+        : 0;
+    final list = songs.toList();
+    return [
+      for (final level in const [0, 1, 2])
+        for (final song in list)
+          if (tier(song) == level) song,
+    ];
+  }
+
   /// Keeps songs in order, leaving out any that would put too many from one artist or
-  /// album on a shelf, up to [limit].
+  /// album on a shelf, up to [limit]. Songs in [first] get the first chance. Unless
+  /// [preferUnseen] is off, repeats only appear when there's nothing else to fill with.
   List<Song> _varied(
     Iterable<Song> songs, {
     int limit = kShelfSize,
     bool isMoodShelf = false,
+    bool preferUnseen = true,
+    List<Song> first = const [],
   }) {
+    final placed = {for (final song in first) song.id};
+    final others = songs.where((song) => !placed.contains(song.id));
+    final ordered = [
+      ...first,
+      ...(preferUnseen ? _unseenFirst(others) : others),
+    ];
     final artists = <String, int>{};
     final albums = <String, int>{};
     var heavy = 0;
     final picked = <Song>[];
     final leftOut = <Song>[];
-    for (final song in songs) {
+    for (final song in ordered) {
       if (picked.length >= limit) break;
       final artist = song.artist;
-      final album = song.albumId ?? song.album;
+      final album = _albumKey(song);
       if ((artists[artist] ?? 0) >= kMaxPerArtist ||
           (albums[album] ?? 0) >= kMaxPerArtist ||
           (!isMoodShelf && _isHeavy(song) && heavy >= _maxHeavySongs)) {
@@ -324,7 +397,11 @@ class HomeBuilder {
           scoreOf(b) > 0 == scoreOf(a) > 0 ? 0 : (scoreOf(b) > 0 ? 1 : -1),
     );
     final familiarSlots = (kShelfSize * (1 - kFreshShare)).floor();
-    final picked = _varied([...familiar.take(familiarSlots), ...fresh]);
+    // Favourites keep their share, but ones not shown lately get it first.
+    final picked = _varied(
+      fresh,
+      first: _unseenFirst(familiar).take(familiarSlots).toList(),
+    );
     return List.unmodifiable([...picked]..shuffle(_random));
   }
 
@@ -358,7 +435,8 @@ class HomeBuilder {
     return _shelf(
       ShelfKind.jumpBack,
       'Jump back in',
-      _varied([for (final id in ids) ?_songsById[id]]),
+      // This one is simply what you played last, so it's allowed to stay the same.
+      _varied([for (final id in ids) ?_songsById[id]], preferUnseen: false),
     );
   }
 
@@ -402,7 +480,7 @@ class HomeBuilder {
     final albums = <String, int>{};
     final picked = <Song>[];
     for (final song in songs) {
-      final album = song.albumId ?? song.album;
+      final album = _albumKey(song);
       if ((albums[album] ?? 0) >= kMaxPerArtist) continue;
       albums[album] = (albums[album] ?? 0) + 1;
       picked.add(song);
@@ -459,10 +537,11 @@ class HomeBuilder {
               genres.contains(_genreOf(song))),
     );
     final habitSlots = (kShelfSize * (1 - kFreshShare)).floor();
-    final mixed = _varied([
-      ...(habit..shuffle(_random)).take(habitSlots),
-      ...similar.toList()..shuffle(_random),
-    ]);
+    final mixed = _varied(
+      similar.toList()..shuffle(_random),
+      // What makes this mix yours, so these aren't given up to other shelves.
+      first: _unseenFirst(habit..shuffle(_random)).take(habitSlots).toList(),
+    );
     return _shelf(
       ShelfKind.timeOfDay,
       timeOfDayTitle(now),
@@ -546,37 +625,46 @@ class HomeBuilder {
     return shelves;
   }
 
-  /// Takes a little from many recent albums, newest albums more often, so one big upload
-  /// can't fill the shelf and each day shows something else.
+  /// One song each from the newest albums, so new music comes first (still within the
+  /// limit per artist, so one artist's albums can't take over), then a
+  /// changing selection from the other recent albums, so one big upload can't fill the
+  /// shelf and each Home shows something else.
   HomeShelf? _recentlyAddedShelf() {
     final byAlbum = <String, List<Song>>{};
     for (final song in recentlyAdded) {
       if (lessSongs.contains(song.id) || lessArtists.contains(song.artist)) {
         continue;
       }
-      (byAlbum[song.albumId ?? song.album] ??= []).add(song);
+      (byAlbum[_albumKey(song)] ??= []).add(song);
     }
-    final albums = byAlbum.keys.toList();
-    final order = <String>[
-      ...albums.take(_shelvesPerFamily),
-      ...albums.skip(_shelvesPerFamily).toList()..shuffle(_random),
-    ];
+    final tracks = {
+      for (final entry in byAlbum.entries)
+        entry.key: _unseenFirst(entry.value..shuffle(_random)),
+    };
+    final albums = tracks.keys.toList();
+    final newest = albums.take(_newestAlbumsKept).toList();
+    final older = albums.skip(_newestAlbumsKept).toList()..shuffle(_random);
     final firstFromEach = <Song>[];
     final theRest = <Song>[];
-    for (final album in order) {
-      final tracks = byAlbum[album]!..shuffle(_random);
-      firstFromEach.addAll(tracks.take(kMaxPerArtist));
-      theRest.addAll(tracks.skip(kMaxPerArtist));
+    for (final album in [...newest, ...older]) {
+      firstFromEach.addAll(tracks[album]!.take(kMaxPerArtist));
+      theRest.addAll(tracks[album]!.skip(kMaxPerArtist));
     }
     return _shelf(
       ShelfKind.recentlyAdded,
       'Recently added',
-      _varied([...firstFromEach, ...theRest]),
+      _varied(
+        [...firstFromEach, ...theRest],
+        first: [for (final album in newest) tracks[album]!.first],
+      ),
     );
   }
 
-  HomeShelf? _shelf(ShelfKind kind, String title, List<Song> songs) =>
-      songs.length < kMinShelfSongs ? null : HomeShelf(kind, title, songs);
+  HomeShelf? _shelf(ShelfKind kind, String title, List<Song> songs) {
+    if (songs.length < kMinShelfSongs) return null;
+    _onOtherShelves.addAll(songs.map((song) => song.id));
+    return HomeShelf(kind, title, songs);
+  }
 
   /// The shelves to show. [Jump back in] always leads; the rest rotate daily unless
   /// [keepOrder] holds the user's own arrangement of each kind of shelf.

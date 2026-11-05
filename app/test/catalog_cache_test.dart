@@ -26,6 +26,39 @@ void main() {
     await dir.delete(recursive: true);
   });
 
+  test('opening many albums does not push out the Library lists', () {
+    final cache = CatalogCache(
+      file: File('${dir.path}/lists.json'),
+      maxEntries: 5,
+    );
+    opened.add(cache);
+    cache.put('getArtists', const {}, const {'a': 1});
+    cache.put('getPlaylists', const {}, const {'a': 1});
+    cache.put('getAlbumList2', const {'type': 'newest'}, const {'a': 1});
+    for (var i = 0; i < 50; i++) {
+      cache.put('getAlbum', {'id': i}, const {'a': 1});
+    }
+    expect(cache.peek('getArtists', const {}), isNotNull);
+    expect(cache.peek('getPlaylists', const {}), isNotNull);
+    expect(cache.peek('getAlbumList2', const {'type': 'newest'}), isNotNull);
+    expect(cache.peek('getAlbum', const {'id': 0}), isNull);
+    expect(cache.peek('getAlbum', const {'id': 49}), isNotNull);
+  });
+
+  test('what was read lately outlives what was not', () {
+    final cache = CatalogCache(
+      file: File('${dir.path}/reads.json'),
+      maxEntries: 2,
+    );
+    opened.add(cache);
+    cache.put('getAlbum', const {'id': 'kept'}, const {'a': 1});
+    cache.put('getAlbum', const {'id': 'idle'}, const {'a': 1});
+    expect(cache.peek('getAlbum', const {'id': 'kept'}), isNotNull);
+    cache.put('getAlbum', const {'id': 'new'}, const {'a': 1});
+    expect(cache.peek('getAlbum', const {'id': 'kept'}), isNotNull);
+    expect(cache.peek('getAlbum', const {'id': 'idle'}), isNull);
+  });
+
   http.Response ok(Map<String, Object?> body) => http.Response(
     jsonEncode({
       'subsonic-response': {'status': 'ok', ...body},

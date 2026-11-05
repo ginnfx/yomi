@@ -17,6 +17,10 @@ const int _libraryPoolSize = 200;
 const int _recentCount = 16;
 const int _recentAlbums = 20;
 
+/// A new Home that's ready this soon after opening the app replaces the old one, before
+/// you've started using it. Later ones wait, so nothing moves under your finger.
+const Duration _justOpened = Duration(seconds: 5);
+
 /// Keeps Home's shelves. They're saved to disk so Home opens instantly and offline, and
 /// only rebuilt when the rotation key changes: a new day, or enough new plays.
 class HomeController extends ChangeNotifier {
@@ -30,8 +34,10 @@ class HomeController extends ChangeNotifier {
     this.otherDevicePlays,
     this.importedTaste,
     this.pastFavouritesFor,
+    this.libraryVersion,
     DateTime Function()? now,
   }) : _now = now ?? DateTime.now {
+    _openedAt = _now();
     history.addListener(_onHistoryChanged);
     settings.addListener(_onSettingsChanged);
   }
@@ -53,16 +59,25 @@ class HomeController extends ChangeNotifier {
   /// What's known from a Spotify export.
   final Map<String, double> Function()? importedTaste;
   final Map<int, List<Song>> Function(List<Song> songs)? pastFavouritesFor;
+
+  /// Changes when the library does, such as after new songs are added.
+  final String? Function()? libraryVersion;
   final DateTime Function() _now;
   SubsonicClient? _client;
   List<HomeShelf> _shelves = const [];
   List<Playlist> _quickPlaylists = const [];
   List<Song> _quickSongs = const [];
   _HomeContent? _heldBack;
-  Map<String, int> _shown = const {};
-  String? _builtFor;
+  Map<String, ShownRecord> _shown = const {};
+  String? _builtForDay;
+  DateTime? _builtAt;
+  String? _builtFromLibrary;
+  late DateTime _openedAt;
   bool _isLoading = false;
+  StreamSubscription<String>? _playlistUpdates;
   Future<void>? _inFlight;
+  bool _isCheckDue = false;
+  int _rebuilds = 0;
   int _generation = 0;
   Object? _error;
 
@@ -81,14 +96,25 @@ class HomeController extends ChangeNotifier {
     );
   }
 
-  String get _currentKey => homeRotationKey(_now(), history.events.length);
+  /// Home changes on a new day, after enough new plays, or when the library changes.
+  bool get _isDue {
+    if (_shelves.isEmpty || _builtForDay != homeDayKey(_now())) return true;
+    final version = libraryVersion?.call();
+    if (version != null && version != _builtFromLibrary) return true;
+    final since = _builtAt;
+    if (since == null) return true;
+    final newPlays = history.events.where((e) => e.at.isAfter(since)).length;
+    return newPlays >= kPlaysPerRefresh;
+  }
 
   Future<void> loadCache() async {
     try {
       if (!await cacheFile.exists()) return;
       final json = jsonDecode(await cacheFile.readAsString());
       if (json is! Map<String, dynamic>) return;
-      _builtFor = json['key'] as String?;
+      _builtForDay = json['day'] as String?;
+      _builtAt = DateTime.tryParse(json['builtAt'] as String? ?? '');
+      _builtFromLibrary = json['library'] as String?;
       _shelves = List.unmodifiable(
         (json['shelves'] as List<dynamic>).cast<Map<String, dynamic>>().map(
           HomeShelf.fromJson,
@@ -106,14 +132,14 @@ class HomeController extends ChangeNotifier {
       );
       _shown = {
         for (final entry
-            in ((json['shown'] as Map<String, dynamic>?) ?? const {}).entries)
-          entry.key: (entry.value as num).toInt(),
+            in ((json['shownAt'] as Map<String, dynamic>?) ?? const {}).entries)
+          entry.key: ShownRecord.fromJson(entry.value as Map<String, dynamic>),
       };
       notifyListeners();
     } on Object catch (error) {
       // Home simply rebuilds; a damaged cache costs nothing else.
       debugPrint('Ignoring saved Home: $error');
-      _builtFor = null;
+      _builtForDay = null;
       _shelves = const [];
     }
   }
@@ -121,12 +147,21 @@ class HomeController extends ChangeNotifier {
   void attach(SubsonicClient? client) {
     final isNewClient = !identical(client, _client);
     _client = client;
+    if (isNewClient) {
+      unawaited(_playlistUpdates?.cancel());
+      _playlistUpdates = client?.catalogUpdates.listen((endpoint) {
+        if (endpoint == 'getPlaylists') _updateQuickPlaylists();
+      });
+    }
     if (client == null) {
       _shelves = const [];
       _quickPlaylists = const [];
       _quickSongs = const [];
       _heldBack = null;
-      _builtFor = null;
+      _builtForDay = null;
+      _builtAt = null;
+      _builtFromLibrary = null;
+      _shown = const {};
       _generation++;
       // The next person to sign in on this device shouldn't see this Home.
       unawaited(_deleteCache());
@@ -136,6 +171,34 @@ class HomeController extends ChangeNotifier {
     }
   }
 
+  /// Keeps the playlists at the top in place, with their latest names and covers, and
+  /// drops any since deleted. Their order only changes with the rest of Home.
+  void _updateQuickPlaylists() {
+    final cached = _client?.cachedPlaylists;
+    if (cached == null)
+      return; // Nothing known, which isn't the same as none left.
+    final latest = {for (final playlist in cached) playlist.id: playlist};
+    List<Playlist> current(List<Playlist> playlists) => List.unmodifiable([
+      for (final playlist in playlists) ?latest[playlist.id],
+    ]);
+    _quickPlaylists = current(_quickPlaylists);
+    final held = _heldBack;
+    if (held != null) {
+      _heldBack = _HomeContent(
+        held.shelves,
+        current(held.playlists),
+        held.songs,
+      );
+    }
+    // What's saved is what the next launch shows, so it needs the change too.
+    unawaited(
+      _saveCache(
+        _heldBack ?? _HomeContent(_shelves, _quickPlaylists, _quickSongs),
+      ),
+    );
+    notifyListeners();
+  }
+
   void _onHistoryChanged() => unawaited(refreshIfDue());
 
   void _onSettingsChanged() => notifyListeners();
@@ -143,9 +206,18 @@ class HomeController extends ChangeNotifier {
   /// Prepares a new Home if one is due. If Home is already showing, the new version is
   /// saved but held back until [applyHeldBack], so nothing changes under your finger.
   Future<void> refreshIfDue() async {
-    if (_builtFor == _currentKey && _shelves.isNotEmpty) return;
+    final running = _inFlight;
+    if (running != null) {
+      _isCheckDue = true; // What's being built may already be out of date.
+      await running;
+      return;
+    }
+    if (!_isDue) return;
     await _startRebuild(showNow: _shelves.isEmpty);
   }
+
+  /// Marks the app as just opened, so a new Home can appear before you start using it.
+  void appOpened() => _openedAt = _now();
 
   /// Rebuilds Home now, or joins a rebuild already running, because you asked for it. On
   /// failure the shelves already showing stay.
@@ -157,6 +229,10 @@ class HomeController extends ChangeNotifier {
   Future<void> _startRebuild({required bool showNow}) =>
       _inFlight ??= _rebuild(showNow: showNow).whenComplete(() {
         _inFlight = null;
+        if (_isCheckDue) {
+          _isCheckDue = false;
+          unawaited(refreshIfDue());
+        }
       });
 
   /// Shows a version of Home that was prepared in the background. Called when the app
@@ -165,6 +241,9 @@ class HomeController extends ChangeNotifier {
     final held = _heldBack;
     if (held == null) return;
     _heldBack = null;
+    // Out of date already, and a newer one is on its way. Showing this would make Home
+    // change twice in a row.
+    if (_isDue) return;
     _show(held);
     unawaited(_saveCache(held));
     notifyListeners();
@@ -172,7 +251,7 @@ class HomeController extends ChangeNotifier {
 
   void _show(_HomeContent content) {
     // Counted when it's really on screen, as a song shouldn't fade for shelves never seen.
-    _shown = _countShown(content.shelves);
+    _shown = _countShown(content);
     _shelves = content.shelves;
     _quickPlaylists = content.playlists;
     _quickSongs = content.songs;
@@ -187,11 +266,16 @@ class HomeController extends ChangeNotifier {
     notifyListeners();
     try {
       final library = catalogSongs?.call() ?? const <Song>[];
+      // Read when it starts, so changes during the rebuild trigger another one.
+      final version = library.isEmpty ? null : libraryVersion?.call();
+      final newest = newestSongs(library);
       final results = await Future.wait<List<Song>>([
         library.isNotEmpty
             ? Future.value(library)
             : client.randomSongs(size: _libraryPoolSize),
-        library.isNotEmpty
+        newest.isNotEmpty
+            ? Future.value(newest)
+            : library.isNotEmpty
             ? _recentFromCatalog(client, library)
             : client.recentSongs(count: _recentCount),
         client.starredSongs(),
@@ -199,7 +283,9 @@ class HomeController extends ChangeNotifier {
       final playlists = await _quickPlaylistsFrom(client);
       if (generation != _generation)
         return; // Signed out while this was loading.
-      final key = _currentKey;
+      final builtAt = _now();
+      // A new seed each time, so pulling to refresh really does give you something new.
+      final seed = builtAt.microsecondsSinceEpoch + ++_rebuilds;
       final order = settings.hasCustomHomeOrder
           ? [
               for (final id in settings.homeOrder)
@@ -215,7 +301,9 @@ class HomeController extends ChangeNotifier {
         recentlyAdded: results[1],
         starred: {for (final song in results[2]) song.id},
         now: _now(),
-        shown: _shown,
+        shown: _wornOut(builtAt),
+        recentlyShown: _onScreen(),
+        seed: seed,
         lessArtists: settings.lessArtists,
         lessSongs: settings.lessSongs,
         moodsById: moodsFor?.call(results[0]) ?? const {},
@@ -226,10 +314,12 @@ class HomeController extends ChangeNotifier {
       final content = _HomeContent(
         List.unmodifiable(shelves),
         playlists,
-        _quickSongsFrom(results[0]),
+        _quickSongsFrom(results[0], seed),
       );
-      _builtFor = key;
-      if (showNow) {
+      _builtForDay = homeDayKey(builtAt);
+      _builtAt = builtAt;
+      _builtFromLibrary = version;
+      if (showNow || _now().difference(_openedAt) < _justOpened) {
         _heldBack = null;
         _show(content);
       } else {
@@ -267,26 +357,63 @@ class HomeController extends ChangeNotifier {
     return [for (final album in albums) ...?byAlbum[album.id]];
   }
 
-  /// A few songs for the top of Home, which change with Home rather than on every open.
-  List<Song> _quickSongsFrom(List<Song> pool) {
-    final sample = [...pool]..shuffle(Random(_currentKey.hashCode));
-    return List.unmodifiable(sample.take(quickPickCount));
+  /// A few songs for the top of Home, which change with Home rather than on every open,
+  /// and differ from the last few when there are enough to choose from.
+  List<Song> _quickSongsFrom(List<Song> pool, int seed) {
+    final previous = {for (final song in _quickSongs) song.id};
+    final allowed = [
+      for (final song in pool)
+        if (!settings.lessSongs.contains(song.id) &&
+            !settings.lessArtists.contains(song.artist))
+          song,
+    ]..shuffle(Random(seed));
+    return List.unmodifiable(
+      [
+        ...allowed.where((song) => !previous.contains(song.id)),
+        ...allowed.where((song) => previous.contains(song.id)),
+      ].take(quickPickCount),
+    );
   }
 
-  /// Adds up what's on screen, and forgets anything played since, so a song only fades
-  /// from Home when it keeps being offered without being chosen.
-  Map<String, int> _countShown(List<HomeShelf> shelves) {
-    final playedSince = {
-      for (final event in history.events)
-        if (event.kind == PlayKind.completed) event.songId,
+  /// Everything on Home right now that was suggested, rather than simply played last.
+  Set<String> _onScreen() => {
+    for (final shelf in _shelves)
+      if (shelf.kind != ShelfKind.jumpBack)
+        for (final song in shelf.songs) song.id,
+    for (final song in _quickSongs) song.id,
+  };
+
+  /// How many times each song has been shown, counting only what's still resting.
+  Map<String, int> _wornOut(DateTime now) => {
+    for (final entry in _shown.entries)
+      if (now.difference(entry.value.lastShown) < kShownRest)
+        entry.key: entry.value.times,
+  };
+
+  /// Adds up what's on screen. A song is forgiven once it's been played since it was last
+  /// shown, or after a long enough rest, so it only fades while it's being ignored.
+  Map<String, ShownRecord> _countShown(_HomeContent content) {
+    final now = _now();
+    final lastPlayed = <String, DateTime>{};
+    for (final event in history.events) {
+      if (event.kind != PlayKind.completed) continue;
+      final latest = lastPlayed[event.songId];
+      if (latest == null || event.at.isAfter(latest)) {
+        lastPlayed[event.songId] = event.at;
+      }
+    }
+    final kept = <String, ShownRecord>{
+      for (final entry in _shown.entries)
+        if (now.difference(entry.value.lastShown) < kShownRest &&
+            !(lastPlayed[entry.key]?.isAfter(entry.value.lastShown) ?? false))
+          entry.key: entry.value,
     };
     return {
-      for (final entry in _shown.entries)
-        if (!playedSince.contains(entry.key)) entry.key: entry.value,
-      for (final shelf in shelves)
-        for (final song in shelf.songs)
-          if (!playedSince.contains(song.id))
-            song.id: (_shown[song.id] ?? 0) + 1,
+      ...kept,
+      for (final shelf in content.shelves)
+        if (shelf.kind != ShelfKind.jumpBack)
+          for (final song in shelf.songs)
+            song.id: ShownRecord((kept[song.id]?.times ?? 0) + 1, now),
     };
   }
 
@@ -325,13 +452,17 @@ class HomeController extends ChangeNotifier {
       await cacheFile.parent.create(recursive: true);
       await temp.writeAsString(
         jsonEncode({
-          'key': _builtFor,
+          'day': _builtForDay,
+          'builtAt': _builtAt?.toIso8601String(),
+          'library': _builtFromLibrary,
           'shelves': [for (final shelf in content.shelves) shelf.toJson()],
           'quickPlaylists': [
             for (final playlist in content.playlists) playlist.toJson(),
           ],
           'quickSongs': [for (final song in content.songs) song.toJson()],
-          'shown': _shown,
+          'shownAt': {
+            for (final entry in _shown.entries) entry.key: entry.value.toJson(),
+          },
         }),
       );
       await temp.rename(cacheFile.path);
@@ -342,10 +473,30 @@ class HomeController extends ChangeNotifier {
 
   @override
   void dispose() {
+    unawaited(_playlistUpdates?.cancel());
     history.removeListener(_onHistoryChanged);
     settings.removeListener(_onSettingsChanged);
     super.dispose();
   }
+}
+
+/// How often a song has been offered on Home, and when it last was.
+@immutable
+class ShownRecord {
+  const ShownRecord(this.times, this.lastShown);
+
+  factory ShownRecord.fromJson(Map<String, dynamic> json) => ShownRecord(
+    (json['times'] as num).toInt(),
+    DateTime.fromMillisecondsSinceEpoch((json['at'] as num).toInt()),
+  );
+
+  final int times;
+  final DateTime lastShown;
+
+  Map<String, Object?> toJson() => {
+    'times': times,
+    'at': lastShown.millisecondsSinceEpoch,
+  };
 }
 
 @immutable

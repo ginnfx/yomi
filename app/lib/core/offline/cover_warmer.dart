@@ -1,5 +1,4 @@
-import 'package:flutter_cache_manager/flutter_cache_manager.dart';
-
+import '../cover_crop.dart';
 import '../cover_sizes.dart';
 import '../models.dart';
 import '../subsonic_client.dart';
@@ -10,7 +9,7 @@ Future<void> warmCovers(SubsonicClient client, Song song) async {
   if (id == null) return;
   for (final pixels in const [smallCoverPx, largeCoverPx]) {
     try {
-      await DefaultCacheManager().getSingleFile(
+      await coverCacheManager.getSingleFile(
         client.coverArtUri(id, size: pixels).toString(),
         key: coverCacheKey(id, pixels),
       );

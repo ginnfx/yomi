@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
@@ -18,6 +20,17 @@ import '../widgets/song_tile.dart';
 import '../widgets/tinted_background.dart';
 
 const double _heroCover = 230;
+
+/// What this page's songs are read from.
+const Set<String> _songEndpoints = {
+  'getAlbum',
+  'getArtist',
+  'getPlaylist',
+  'getStarred2',
+};
+
+/// An artist's page can refresh many albums at once, so these become one reload.
+const Duration _reloadDelay = Duration(milliseconds: 500);
 
 /// An album, a playlist, or Liked songs: coloured header, play controls, and the tracks.
 class CollectionPage extends StatefulWidget {
@@ -51,7 +64,33 @@ class _CollectionPageState extends State<CollectionPage> {
   late List<Song>? _lastSongs = widget.savedSongs;
   late String _title = widget.title;
 
+  StreamSubscription<String>? _updates;
+  Timer? _reloadTimer;
+
   void _reload() => setState(() => _songs = widget.loadSongs());
+
+  @override
+  void initState() {
+    super.initState();
+    // Opening this may show a saved list while a newer one is fetched. Show that when it
+    // arrives, rather than leaving the old list up until the page is opened again.
+    _updates = context.read<SessionController>().client.catalogUpdates.listen((
+      endpoint,
+    ) {
+      if (!_songEndpoints.contains(endpoint)) return;
+      _reloadTimer?.cancel();
+      _reloadTimer = Timer(_reloadDelay, () {
+        if (mounted) _reload();
+      });
+    });
+  }
+
+  @override
+  void dispose() {
+    _reloadTimer?.cancel();
+    unawaited(_updates?.cancel());
+    super.dispose();
+  }
 
   Future<void> _rename() async {
     final client = context.read<SessionController>().client;

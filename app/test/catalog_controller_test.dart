@@ -15,7 +15,11 @@ http.Response _ok(Map<String, Object?> body) => http.Response(
   200,
 );
 
-Map<String, Object?> _song(int i) => {'id': '$i', 'title': 'Song $i', 'artist': 'A'};
+Map<String, Object?> _song(int i) => {
+  'id': '$i',
+  'title': 'Song $i',
+  'artist': 'A',
+};
 
 void main() {
   late Directory dir;
@@ -71,15 +75,18 @@ void main() {
 
   tearDown(() => dir.delete(recursive: true));
 
-  test('loads the whole library past the first page, in server order', () async {
-    final catalog = CatalogController(directory: dir);
-    await catalog.attach(client(), 'account');
-    await catalog.sync();
+  test(
+    'loads the whole library past the first page, in server order',
+    () async {
+      final catalog = CatalogController(directory: dir);
+      await catalog.attach(client(), 'account');
+      await catalog.sync();
 
-    expect(catalog.songs, hasLength(250));
-    expect(catalog.songs.last.id, '249');
-    expect(catalog.isLoaded, isTrue);
-  });
+      expect(catalog.songs, hasLength(250));
+      expect(catalog.songs.last.id, '249');
+      expect(catalog.isLoaded, isTrue);
+    },
+  );
 
   test('a restart shows saved songs without any network', () async {
     final first = CatalogController(directory: dir);
@@ -91,7 +98,11 @@ void main() {
 
     expect(second.songs, hasLength(250));
     await second.sync();
-    expect(second.songs, hasLength(250), reason: 'a failed sync keeps the list');
+    expect(
+      second.songs,
+      hasLength(250),
+      reason: 'a failed sync keeps the list',
+    );
     expect(second.error, isNotNull);
   });
 
@@ -106,20 +117,23 @@ void main() {
     expect(searches, before);
   });
 
-  test('reloads after a new scan and swaps the list only when finished', () async {
-    final catalog = CatalogController(directory: dir);
-    await catalog.attach(client(), 'account');
-    await catalog.sync();
+  test(
+    'reloads after a new scan and swaps the list only when finished',
+    () async {
+      final catalog = CatalogController(directory: dir);
+      await catalog.attach(client(), 'account');
+      await catalog.sync();
 
-    total = 251;
-    lastScan = 'two';
-    final sizes = <int>[];
-    catalog.addListener(() => sizes.add(catalog.songs.length));
-    await catalog.sync();
+      total = 251;
+      lastScan = 'two';
+      final sizes = <int>[];
+      catalog.addListener(() => sizes.add(catalog.songs.length));
+      await catalog.sync();
 
-    expect(catalog.songs, hasLength(251));
-    expect(sizes.where((size) => size != 250 && size != 251), isEmpty);
-  });
+      expect(catalog.songs, hasLength(251));
+      expect(sizes.where((size) => size != 250 && size != 251), isEmpty);
+    },
+  );
 
   test('waits for a running scan to finish', () async {
     final catalog = CatalogController(directory: dir);
@@ -158,47 +172,50 @@ void main() {
     expect(dir.listSync(), isEmpty);
   });
 
-  test('signing out during a sync neither blocks the next one nor leaves a file', () async {
-    final gate = Completer<void>();
-    var firstSearch = true;
-    final slow = SubsonicClient(
-      baseUrl: 'http://music.test',
-      username: 'one',
-      password: 'pw',
-      httpClient: MockClient((request) async {
-        final path = request.url.path;
-        if (path.endsWith('getScanStatus')) {
+  test(
+    'signing out during a sync neither blocks the next one nor leaves a file',
+    () async {
+      final gate = Completer<void>();
+      var firstSearch = true;
+      final slow = SubsonicClient(
+        baseUrl: 'http://music.test',
+        username: 'one',
+        password: 'pw',
+        httpClient: MockClient((request) async {
+          final path = request.url.path;
+          if (path.endsWith('getScanStatus')) {
+            return _ok({
+              'scanStatus': {'count': 1, 'scanning': false, 'lastScan': 'x'},
+            });
+          }
+          if (path.endsWith('getStarred2')) return _ok({'starred2': {}});
+          if (firstSearch) {
+            firstSearch = false;
+            await gate.future;
+          }
           return _ok({
-            'scanStatus': {'count': 1, 'scanning': false, 'lastScan': 'x'},
+            'searchResult3': {
+              'song': [_song(1)],
+            },
           });
-        }
-        if (path.endsWith('getStarred2')) return _ok({'starred2': {}});
-        if (firstSearch) {
-          firstSearch = false;
-          await gate.future;
-        }
-        return _ok({
-          'searchResult3': {
-            'song': [_song(1)],
-          },
-        });
-      }),
-    );
-    final catalog = CatalogController(directory: dir);
-    await catalog.attach(slow, 'old');
-    final running = catalog.sync();
-    await Future<void>.delayed(Duration.zero);
+        }),
+      );
+      final catalog = CatalogController(directory: dir);
+      await catalog.attach(slow, 'old');
+      final running = catalog.sync();
+      await Future<void>.delayed(Duration.zero);
 
-    await catalog.attach(null, null);
-    gate.complete();
-    await running;
-    expect(File('${dir.path}/old.json').existsSync(), isFalse);
+      await catalog.attach(null, null);
+      gate.complete();
+      await running;
+      expect(File('${dir.path}/old.json').existsSync(), isFalse);
 
-    await catalog.attach(slow, 'new');
-    await catalog.sync();
-    expect(catalog.songs, hasLength(1));
-    expect(catalog.isSyncing, isFalse);
-  });
+      await catalog.attach(slow, 'new');
+      await catalog.sync();
+      expect(catalog.songs, hasLength(1));
+      expect(catalog.isSyncing, isFalse);
+    },
+  );
 
   test('a different account never sees the previous songs', () async {
     final catalog = CatalogController(directory: dir);
@@ -208,5 +225,46 @@ void main() {
     await catalog.attach(client(), 'other');
 
     expect(catalog.songs, isEmpty);
+  });
+
+  test(
+    'a list saved by an older version is fetched again, then not again',
+    () async {
+      final catalog = CatalogController(directory: dir);
+      File('${dir.path}/acct.json').writeAsStringSync(
+        jsonEncode({
+          'lastScan': 'one',
+          'songs': [_song(1)],
+        }),
+      );
+      await catalog.attach(client(), 'acct');
+      expect(catalog.songs, hasLength(1));
+      await catalog.sync();
+      expect(catalog.songs, hasLength(total));
+      final first = searches;
+
+      final reopened = CatalogController(directory: dir);
+      await reopened.attach(client(), 'acct');
+      await reopened.sync();
+      expect(searches, first);
+    },
+  );
+
+  test('knows a cover for an artist without asking the server', () async {
+    final catalog = CatalogController(directory: dir);
+    File('${dir.path}/acct.json').writeAsStringSync(
+      jsonEncode({
+        'format': 2,
+        'lastScan': 'one',
+        'songs': [
+          {'id': '1', 'title': 'A', 'artist': 'One'},
+          {'id': '2', 'title': 'B', 'artist': 'One', 'coverArt': 'c2'},
+          {'id': '3', 'title': 'C', 'artist': 'One', 'coverArt': 'c3'},
+        ],
+      }),
+    );
+    await catalog.attach(client(), 'acct');
+    expect(catalog.coverForArtist('One'), 'c2');
+    expect(catalog.coverForArtist('Nobody'), isNull);
   });
 }

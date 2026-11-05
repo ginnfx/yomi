@@ -23,6 +23,9 @@ import 'core/listening/play_history.dart';
 import 'core/listening/scrobble_queue.dart';
 import 'core/lyrics.dart';
 import 'core/offline/audio_cache.dart';
+import 'core/cover_crop.dart';
+import 'core/cover_prefiller.dart';
+import 'core/cover_sizes.dart';
 import 'core/offline/cover_warmer.dart';
 import 'core/offline/download_store.dart';
 import 'core/offline/outbox.dart';
@@ -49,6 +52,7 @@ import 'state/settings.dart';
 import 'state/tunnel_controller.dart';
 import 'state/update_controller.dart';
 import 'state/upload_queue.dart';
+import 'ui/widgets/album_card.dart' show kCardWidth;
 import 'ui/pages/login_page.dart';
 import 'ui/pages/shell_page.dart';
 import 'ui/theme.dart';
@@ -204,8 +208,14 @@ Future<void> main() async {
     otherDevicePlays: () => listeningLog.remotePlays,
     importedTaste: () => listeningLog.imported.artistTaste,
     pastFavouritesFor: (songs) => pastFavourites(listeningLog.imported, songs),
+    libraryVersion: () => catalog.lastScan,
   );
   await home.loadCache();
+  WidgetsBinding.instance.addObserver(_CoverMemoryObserver());
+  await CoverImageService.instance.warm(
+    _coversOnFirstScreen(home),
+    limit: _coverWarmLimit,
+  );
   player.suggestNext = () =>
       [for (final shelf in home.shelves) ...shelf.songs]
           .take(_suggestedSongsPerSkip)
@@ -343,8 +353,13 @@ Future<void> main() async {
             .then((_) => home.refreshIfDue()),
       );
     }
+    final addressChanged = client != null && client.baseUrl != aiUrl;
     aiUrl = client?.baseUrl;
     final isReachable = session.isServerReachable;
+    // Covers still loading may be stuck on an address that no longer works.
+    if (client != null && (addressChanged || (isReachable && !wasReachable))) {
+      CoverImageService.instance.retryFailed();
+    }
     player.isServerDown = !isReachable;
     if (client != null && isReachable && !wasReachable) {
       unawaited(client.flushOutbox());
@@ -368,6 +383,7 @@ Future<void> main() async {
 
   var wasCatalogLoaded = false;
   catalog.addListener(() {
+    unawaited(home.refreshIfDue());
     if (catalog.isLoaded) {
       unawaited(ai.queueMissing(catalog.songs));
       unawaited(imports.rematch(catalog.songs));
@@ -379,6 +395,26 @@ Future<void> main() async {
   session.addListener(followSession);
   followSession();
 
+  var isInForeground = true;
+  final coverPrefiller = CoverPrefiller(
+    source: CoverImageService.instance.source,
+    songs: () => catalog.songs,
+    canRun: () =>
+        isInForeground &&
+        catalog.isLoaded &&
+        connectivity.isOnWifi &&
+        session.isSignedIn &&
+        session.isServerReachable,
+    urlFor: (id) => session.isSignedIn
+        ? session.client.coverArtUri(id, size: smallCoverPx).toString()
+        : null,
+  );
+  void wakeCoverPrefiller() => unawaited(coverPrefiller.wake());
+  catalog.addListener(wakeCoverPrefiller);
+  session.addListener(wakeCoverPrefiller);
+  connectivity.addListener(wakeCoverPrefiller);
+  wakeCoverPrefiller();
+
   // Older versions kept these in preferences, where they could never be read again.
   for (final key in prefs.getKeys().toList()) {
     if (key.startsWith('catalog_v1_') || key.startsWith('song_count_')) {
@@ -388,11 +424,17 @@ Future<void> main() async {
   final updates = await _buildUpdateController(prefs);
   DateTime? hiddenSince;
   AppLifecycleListener(
-    onHide: () => hiddenSince = DateTime.now(),
+    onHide: () {
+      hiddenSince = DateTime.now();
+      isInForeground = false;
+    },
     onResume: () {
+      isInForeground = true;
+      wakeCoverPrefiller();
       final since = hiddenSince;
       if (since != null &&
           DateTime.now().difference(since) > _showNewHomeAfter) {
+        home.appOpened();
         home.applyHeldBack();
       }
       unawaited(updates.check());
@@ -441,6 +483,43 @@ const int _suggestedSongsPerSkip = 20;
 
 /// How long the app must be away before a prepared Home replaces the one showing.
 const Duration _showNewHomeAfter = Duration(minutes: 30);
+
+/// How long the first screen may wait for its covers before showing anyway.
+const Duration _coverWarmLimit = Duration(milliseconds: 300);
+
+/// Enough shelves to fill the first screen of Home.
+const int _shelvesOnFirstScreen = 3;
+
+/// Tiles visible across a shelf before you scroll it.
+const int _tilesOnFirstScreen = 4;
+
+/// The size of the tiles at the top of Home.
+const double _quickTile = 60;
+
+/// The covers the first screen of Home will ask for: small tiles at the top, and larger
+/// cards on the shelves below.
+Iterable<String> _coversOnFirstScreen(HomeController home) sync* {
+  final tiles = [
+    for (final playlist in home.quickPlaylists) playlist.coverArtId,
+    for (final song in home.quickSongs) song.coverArtId,
+  ];
+  for (final cover in tiles) {
+    if (cover != null) yield coverCacheKey(cover, coverPixelsFor(_quickTile));
+  }
+  for (final shelf in home.shelves.take(_shelvesOnFirstScreen)) {
+    for (final song in shelf.songs.take(_tilesOnFirstScreen)) {
+      final cover = song.coverArtId;
+      if (cover != null) yield coverCacheKey(cover, coverPixelsFor(kCardWidth));
+    }
+  }
+}
+
+/// Frees decoded covers when the system asks, so playing in the background is less likely
+/// to get the app closed.
+class _CoverMemoryObserver with WidgetsBindingObserver {
+  @override
+  void didHaveMemoryPressure() => CoverImageService.instance.releaseMemory();
+}
 
 Future<void> _followCatalog(
   CatalogController catalog,

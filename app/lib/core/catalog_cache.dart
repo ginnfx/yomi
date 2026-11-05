@@ -28,7 +28,17 @@ class CatalogCache {
   }) : _file = file,
        _now = now ?? DateTime.now;
 
-  static const int defaultMaxEntries = 128;
+  static const int defaultMaxEntries = 600;
+
+  /// The lists behind whole screens. Opening many albums or artists mustn't push these
+  /// out, or the Library tabs go back to loading.
+  static const Set<String> _alwaysKept = {
+    'getAlbumList2',
+    'getArtists',
+    'getGenres',
+    'getPlaylists',
+    'getStarred2',
+  };
 
   /// How long an entry is shown without also being refreshed in the background.
   static const Duration freshFor = Duration(minutes: 5);
@@ -62,8 +72,11 @@ class CatalogCache {
   }
 
   CatalogEntry? peek(String endpoint, Map<String, Object?> params) {
-    final saved = _entries[_keyFor(endpoint, params)];
+    final key = _keyFor(endpoint, params);
+    final saved = _entries.remove(key);
     if (saved == null) return null;
+    _entries[key] =
+        saved; // The least recently read goes first when space runs out.
     final age = _now().millisecondsSinceEpoch - saved.atMs;
     return CatalogEntry(
       data: saved.data,
@@ -79,11 +92,22 @@ class CatalogCache {
     final key = _keyFor(endpoint, params);
     _entries.remove(key); // Re-adding moves it to the newest position.
     _entries[key] = _Saved(endpoint, _now().millisecondsSinceEpoch, data);
-    while (_entries.length > maxEntries) {
-      _entries.remove(_entries.keys.first);
-    }
+    _trim();
     _changed();
     _updates.add(endpoint);
+  }
+
+  void _trim() {
+    var excess = _entries.length - maxEntries;
+    if (excess <= 0) return;
+    final oldest = [
+      for (final entry in _entries.entries)
+        if (!_alwaysKept.contains(entry.value.endpoint)) entry.key,
+    ];
+    for (final key in oldest) {
+      if (excess-- <= 0) break;
+      _entries.remove(key);
+    }
   }
 
   /// Forgets every entry from these endpoints.

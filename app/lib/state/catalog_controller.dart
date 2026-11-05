@@ -11,6 +11,12 @@ import '../core/subsonic_client.dart';
 
 const int _pageSize = 500;
 
+/// Bumped when saved songs lack something newer versions need, so they're fetched again.
+const int _savedFormat = 2;
+
+/// How soon to look again when the server is partway through a library scan.
+const Duration _rescanCheckAfter = Duration(seconds: 30);
+
 /// Every song in the library, saved on this device.
 ///
 /// Screens read [songs] directly, so the list is complete and instant. [sync] only asks
@@ -29,7 +35,32 @@ class CatalogController extends ChangeNotifier {
   Object? _error;
   int _generation = 0;
 
+  Timer? _rescanCheck;
+  Map<String, String>? _artistCovers;
+  List<Song>? _artistCoversFrom;
+
   List<Song> get songs => _songs;
+
+  /// The library scan [songs] came from. Changes when the library does.
+  String? get lastScan => _lastScan;
+
+  /// A cover to represent an artist, without asking the server.
+  String? coverForArtist(String name) {
+    if (!identical(_artistCoversFrom, _songs)) {
+      _artistCoversFrom = _songs;
+      _artistCovers = _firstCoverByArtist(_songs);
+    }
+    return _artistCovers?[name];
+  }
+
+  static Map<String, String> _firstCoverByArtist(List<Song> songs) {
+    final covers = <String, String>{};
+    for (final song in songs) {
+      final cover = song.coverArtId;
+      if (cover != null) covers.putIfAbsent(song.artist, () => cover);
+    }
+    return covers;
+  }
 
   /// Search over [songs], rebuilt only after they change.
   SearchIndex get searchIndex {
@@ -55,6 +86,7 @@ class CatalogController extends ChangeNotifier {
     if (accountId == _accountId) return;
     final previous = _accountId;
     _accountId = accountId;
+    _rescanCheck?.cancel();
     _generation++;
     _songs = const [];
     _lastScan = null;
@@ -106,7 +138,11 @@ class CatalogController extends ChangeNotifier {
     notifyListeners();
     try {
       final status = await client.scanStatus();
-      if (status.isScanning && _isLoaded && !force) return;
+      if (status.isScanning && _isLoaded && !force) {
+        _rescanCheck?.cancel();
+        _rescanCheck = Timer(_rescanCheckAfter, () => unawaited(sync()));
+        return;
+      }
       final isSameScan =
           _isLoaded && status.lastScan != null && status.lastScan == _lastScan;
       final songs = isSameScan && !force
@@ -154,6 +190,7 @@ class CatalogController extends ChangeNotifier {
     try {
       final text = await Isolate.run(
         () => jsonEncode({
+          'format': _savedFormat,
           'lastScan': lastScan,
           'songs': [for (final song in songs) song.toJson()],
         }),
@@ -174,10 +211,16 @@ class CatalogController extends ChangeNotifier {
     }
   }
 
+  @override
+  void dispose() {
+    _rescanCheck?.cancel();
+    super.dispose();
+  }
+
   static _SavedCatalog _decode(String text) {
     final json = jsonDecode(text) as Map<String, dynamic>;
     return _SavedCatalog(
-      json['lastScan'] as String?,
+      json['format'] == _savedFormat ? json['lastScan'] as String? : null,
       List<Song>.unmodifiable(
         (json['songs'] as List<dynamic>).cast<Map<String, dynamic>>().map(
           Song.fromJson,
