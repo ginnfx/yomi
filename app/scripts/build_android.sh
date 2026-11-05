@@ -27,9 +27,17 @@ flutter build apk --release --build-name="$VERSION" --build-number="$BUILD_NUMBE
 
 # Refuse to publish an APK that installed copies would reject as an update.
 SDK=${ANDROID_HOME:-${ANDROID_SDK_ROOT:-$(sed -n 's/^sdk.dir=//p' "$APP_DIR/android/local.properties")}}
-APKSIGNER=$(ls "$SDK"/build-tools/*/apksigner | sort -V | tail -1)
 EXPECTED=$(tr -d '[:space:]' < "$APP_DIR/android/release-cert.sha256")
-ACTUAL=$("$APKSIGNER" verify --print-certs "$APK" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p')
+# The newest build tools on a machine can print nothing (seen on GitHub's runners), so try
+# each, newest first, until one reports the certificate.
+ACTUAL=""
+for APKSIGNER in $(ls "$SDK"/build-tools/*/apksigner | sort -Vr); do
+  OUTPUT=$("$APKSIGNER" verify --print-certs "$APK" 2>&1 || true)
+  ACTUAL=$(printf '%s\n' "$OUTPUT" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p' | head -n 1 | tr -d '[:space:]')
+  [ -n "$ACTUAL" ] && break
+  echo "No certificate from $APKSIGNER:" >&2
+  printf '%s\n' "$OUTPUT" | head -n 5 >&2
+done
 if [ "$ACTUAL" != "$EXPECTED" ]; then
   echo "APK is signed by the wrong key: $ACTUAL (expected $EXPECTED)" >&2
   exit 1
