@@ -10,6 +10,23 @@ import 'package:yomi/ui/pages/messages_page.dart';
 import 'support/screen_harness.dart';
 
 class FakeTransport implements MessagingTransport {
+  @override
+  Future<void> saveTaste({
+    required List<String> topArtists,
+    required List<String> topMoods,
+  }) async {}
+
+  @override
+  Future<void> react(int messageId, String emoji) async {}
+  @override
+  Future<int> waitForChange(int revision) async => revision;
+  @override
+  Future<void> setPlaying({
+    String? songId,
+    String? title,
+    String? artist,
+  }) async {}
+
   final List<ChatMessage> messages = [];
   List<ChatProfile> people = const [
     ChatProfile(user: 'demo'),
@@ -48,7 +65,11 @@ class FakeTransport implements MessagingTransport {
   }
 
   @override
-  Future<List<ChatMessage>> thread(String withUser, {int after = 0}) async {
+  Future<List<ChatMessage>> thread(
+    String withUser, {
+    int after = 0,
+    int before = 0,
+  }) async {
     final error = failure;
     if (error != null) throw error;
     return messages.where((m) => m.id > after).toList();
@@ -60,6 +81,9 @@ class FakeTransport implements MessagingTransport {
     String text = '',
     String? songId,
     String? songTitle,
+    String? albumId,
+    String? playlistId,
+    int? replyTo,
   }) async {
     final error = failure;
     if (error != null) throw error;
@@ -236,7 +260,8 @@ void main() {
         await controller.refresh();
       });
       await pumpScreen(tester, wrap(const MessagesPage()), size: phoneSize);
-      expect(find.text('Sam'), findsOneWidget);
+      // Once in the friends row, once in the list. You never appear yourself.
+      expect(find.text('Sam'), findsNWidgets(2));
       expect(find.text('demo'), findsNothing);
       expect(find.textContaining('end-to-end'), findsOneWidget);
     });

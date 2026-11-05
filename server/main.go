@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"path/filepath"
 	"time"
 )
 
@@ -24,6 +25,12 @@ func main() {
 	go index.Seed()
 	server := newServer(cfg, auth, navidromeScan(cfg.NavidromeURL), index)
 	server.Status = newStatusReader(cfg, index)
+	if covers, err := openPlaylistCoverStore(filepath.Join(cfg.MessagesDir, "playlist-covers")); err != nil {
+		log.Printf("playlist pictures disabled: %v", err)
+	} else {
+		server.PlaylistCovers = covers
+		server.PlaylistOwner = navidromePlaylistOwner(cfg.NavidromeURL, &http.Client{Timeout: playlistOwnerTimeout})
+	}
 	server.Backups = newBackupSource(cfg)
 	messages, err := openMessageStore(cfg.MessagesDir, time.Now)
 	if err != nil {
@@ -37,10 +44,28 @@ func main() {
 		if cfg.PrimaryURL == "" || cfg.ReplicaUser == "" || cfg.ReplicaPassword == "" || cfg.ReplicaDatabase == "" {
 			log.Fatal("replica needs YOMI_PRIMARY, YOMI_REPLICA_USER, YOMI_REPLICA_PASSWORD and YOMI_REPLICA_DB")
 		}
-		go newReplicaSync(cfg, index).Run(context.Background())
+		sync := newReplicaSync(cfg, index)
+		sync.State = &StateSync{
+			PrimaryURL: sync.PrimaryURL,
+			Login:      sync.Login,
+			Client:     sync.Client,
+			Roots:      map[string]string{stateRootMessages: cfg.MessagesDir, stateRootHistory: cfg.HistoryDir},
+		}
+		if server.Messages != nil {
+			sync.State.OnChanged = server.Messages.Reload
+		}
+		go sync.Run(context.Background())
 	}
 	if cfg.CoversOn {
 		startCovers(cfg)
+	}
+	startAI(cfg, server)
+	history, err := openHistoryStore(cfg.HistoryDir)
+	if err != nil {
+		// Music matters more than stats, so the server still starts.
+		log.Printf("listening history disabled: %v", err)
+	} else {
+		server.History = history
 	}
 	httpServer := &http.Server{
 		Addr:              cfg.Listen,

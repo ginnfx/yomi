@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
@@ -6,6 +7,7 @@ import 'package:provider/provider.dart';
 import '../../core/cover_crop.dart';
 import '../../core/artwork_lookup.dart';
 import '../../core/cover_sizes.dart';
+import '../../state/catalog_controller.dart';
 import '../../state/session.dart';
 import '../theme.dart';
 
@@ -38,42 +40,17 @@ class CoverArt extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final fallback = _Fallback(size: size, seedText: seed ?? coverArtId ?? '');
-    Widget image = fallback;
-    if (coverArtId != null || artist != null) {
-      final client = context.read<SessionController>().client;
-      final pixels = coverPixelsFor(size);
-      final service = CoverImageService.instance;
-      final key = coverCacheKey(
-        coverArtId ?? 'missing-${artist ?? ''}-${album ?? ''}',
-        pixels,
-      );
-      // While the big version loads, show the small one we already have instead of a blank.
-      final placeholder =
-          service.peek(key) ??
-          service.peek(coverCacheKey(coverArtId ?? '', smallCoverPx));
-      image = _TrimmedImage(
-        future: () async {
-          if (coverArtId != null) {
-            final image = await service.load(
-              client.coverArtUri(coverArtId, size: pixels).toString(),
-              key,
-            );
-            if (image != null) return image;
-          }
-          if (artist == null) return null;
-          final url = await ArtworkLookup.instance.find(
-            artist!,
-            album ?? '',
-            title ?? '',
+    final hasCover = coverArtId != null || artist != null;
+    final Widget image = !hasCover
+        ? fallback
+        : _CoverImage(
+            coverArtId: coverArtId,
+            pixels: coverPixelsFor(size),
+            artist: artist,
+            album: album,
+            title: title,
+            fallback: fallback,
           );
-          return url == null
-              ? null
-              : service.load(url, 'external-$url-$pixels');
-        }(),
-        initial: placeholder,
-        fallback: fallback,
-      );
-    }
     Widget result = SizedBox.square(
       dimension: size,
       child: DecoratedBox(
@@ -100,37 +77,183 @@ class CoverArt extends StatelessWidget {
   }
 }
 
-/// Shows a cover trimmed to its real artwork, fading in once ready.
-class _TrimmedImage extends StatelessWidget {
-  const _TrimmedImage({
-    required this.future,
+/// Shows a cover trimmed to its real artwork.
+///
+/// A cover already in memory shows immediately. When this widget is reused for another
+/// song, the previous song's cover goes at once rather than staying until the new one
+/// has loaded. If loading fails, it tries again when the connection changes.
+class _CoverImage extends StatefulWidget {
+  const _CoverImage({
+    required this.coverArtId,
+    required this.pixels,
+    required this.artist,
+    required this.album,
+    required this.title,
     required this.fallback,
-    this.initial,
   });
 
-  final Future<ui.Image?> future;
-  final ui.Image? initial;
+  final String? coverArtId;
+  final int pixels;
+  final String? artist, album, title;
   final Widget fallback;
+
+  String get cacheKey => coverCacheKey(
+    coverArtId ?? 'missing-${artist ?? ''}-${album ?? ''}-${title ?? ''}',
+    pixels,
+  );
+
+  @override
+  State<_CoverImage> createState() => _CoverImageState();
+}
+
+class _CoverImageState extends State<_CoverImage> {
+  static const _fade = Duration(milliseconds: 160);
+  static const _loadingColor = Color(0x14FFFFFF);
+
+  /// The first retry after a failure. Each one after waits twice as long, up to the limit.
+  static const _firstRetry = Duration(seconds: 15);
+  static const _longestRetry = Duration(minutes: 2);
+  static const _smallVersionLimit = Duration(seconds: 2);
+
+  final CoverImageService _service = CoverImageService.instance;
+  ui.Image? _image;
+  bool _hasExactImage = false;
+  bool _isLoading = false;
+  int _generation = 0;
+  int _failures = 0;
+  Timer? _retryTimer;
+
+  @override
+  void initState() {
+    super.initState();
+    _service.retries.addListener(_retry);
+    _start();
+  }
+
+  @override
+  void didUpdateWidget(_CoverImage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.cacheKey != widget.cacheKey) {
+      _failures = 0;
+      _start();
+    }
+  }
+
+  @override
+  void dispose() {
+    _generation++;
+    _retryTimer?.cancel();
+    _service.retries.removeListener(_retry);
+    super.dispose();
+  }
+
+  void _retry() {
+    if (mounted && !_hasExactImage) setState(_start);
+  }
+
+  void _start() {
+    final generation = ++_generation;
+    _retryTimer?.cancel();
+    final exact = _service.peek(widget.cacheKey);
+    _hasExactImage = exact != null;
+    // While the big version loads, show the small one we already have instead of a blank.
+    _image = exact ?? _smallVersion();
+    // A retry leaves the fallback up, rather than flickering to blank and back.
+    _isLoading = exact == null && _failures == 0;
+    if (exact != null) return;
+    if (_image == null) unawaited(_showSavedSmallVersion(generation));
+    unawaited(
+      _load().then((image) {
+        if (!mounted || generation != _generation) return;
+        setState(() {
+          _isLoading = false;
+          _hasExactImage = image != null;
+          _image = image ?? _image;
+        });
+        if (image != null) {
+          _failures = 0;
+        } else if (!_service.isMissing(widget.cacheKey)) {
+          _retryLater();
+        }
+      }),
+    );
+  }
+
+  /// Reads the small version from this device, so a big cover isn't blank while it
+  /// downloads, or at all when there's no connection.
+  Future<void> _showSavedSmallVersion(int generation) async {
+    final id = widget.coverArtId;
+    if (id == null || widget.pixels == smallCoverPx) return;
+    final key = coverCacheKey(id, smallCoverPx);
+    await _service.warm([key], limit: _smallVersionLimit);
+    if (!mounted || generation != _generation || _image != null) return;
+    final small = _service.peek(key);
+    if (small == null) return;
+    setState(() {
+      _image = small;
+      _isLoading = false;
+    });
+  }
+
+  /// Keeps trying while this cover is on screen, as nothing else will ask for it again
+  /// and the connection may recover without the address changing.
+  void _retryLater() {
+    final wait = _firstRetry * (1 << _failures.clamp(0, 3));
+    _failures++;
+    _retryTimer = Timer(wait > _longestRetry ? _longestRetry : wait, _retry);
+  }
+
+  ui.Image? _smallVersion() {
+    final id = widget.coverArtId;
+    return id == null ? null : _service.peek(coverCacheKey(id, smallCoverPx));
+  }
+
+  Future<ui.Image?> _load() {
+    final id = widget.coverArtId;
+    final artist = widget.artist;
+    return _service.load(
+      id == null
+          ? null
+          : context
+                .read<SessionController>()
+                .client
+                .coverArtUri(id, size: widget.pixels)
+                .toString(),
+      widget.cacheKey,
+      fallbackUrl: artist == null
+          ? null
+          : () => ArtworkLookup.instance.find(
+              artist,
+              widget.album ?? '',
+              widget.title ?? '',
+            ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
-    return FutureBuilder<ui.Image?>(
-      future: future,
-      initialData: initial,
-      builder: (context, snapshot) {
-        final image = snapshot.data;
-        return AnimatedSwitcher(
-          duration: const Duration(milliseconds: 220),
-          child: image == null
-              ? KeyedSubtree(key: const ValueKey('fallback'), child: fallback)
-              : RawImage(
-                  key: ValueKey(image),
-                  image: image,
-                  fit: BoxFit.cover,
-                  filterQuality: FilterQuality.medium,
-                ),
-        );
-      },
+    final image = _image;
+    return AnimatedSwitcher(
+      // Keyed by cover, so a reused row never fades through the previous song's cover.
+      key: ValueKey(widget.cacheKey),
+      duration: _fade,
+      child: image != null
+          ? RawImage(
+              key: ValueKey(image),
+              image: image,
+              fit: BoxFit.cover,
+              filterQuality: FilterQuality.medium,
+            )
+          : _isLoading
+          ? const ColoredBox(
+              key: ValueKey('loading'),
+              color: _loadingColor,
+              child: SizedBox.expand(),
+            )
+          : KeyedSubtree(
+              key: const ValueKey('fallback'),
+              child: widget.fallback,
+            ),
     );
   }
 }
@@ -181,19 +304,26 @@ class ArtistAvatar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // The saved library knows this without asking the server once per artist.
+    final saved = Provider.of<CatalogController?>(
+      context,
+      listen: false,
+    )?.coverForArtist(name);
+    if (saved != null) return _circle(saved);
     final client = context.read<SessionController>().client;
     return FutureBuilder<String?>(
+      // Keyed so a reused row can't keep showing another artist's picture.
+      key: ValueKey(artistId),
       future: client.artistCoverId(artistId),
-      builder: (context, snapshot) {
-        final coverId = snapshot.data;
-        return ClipOval(
-          child: coverId != null
-              ? CoverArt(coverArtId: coverId, size: size, radius: size / 2)
-              : _Monogram(name: name, size: size),
-        );
-      },
+      builder: (context, snapshot) => _circle(snapshot.data),
     );
   }
+
+  Widget _circle(String? coverId) => ClipOval(
+    child: coverId != null
+        ? CoverArt(coverArtId: coverId, size: size, radius: size / 2)
+        : _Monogram(name: name, size: size),
+  );
 }
 
 class _Monogram extends StatelessWidget {

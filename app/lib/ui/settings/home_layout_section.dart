@@ -13,7 +13,7 @@ const Map<String, (String, String, IconData)> homeSectionInfo = {
   ),
   'quick': (
     'Quick picks',
-    'Your playlists and newest songs as tiles',
+    'Your playlists and a few songs as tiles',
     Icons.grid_view_rounded,
   ),
   'jumpBack': (
@@ -23,12 +23,12 @@ const Map<String, (String, String, IconData)> homeSectionInfo = {
   ),
   'becauseYouPlayed': (
     'Because you played',
-    'More like the artist you play most',
+    'More like the artists you play most',
     Icons.auto_awesome_outlined,
   ),
   'topGenre': (
-    'Your top genre',
-    'From the genre you play most',
+    'Your top genres',
+    'From the genres you play most',
     Icons.category_outlined,
   ),
   'rediscover': (
@@ -43,8 +43,28 @@ const Map<String, (String, String, IconData)> homeSectionInfo = {
   ),
   'recentlyAdded': (
     'Recently added',
-    'The newest songs in the library',
+    'A few songs from each of the newest albums',
     Icons.new_releases_outlined,
+  ),
+  'artistsYouLove': (
+    'Around your favourites',
+    'Artists you love and others like them',
+    Icons.favorite_outline_rounded,
+  ),
+  'newToYou': (
+    'New to you',
+    "One song each from artists you haven't played",
+    Icons.travel_explore_rounded,
+  ),
+  'mood': (
+    'Mood mixes',
+    'Shelves for a feeling, when AI is set up on your server',
+    Icons.mood_rounded,
+  ),
+  'pastYears': (
+    'Past favourites',
+    'What you played a lot in past years on Spotify',
+    Icons.history_edu_rounded,
   ),
   'discover': (
     'Something different',

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math';
 
 import 'package:flutter/foundation.dart';
 
@@ -138,7 +139,7 @@ class ListeningController {
   /// Runs after each play and when Wi-Fi returns, so a song that qualified on
   /// mobile data is fetched the next time it's cheap.
   void _queueRepeats() {
-    if (!settings.autoDownloadRepeats || !connectivity.isOnWifi) return;
+    if (!connectivity.isOnWifi) return;
     if (_client == null) return;
     final due = history.songs.where(_qualifies).toList();
     if (due.isEmpty) return;
@@ -152,9 +153,20 @@ class ListeningController {
   /// The song playing now is kept, even when it alone is over the cap.
   void _enforceCap() {
     if (_isEvicting) return;
-    final saved = ledger.autoIds.where(downloads.isDownloaded).toList();
+    final saved = ledger.autoIds
+        .where((id) => downloads.isDownloaded(id) && !ledger.isKept(id))
+        .toList();
     var total = saved.fold<int>(0, (sum, id) => sum + downloads.bytesOf(id));
-    if (total <= kAutoDownloadCapBytes) return;
+    // Songs on repeat share the storage limit with kept playlists, which come first.
+    final keptBytes = ledger.keptIds.fold<int>(
+      0,
+      (sum, id) => sum + downloads.bytesOf(id),
+    );
+    final cap = min(
+      kAutoDownloadCapBytes,
+      settings.storageLimitBytes - keptBytes,
+    );
+    if (total <= cap) return;
     final playing = currentSong()?.id;
     final epoch = DateTime.fromMillisecondsSinceEpoch(0);
     final oldestFirst = saved.where((id) => id != playing).toList()
@@ -167,7 +179,7 @@ class ListeningController {
     unawaited(() async {
       try {
         for (final id in oldestFirst) {
-          if (total <= kAutoDownloadCapBytes) break;
+          if (total <= cap) break;
           // The user may have saved it by hand while the last eviction ran.
           if (!ledger.isAuto(id)) continue;
           total -= downloads.bytesOf(id);

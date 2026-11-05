@@ -5,11 +5,14 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';
 import 'package:yomi/core/models.dart';
 import 'package:yomi/core/recommendations.dart';
+import 'package:yomi/core/taste.dart';
 import 'package:yomi/state/home_controller.dart';
 import 'package:yomi/state/messages_controller.dart';
 import 'package:yomi/state/playback_sync_controller.dart';
 import 'package:yomi/ui/pages/home_page.dart';
 import 'package:yomi/ui/settings/profile_section.dart';
+
+import 'package:yomi/ui/widgets/shimmer.dart';
 
 import 'support/screen_harness.dart';
 
@@ -22,7 +25,13 @@ class _FakeHome extends ChangeNotifier implements HomeController {
   bool get isLoading => false;
   @override
   Object? get error => null;
+  @override
+  List<Playlist> get quickPlaylists => const [];
+  @override
+  List<Song> get quickSongs => _songs('Quick');
 
+  @override
+  TasteProfile get taste => TasteProfile.empty;
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
@@ -71,6 +80,16 @@ void main() {
     ],
     child: Material(child: HomePage(greetingTime: DateTime(2026, 1, 1, 15))),
   );
+
+  testWidgets('real content on the first frame, with no skeleton', (
+    tester,
+  ) async {
+    await pumpScreen(tester, home(), size: phoneSize);
+
+    expect(find.text('Quick song 0'), findsOneWidget);
+    expect(find.text('Jump back in'), findsOneWidget);
+    expect(find.byType(Shimmer), findsNothing);
+  });
 
   final hideQuick = <String, Object>{
     'homeHidden': <String>['quick'],

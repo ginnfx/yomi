@@ -14,10 +14,15 @@ class AutoDownloadLedger {
 
   final SharedPreferences _prefs;
   Set<String> _auto = const {};
+  Set<String> _kept = const {};
   Set<String> _declined = const {};
   Map<String, DateTime> _evictedAt = const {};
 
   Set<String> get autoIds => _auto;
+
+  /// Saved because they're in a playlist kept offline, rather than for being on repeat.
+  Set<String> get keptIds => _kept;
+  bool isKept(String songId) => _kept.contains(songId);
   bool isAuto(String songId) => _auto.contains(songId);
 
   /// The user removed this song, so it is never fetched automatically again.
@@ -32,9 +37,17 @@ class AutoDownloadLedger {
     _save();
   }
 
+  void markKept(String songId) {
+    _auto = {..._auto, songId};
+    _kept = {..._kept, songId};
+    _evictedAt = _without(_evictedAt, songId);
+    _save();
+  }
+
   /// A song the user saved themselves is theirs from now on.
   void markManual(String songId) {
     _auto = {..._auto}..remove(songId);
+    _kept = {..._kept}..remove(songId);
     _declined = {..._declined}..remove(songId);
     _evictedAt = _without(_evictedAt, songId);
     _save();
@@ -43,12 +56,14 @@ class AutoDownloadLedger {
   void markUserRemoved(String songId) {
     if (!_auto.contains(songId)) return;
     _auto = {..._auto}..remove(songId);
+    _kept = {..._kept}..remove(songId);
     _declined = {..._declined, songId};
     _save();
   }
 
   void markEvicted(String songId, DateTime at) {
     _auto = {..._auto}..remove(songId);
+    _kept = {..._kept}..remove(songId);
     _evictedAt = {..._evictedAt, songId: at};
     _save();
   }
@@ -67,6 +82,9 @@ class AutoDownloadLedger {
     try {
       final json = jsonDecode(raw) as Map<String, dynamic>;
       _auto = (json['auto'] as List<dynamic>).cast<String>().toSet();
+      _kept = ((json['kept'] as List<dynamic>?) ?? const [])
+          .cast<String>()
+          .toSet();
       _declined = (json['declined'] as List<dynamic>).cast<String>().toSet();
       _evictedAt = {
         for (final entry in (json['evicted'] as Map<String, dynamic>).entries)
@@ -85,6 +103,7 @@ class AutoDownloadLedger {
       _prefsKey,
       jsonEncode({
         'auto': _auto.toList(),
+        'kept': _kept.toList(),
         'declined': _declined.toList(),
         'evicted': {
           for (final entry in _evictedAt.entries)

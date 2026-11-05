@@ -6,11 +6,11 @@ import '../../state/session.dart';
 import '../settings/appearance_section.dart';
 import '../settings/connection_section.dart';
 import '../settings/invite_section.dart';
-import '../settings/home_layout_section.dart';
 import '../settings/listening_sync_section.dart';
 import '../settings/profile_section.dart';
 import '../settings/settings_widgets.dart';
 import '../settings/storage_section.dart';
+import '../stats/spotify_import_page.dart';
 import '../theme.dart';
 
 void openSettings(BuildContext context) {
@@ -35,13 +35,46 @@ class SettingsPage extends StatelessWidget {
             bottom: MediaQuery.paddingOf(context).bottom + 32,
           ),
           children: [
-            const ProfileSection(),
-            const ListeningSyncSection(),
-            const ConnectionSection(),
-            const InviteSection(),
-            const AppearanceSection(),
-            const HomeLayoutSection(),
-            const StorageSection(),
+            _SettingsRow(
+              icon: Icons.person_rounded,
+              title: 'Profile',
+              page: const ProfileSection(),
+            ),
+            _SettingsRow(
+              icon: Icons.palette_rounded,
+              title: 'Appearance',
+              page: const AppearanceSection(),
+            ),
+            _SettingsRow(
+              icon: Icons.sd_storage_rounded,
+              title: 'Storage',
+              page: const StorageSection(),
+            ),
+            ListTile(
+              leading: const Icon(Icons.library_music_rounded),
+              title: Text(
+                'Import from Spotify',
+                style: yomiText(16, weight: FontWeight.w700),
+              ),
+              trailing: const Icon(Icons.chevron_right_rounded),
+              onTap: () => Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (_) => const SpotifyImportPage(),
+                ),
+              ),
+            ),
+            _SettingsRow(
+              icon: Icons.tune_rounded,
+              title: 'Advanced',
+              subtitle: 'Connection, invites and syncing between devices',
+              page: const Column(
+                children: [
+                  ConnectionSection(),
+                  InviteSection(),
+                  ListeningSyncSection(),
+                ],
+              ),
+            ),
             SettingsGroup(
               title: 'Account',
               children: [
@@ -72,6 +105,57 @@ class SettingsPage extends StatelessWidget {
               ],
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+/// A top-level setting that opens on its own page, so the first screen stays short.
+class _SettingsRow extends StatelessWidget {
+  const _SettingsRow({
+    required this.icon,
+    required this.title,
+    required this.page,
+    this.subtitle,
+  });
+
+  final IconData icon;
+  final String title;
+  final String? subtitle;
+  final Widget page;
+
+  @override
+  Widget build(BuildContext context) {
+    final detail = subtitle;
+    return ListTile(
+      leading: Icon(icon),
+      title: Text(title, style: yomiText(16, weight: FontWeight.w700)),
+      subtitle: detail == null
+          ? null
+          : Text(
+              detail,
+              style: yomiText(
+                12.5,
+                weight: FontWeight.w500,
+                color: YomiColors.textSecondary,
+              ),
+            ),
+      trailing: const Icon(Icons.chevron_right_rounded),
+      onTap: () => Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (_) => PageBackground(
+            child: Scaffold(
+              backgroundColor: Colors.transparent,
+              appBar: AppBar(
+                title: Text(
+                  title,
+                  style: yomiText(20, weight: FontWeight.w800),
+                ),
+              ),
+              body: SingleChildScrollView(child: page),
+            ),
+          ),
         ),
       ),
     );

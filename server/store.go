@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"io"
@@ -62,8 +63,17 @@ func sanitizeName(name string) (string, error) {
 	// FAT32 silently drops dots and spaces before an extension's end of a name.
 	stem := strings.TrimRight(strings.TrimSuffix(cleaned, ext), ". ")
 	cleaned = stem + ext
-	if stem == "" || len(cleaned) > maxNameBytes {
+	if stem == "" {
 		return "", errBadName
+	}
+	if len(cleaned) > maxNameBytes {
+		digest := sha256.Sum256([]byte(cleaned))
+		suffix := fmt.Sprintf("-%x", digest[:4])
+		for len(stem)+len(suffix)+len(ext) > maxNameBytes {
+			_, size := utf8.DecodeLastRuneInString(stem)
+			stem = stem[:len(stem)-size]
+		}
+		cleaned = strings.TrimRight(stem, ". ") + suffix + ext
 	}
 	return cleaned, nil
 }

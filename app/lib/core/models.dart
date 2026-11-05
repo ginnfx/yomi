@@ -22,6 +22,8 @@ class Song {
     this.track,
     this.isStarred = false,
     this.genre,
+    this.playCount = 0,
+    this.addedAt,
   });
 
   /// Untagged files arrive with the file name as the title and no artist. Files named
@@ -56,6 +58,8 @@ class Song {
         track: (json['track'] as num?)?.toInt(),
         isStarred: json['starred'] != null,
         genre: (json['genre'] as String?)?.trim(),
+        playCount: (json['playCount'] as num?)?.toInt() ?? 0,
+        addedAt: DateTime.tryParse(json['created']?.toString() ?? ''),
       );
 
   final String id;
@@ -70,6 +74,12 @@ class Song {
 
   final String? genre;
 
+  /// How many times the server has counted this as played, across all devices.
+  final int playCount;
+
+  /// When the song joined the library, if the server said.
+  final DateTime? addedAt;
+
   Duration get duration => Duration(seconds: durationSeconds);
 
   Map<String, Object?> toJson() => {
@@ -83,6 +93,8 @@ class Song {
     'track': track,
     'starred': isStarred ? 'yes' : null,
     'genre': genre,
+    'playCount': playCount,
+    'created': addedAt?.toIso8601String(),
   };
 
   Song copyWith({bool? isStarred}) => Song(
@@ -96,6 +108,8 @@ class Song {
     track: track,
     isStarred: isStarred ?? this.isStarred,
     genre: genre,
+    playCount: playCount,
+    addedAt: addedAt,
   );
 }
 
@@ -178,6 +192,15 @@ class Playlist {
   final int durationSeconds;
   final String? owner;
   final String? coverArtId;
+
+  Map<String, Object?> toJson() => {
+    'id': id,
+    'name': name,
+    'songCount': songCount,
+    'duration': durationSeconds,
+    'owner': owner,
+    'coverArt': coverArtId,
+  };
 }
 
 @immutable

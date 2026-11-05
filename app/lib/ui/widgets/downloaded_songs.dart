@@ -2,6 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/format.dart';
+import '../../core/offline/audio_cache.dart';
+import '../../core/offline/audio_files.dart';
+import '../../state/catalog_controller.dart';
 import '../../state/download_manager.dart';
 import '../../state/player_controller.dart';
 import '../theme.dart';
@@ -20,9 +23,17 @@ class DownloadedSongs extends StatelessWidget {
   Widget build(BuildContext context) {
     final downloads = context.watch<DownloadManager>();
     final player = context.read<PlayerController>();
-    final songs = downloads.downloadedSongs
-        .where((s) => matchesQuery('${s.title} ${s.artist}', query))
-        .toList();
+    final downloaded = {for (final s in downloads.downloadedSongs) s.id};
+    final cachedFiles = context.read<AudioCache>().savedFiles();
+    final songs = [
+      ...downloads.downloadedSongs,
+      // Songs kept from listening play offline too, so they're listed with the rest.
+      ...context.watch<CatalogController>().songs.where(
+        (s) =>
+            !downloaded.contains(s.id) &&
+            cachedFiles.containsKey(safeFileId(s.id)),
+      ),
+    ].where((s) => matchesQuery('${s.title} ${s.artist}', query)).toList();
     if (songs.isEmpty) {
       return Center(
         child: Padding(
@@ -42,7 +53,7 @@ class DownloadedSongs extends StatelessWidget {
               ),
               const SizedBox(height: 6),
               Text(
-                'Use ••• on a song to download it.',
+                'Download with ••• on a song. Songs you play are saved here too.',
                 textAlign: TextAlign.center,
                 style: yomiText(
                   14,
@@ -98,6 +109,7 @@ class DownloadedSongs extends StatelessWidget {
         ),
         for (var i = 0; i < songs.length; i++)
           SongTile(
+            key: ValueKey(songs[i].id),
             song: songs[i],
             onTap: () => player.playQueue(songs, startIndex: i),
           ),

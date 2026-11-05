@@ -525,3 +525,23 @@ func TestGoodLoginsDoNotClearAttemptsAgainstTheAccount(t *testing.T) {
 		t.Fatalf("code = %d: polling reset the guess counter", code)
 	}
 }
+
+func TestBulkLongFilenameDoesNotStallQueue(t *testing.T) {
+	env := newBulkEnv(t)
+	content := id3File("Artist", "Album", strings.Repeat("audio", 100000))
+	name := "Monotonously Rings the Little Bell - " + strings.Repeat("Performer, ", 20) + ".mp3"
+	status, body := env.put(t, sum(content), name, content)
+	if status != http.StatusCreated {
+		t.Fatalf("long filename status %d: %v", status, body)
+	}
+	if len(filepath.Base(body["file"])) > maxNameBytes {
+		t.Fatal("stored name exceeds limit")
+	}
+	if _, err := os.Stat(filepath.Join(env.dir, body["file"])); err != nil {
+		t.Fatal(err)
+	}
+	next := id3File("Artist", "Album", "next track")
+	if status, _ := env.put(t, sum(next), "next.mp3", next); status != http.StatusCreated {
+		t.Fatalf("next upload status %d", status)
+	}
+}

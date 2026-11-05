@@ -3,8 +3,9 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../core/models.dart';
 
-const int _defaultCacheMb = 1024;
-const List<int> cacheLimitChoicesMb = [256, 512, 1024, 2048, 4096];
+const int _defaultStorageGb = 5;
+const int _maxRecentSearches = 8;
+const List<int> storageLimitChoicesGb = [2, 5, 10, 20];
 
 /// User preferences, saved on the device.
 class SettingsController extends ChangeNotifier {
@@ -25,18 +26,93 @@ class SettingsController extends ChangeNotifier {
   Future<void> setPrefersArtOverLyrics(bool value) =>
       _set(() => _prefs.setBool('prefersArtOverLyrics', value));
 
-  /// Save songs on repeat for offline play. Only ever fetches on Wi-Fi.
-  bool get autoDownloadRepeats => _prefs.getBool('autoDownloadRepeats') ?? true;
-  Future<void> setAutoDownloadRepeats(bool value) =>
-      _set(() => _prefs.setBool('autoDownloadRepeats', value));
+  /// How much Yomi may use by itself. Downloads you choose yourself don't count.
+  int get storageLimitGb =>
+      _prefs.getInt('storageLimitGb') ?? _defaultStorageGb;
+  int get storageLimitBytes => storageLimitGb * 1024 * 1024 * 1024;
+  Future<void> setStorageLimitGb(int value) =>
+      _set(() => _prefs.setInt('storageLimitGb', value));
+
+  /// Whether your playlists are saved for offline by themselves.
+  bool get keepPlaylistsOffline =>
+      _prefs.getBool('keepPlaylistsOffline') ?? true;
+  Future<void> setKeepPlaylistsOffline(bool value) =>
+      _set(() => _prefs.setBool('keepPlaylistsOffline', value));
+
+  /// A choice made for one playlist, or null to follow the default.
+  bool? playlistKeepChoice(String playlistId) =>
+      _prefs.getBool('keepPlaylist.$playlistId');
+  Future<void> setPlaylistKeepChoice(String playlistId, bool value) =>
+      _set(() => _prefs.setBool('keepPlaylist.$playlistId', value));
+
+  /// Artists and songs "show less like this" has ruled out of suggestions.
+  Set<String> get lessArtists =>
+      (_prefs.getStringList('lessArtists') ?? const <String>[]).toSet();
+  Set<String> get lessSongs =>
+      (_prefs.getStringList('lessSongs') ?? const <String>[]).toSet();
+  Future<void> addLessArtist(String artist) =>
+      _set(() => _prefs.setStringList('lessArtists', [...lessArtists, artist]));
+  Future<void> addLessSong(String songId) =>
+      _set(() => _prefs.setStringList('lessSongs', [...lessSongs, songId]));
+  Future<void> clearLess() => _set(() async {
+    await _prefs.remove('lessArtists');
+    await _prefs.remove('lessSongs');
+    return true;
+  });
+
+  /// What you searched for lately, newest first.
+  List<String> get recentSearches =>
+      _prefs.getStringList('recentSearches') ?? const [];
+  Future<void> addRecentSearch(String text) => _set(
+    () => _prefs.setStringList(
+      'recentSearches',
+      [
+        text,
+        ...recentSearches.where((other) => other != text),
+      ].take(_maxRecentSearches).toList(),
+    ),
+  );
+  Future<void> clearRecentSearches() =>
+      _set(() => _prefs.remove('recentSearches'));
+
+  /// Whether friends can see what you're playing, and you theirs. Off until you choose it.
+  bool get shareListening => _prefs.getBool('shareListening') ?? false;
+  Future<void> setShareListening(bool value) =>
+      _set(() => _prefs.setBool('shareListening', value));
+
+  /// Choices made for individual playlists, as a stable piece of text for comparing.
+  String get playlistKeepChoices =>
+      (_prefs
+              .getKeys()
+              .where((key) => key.startsWith('keepPlaylist.'))
+              .map((key) => '$key=${_prefs.getBool(key)}')
+              .toList()
+            ..sort())
+          .join(',');
+
+  /// Forgets what belongs to the person signing out. Device preferences such as Wi-Fi only
+  /// and the storage limit stay, because they're about this device.
+  Future<void> clearPersonal() => _set(() async {
+    final keys = _prefs.getKeys().where(
+      (key) =>
+          key.startsWith('keepPlaylist.') ||
+          const {
+            'shareListening',
+            'recentSearches',
+            'lessArtists',
+            'lessSongs',
+            'homeOrder',
+            'homeHidden',
+            'playlistOrder',
+          }.contains(key),
+    );
+    for (final key in keys.toList()) {
+      await _prefs.remove(key);
+    }
+    return true;
+  });
 
   bool get wifiOnlyDownloads => _prefs.getBool('wifiOnlyDownloads') ?? true;
-  bool get cachePlayedSongs => _prefs.getBool('cachePlayedSongs') ?? true;
-  Future<void> setCachePlayedSongs(bool value) =>
-      _set(() => _prefs.setBool('cachePlayedSongs', value));
-  bool get preloadNext => _prefs.getBool('preloadNext') ?? true;
-  int get cacheLimitMb => _prefs.getInt('cacheLimitMb') ?? _defaultCacheMb;
-  int get cacheLimitBytes => cacheLimitMb * 1024 * 1024;
 
   /// Home screen sections, in the order shown. Unknown or missing ids are repaired.
   static const homeSectionIds = [
@@ -49,6 +125,10 @@ class SettingsController extends ChangeNotifier {
     'timeOfDay',
     'recentlyAdded',
     'discover',
+    'artistsYouLove',
+    'newToYou',
+    'mood',
+    'pastYears',
   ];
 
   /// Set once the user arranges Home by hand; until then shelves rotate by themselves.
@@ -94,10 +174,6 @@ class SettingsController extends ChangeNotifier {
 
   Future<void> setWifiOnlyDownloads(bool value) =>
       _set(() => _prefs.setBool('wifiOnlyDownloads', value));
-  Future<void> setPreloadNext(bool value) =>
-      _set(() => _prefs.setBool('preloadNext', value));
-  Future<void> setCacheLimitMb(int value) =>
-      _set(() => _prefs.setInt('cacheLimitMb', value));
 
   Future<void> _set(Future<bool> Function() write) async {
     await write();

@@ -5,47 +5,105 @@ import 'package:flutter/material.dart';
 import 'error_view.dart';
 import 'shimmer.dart';
 
-/// Loads data once, shows a shimmering skeleton while waiting, and offers retry on failure.
+/// Shows data as soon as there is any, and refreshes it quietly.
+///
+/// A skeleton appears only when there is nothing to show yet, and an error only when
+/// loading failed with nothing to show. [initialData] appears on the first frame.
+/// Changing [reloadKey], or an update in [refreshOn], reloads in place.
 class AsyncSection<T> extends StatefulWidget {
   const AsyncSection({
     super.key,
     required this.load,
     required this.builder,
     this.skeleton = const SongListSkeleton(),
+    this.initialData,
+    this.reloadKey,
+    this.refreshOn,
+    this.refreshEndpoints = const {},
   });
 
   final Future<T> Function() load;
   final Widget Function(BuildContext context, T data) builder;
   final Widget skeleton;
+  final T? initialData;
+  final Object? reloadKey;
+
+  /// Announces which endpoints changed; reloads when one is in [refreshEndpoints].
+  final Stream<String>? refreshOn;
+  final Set<String> refreshEndpoints;
 
   @override
   State<AsyncSection<T>> createState() => _AsyncSectionState<T>();
 }
 
 class _AsyncSectionState<T> extends State<AsyncSection<T>> {
-  late Future<T> _future = _load();
+  T? _data;
+  bool _hasData = false;
+  Object? _error;
+  int _generation = 0;
+  StreamSubscription<String>? _updates;
 
-  Future<T> _load() =>
-      Future<T>.sync(widget.load).timeout(const Duration(seconds: 20));
+  @override
+  void initState() {
+    super.initState();
+    final initial = widget.initialData;
+    if (initial != null) {
+      _data = initial;
+      _hasData = true;
+    }
+    _updates = widget.refreshOn?.listen((endpoint) {
+      if (widget.refreshEndpoints.contains(endpoint)) unawaited(_load());
+    });
+    unawaited(_load());
+  }
 
-  void _retry() => setState(() {
-    _future = _load();
-  });
+  @override
+  void didUpdateWidget(AsyncSection<T> oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.reloadKey != widget.reloadKey) unawaited(_load());
+  }
+
+  @override
+  void dispose() {
+    _generation++;
+    unawaited(_updates?.cancel());
+    super.dispose();
+  }
+
+  Future<void> _load() async {
+    final generation = ++_generation;
+    try {
+      final data = await Future<T>.sync(widget.load)
+          .timeout(const Duration(seconds: 20));
+      if (!mounted || generation != _generation) return;
+      setState(() {
+        _data = data;
+        _hasData = true;
+        _error = null;
+      });
+    } on Object catch (error) {
+      if (!mounted || generation != _generation) return;
+      debugPrint('Could not refresh a section: $error');
+      if (!_hasData) setState(() => _error = error);
+    }
+  }
+
+  void _retry() {
+    setState(() => _error = null);
+    unawaited(_load());
+  }
 
   @override
   Widget build(BuildContext context) {
-    return FutureBuilder<T>(
-      future: _future,
-      builder: (context, snapshot) {
-        if (snapshot.connectionState != ConnectionState.done)
-          return widget.skeleton;
-        if (snapshot.hasError)
-          return ErrorView(error: snapshot.error!, onRetry: _retry);
-        return AnimatedSwitcher(
-          duration: const Duration(milliseconds: 250),
-          child: widget.builder(context, snapshot.data as T),
-        );
-      },
-    );
+    if (_hasData) {
+      return AnimatedSwitcher(
+        duration: const Duration(milliseconds: 250),
+        child: widget.builder(context, _data as T),
+      );
+    }
+    final error = _error;
+    return error == null
+        ? widget.skeleton
+        : ErrorView(error: error, onRetry: _retry);
   }
 }

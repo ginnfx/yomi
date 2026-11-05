@@ -87,6 +87,12 @@ class FakePlayer extends ChangeNotifier implements PlayerController {
   @override
   bool get isBuffering => false;
   @override
+  bool isAvailableNow(Song song) => true;
+  @override
+  bool get canSkipNext => true;
+  @override
+  int get userSkips => 0;
+  @override
   bool get isShuffled => false;
   @override
   LoopMode get loopMode => LoopMode.off;
@@ -110,6 +116,12 @@ class FakePlayer extends ChangeNotifier implements PlayerController {
 class FakeSession extends ChangeNotifier implements SessionController {
   @override
   String get username => 'demo';
+  @override
+  String get serverUrl => 'http://server';
+  @override
+  ActiveRoute get route => ActiveRoute.home;
+  @override
+  bool get hasHomeAddress => true;
   @override
   SubsonicClient get client =>
       SubsonicClient(baseUrl: 'http://server', username: 'u', password: 'p');

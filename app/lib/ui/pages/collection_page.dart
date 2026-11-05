@@ -1,21 +1,40 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/models.dart';
 import '../../state/download_manager.dart';
+import '../../state/offline_keeper.dart';
 import '../../state/player_controller.dart';
+import '../../state/playlist_covers_controller.dart';
 import '../../state/session.dart';
 import '../theme.dart';
+import '../widgets/send_to_sheet.dart';
 import '../widgets/cover_art.dart';
 import '../widgets/error_view.dart';
 import '../widgets/mini_player.dart';
+import '../widgets/playlist_recommendations.dart';
 import '../widgets/playlist_sheet.dart';
+import '../widgets/playlist_cover.dart';
 import '../widgets/shimmer.dart';
 import '../widgets/song_tile.dart';
 import '../widgets/tinted_background.dart';
+import 'reorder_page.dart';
 
 const double _heroCover = 230;
+
+/// What this page's songs are read from.
+const Set<String> _songEndpoints = {
+  'getAlbum',
+  'getArtist',
+  'getPlaylist',
+  'getStarred2',
+};
+
+/// An artist's page can refresh many albums at once, so these become one reload.
+const Duration _reloadDelay = Duration(milliseconds: 500);
 
 /// An album, a playlist, or Liked songs: coloured header, play controls, and the tracks.
 class CollectionPage extends StatefulWidget {
@@ -24,6 +43,7 @@ class CollectionPage extends StatefulWidget {
     required this.title,
     required this.subtitle,
     required this.loadSongs,
+    this.savedSongs,
     this.coverArtId,
     this.playlist,
   });
@@ -32,6 +52,9 @@ class CollectionPage extends StatefulWidget {
   final String subtitle;
   final String? coverArtId;
   final Future<List<Song>> Function() loadSongs;
+
+  /// What's already saved on this device, shown straight away while [loadSongs] runs.
+  final List<Song>? savedSongs;
 
   /// Set for editable playlists: enables swipe-to-remove, rename and delete.
   final Playlist? playlist;
@@ -42,9 +65,81 @@ class CollectionPage extends StatefulWidget {
 
 class _CollectionPageState extends State<CollectionPage> {
   late Future<List<Song>> _songs = widget.loadSongs();
+  late List<Song>? _lastSongs = widget.savedSongs;
   late String _title = widget.title;
 
+  StreamSubscription<String>? _updates;
+  Timer? _reloadTimer;
+
   void _reload() => setState(() => _songs = widget.loadSongs());
+
+  @override
+  void initState() {
+    super.initState();
+    // Opening this may show a saved list while a newer one is fetched. Show that when it
+    // arrives, rather than leaving the old list up until the page is opened again.
+    _updates = context.read<SessionController>().client.catalogUpdates.listen((
+      endpoint,
+    ) {
+      if (!_songEndpoints.contains(endpoint)) return;
+      _reloadTimer?.cancel();
+      _reloadTimer = Timer(_reloadDelay, () {
+        if (mounted) _reload();
+      });
+    });
+  }
+
+  @override
+  void dispose() {
+    _reloadTimer?.cancel();
+    unawaited(_updates?.cancel());
+    super.dispose();
+  }
+
+  Future<void> _changePicture() =>
+      pickPlaylistPicture(context, widget.playlist!.id);
+
+  Future<void> _changeOrder() async {
+    final messenger = ScaffoldMessenger.of(context);
+    final client = context.read<SessionController>().client;
+    final songs = await _songs;
+    if (!mounted || songs.length < 2) return;
+    final order = await reorderSongs(
+      context,
+      title: _title,
+      items: [
+        for (final song in songs)
+          ReorderItem(
+            title: song.title,
+            subtitle: song.artist,
+            coverArtId: song.coverArtId,
+          ),
+      ],
+    );
+    if (order == null) return;
+    try {
+      await client.replacePlaylistSongs(widget.playlist!.id, [
+        for (final i in order) songs[i].id,
+      ]);
+      if (mounted) _reload();
+    } on Exception catch (error) {
+      if (!mounted) return;
+      messenger.showSnackBar(
+        SnackBar(content: Text(describeFailure(context, error).title)),
+      );
+    }
+  }
+
+  Future<void> _removePicture() async {
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      await context.read<PlaylistCoversController>().removeCover(
+        widget.playlist!.id,
+      );
+    } on Object catch (error) {
+      messenger.showSnackBar(SnackBar(content: Text('$error')));
+    }
+  }
 
   Future<void> _rename() async {
     final client = context.read<SessionController>().client;
@@ -107,9 +202,35 @@ class _CollectionPageState extends State<CollectionPage> {
           actions: [
             if (widget.playlist != null)
               PopupMenuButton<String>(
-                onSelected: (value) =>
-                    value == 'rename' ? _rename() : _delete(),
-                itemBuilder: (_) => const [
+                onSelected: (value) => switch (value) {
+                  'picture' => _changePicture(),
+                  'order' => _changeOrder(),
+                  'removePicture' => _removePicture(),
+                  'rename' => _rename(),
+                  'send' => showSendTo(
+                    context,
+                    title: _title,
+                    playlistId: widget.playlist!.id,
+                  ),
+                  _ => _delete(),
+                },
+                itemBuilder: (_) => [
+                  const PopupMenuItem(
+                    value: 'picture',
+                    child: Text('Choose picture'),
+                  ),
+                  if (context.read<PlaylistCoversController>().hasCover(
+                    widget.playlist!.id,
+                  ))
+                    const PopupMenuItem(
+                      value: 'removePicture',
+                      child: Text('Remove picture'),
+                    ),
+                  const PopupMenuItem(
+                    value: 'order',
+                    child: Text('Change order'),
+                  ),
+                  const PopupMenuItem(value: 'send', child: Text('Send to…')),
                   PopupMenuItem(value: 'rename', child: Text('Rename')),
                   PopupMenuItem(
                     value: 'delete',
@@ -122,7 +243,10 @@ class _CollectionPageState extends State<CollectionPage> {
         body: FutureBuilder<List<Song>>(
           future: _songs,
           builder: (context, snapshot) {
-            final songs = snapshot.data ?? const <Song>[];
+            final loaded = snapshot.data;
+            if (loaded != null) _lastSongs = loaded;
+            final known = _lastSongs;
+            final songs = known ?? const <Song>[];
             final savedCount = downloads.downloadedCountOf(songs);
             final isFullySaved = songs.isNotEmpty && savedCount == songs.length;
             final isBusy = songs.any((s) {
@@ -133,15 +257,27 @@ class _CollectionPageState extends State<CollectionPage> {
             return ListView(
               children: [
                 Center(
-                  child: CoverArt(
-                    coverArtId:
-                        widget.coverArtId ??
-                        (songs.isEmpty ? null : songs.first.coverArtId),
-                    size: _heroCover,
-                    radius: 20,
-                    elevated: true,
-                    seed: _title,
-                  ),
+                  child: widget.playlist != null
+                      ? PlaylistCover(
+                          playlistId: widget.playlist!.id,
+                          onPick: _changePicture,
+                          coverArtId:
+                              widget.coverArtId ??
+                              (songs.isEmpty ? null : songs.first.coverArtId),
+                          size: _heroCover,
+                          radius: 20,
+                          elevated: true,
+                          seed: _title,
+                        )
+                      : CoverArt(
+                          coverArtId:
+                              widget.coverArtId ??
+                              (songs.isEmpty ? null : songs.first.coverArtId),
+                          size: _heroCover,
+                          radius: 20,
+                          elevated: true,
+                          seed: _title,
+                        ),
                 ),
                 Padding(
                   padding: const EdgeInsets.fromLTRB(
@@ -260,9 +396,12 @@ class _CollectionPageState extends State<CollectionPage> {
                     ],
                   ),
                 ),
-                if (snapshot.connectionState != ConnectionState.done)
+                if (widget.playlist != null)
+                  _KeepOffline(playlist: widget.playlist!),
+                if (known == null &&
+                    snapshot.connectionState != ConnectionState.done)
                   const SongListSkeleton(rows: 6),
-                if (snapshot.hasError)
+                if (known == null && snapshot.hasError)
                   ErrorView(error: snapshot.error!, onRetry: _reload),
                 if (snapshot.connectionState == ConnectionState.done &&
                     songs.isEmpty &&
@@ -305,9 +444,10 @@ class _CollectionPageState extends State<CollectionPage> {
                             ),
                           ),
                           onDismissed: (_) async {
-                            await client.removeFromPlaylist(
+                            await client.removeSongFromPlaylist(
                               widget.playlist!.id,
-                              [i],
+                              songs[i],
+                              i,
                             );
                             _reload();
                           },
@@ -316,12 +456,55 @@ class _CollectionPageState extends State<CollectionPage> {
                             onTap: () => player.playQueue(songs, startIndex: i),
                           ),
                         ),
+                if (widget.playlist != null)
+                  PlaylistRecommendations(
+                    key: ValueKey('recommended-${widget.playlist!.id}'),
+                    songs: songs,
+                    onAdd: (song) async {
+                      await client.addToPlaylist(widget.playlist!.id, [
+                        song.id,
+                      ]);
+                      _reload();
+                    },
+                  ),
                 const SizedBox(height: 32),
               ],
             );
           },
         ),
       ),
+    );
+  }
+}
+
+/// The switch for saving a playlist by itself, and how far along that is.
+class _KeepOffline extends StatelessWidget {
+  const _KeepOffline({required this.playlist});
+
+  final Playlist playlist;
+
+  @override
+  Widget build(BuildContext context) {
+    final keeper = context.watch<OfflineKeeper>();
+    final isKept = keeper.isKept(playlist);
+    final status = keeper.statusOf(playlist.id);
+    return SwitchListTile(
+      contentPadding: const EdgeInsets.symmetric(horizontal: kPagePadding),
+      title: Text('Keep offline', style: yomiText(15, weight: FontWeight.w700)),
+      subtitle: isKept && status != null
+          ? Text(
+              status.isLimited
+                  ? '${status.saved} of ${status.total} saved, storage limit reached'
+                  : '${status.saved} of ${status.total} saved',
+              style: yomiText(
+                12.5,
+                weight: FontWeight.w500,
+                color: YomiColors.textSecondary,
+              ),
+            )
+          : null,
+      value: isKept,
+      onChanged: (value) => keeper.setKept(playlist, value),
     );
   }
 }
@@ -402,6 +585,7 @@ void openPlaylist(BuildContext context, Playlist playlist) {
         coverArtId: playlist.coverArtId,
         playlist: playlist,
         loadSongs: () => client.playlistSongs(playlist.id),
+        savedSongs: client.cachedPlaylistSongs(playlist.id),
       ),
     ),
   );

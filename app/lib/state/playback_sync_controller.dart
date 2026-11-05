@@ -94,7 +94,12 @@ class PlaybackSyncController extends ChangeNotifier
     notifyListeners();
   }
 
-  List<Object?> _snapshot() => [player.queue, player.index, player.isPlaying];
+  List<Object?> _snapshot() => [
+    player.queue,
+    player.index,
+    player.isPlaying,
+    player.userSkips,
+  ];
   void _rememberPlayer() => _observed = _snapshot();
 
   void _onPlayer() {
@@ -102,7 +107,15 @@ class PlaybackSyncController extends ChangeNotifier
     final queueChanged = !identical(now[0], _observed.firstOrNull);
     final started =
         now[2] == true && (_observed.length < 3 || _observed[2] != true);
+    final didSkip = _observed.length > 3 && now[3] != _observed[3];
     _observed = now;
+    if (didSkip && enabled && _client != null) {
+      // Someone chose this on this device, so nothing from elsewhere may undo it, even
+      // if a change from another device is being applied right now.
+      _ownsPlayback = true;
+      _claim = true;
+      _remote = null;
+    }
     if (_applying || !enabled || _client == null || player.current == null) {
       return;
     }
@@ -201,7 +214,7 @@ class PlaybackSyncController extends ChangeNotifier
       // Stop the previous device when another client claims the account queue.
       // Restoring paused makes the next Play start at the shared position.
       await player.pause();
-      if (!_valid(epoch)) return;
+      if (!_valid(epoch) || _claim) return;
       await _restore(remote);
     } finally {
       _rememberPlayer();

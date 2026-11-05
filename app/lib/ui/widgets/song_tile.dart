@@ -12,6 +12,9 @@ import 'cover_art.dart';
 import 'download_badge.dart';
 import 'equalizer.dart';
 import 'playlist_sheet.dart';
+import 'send_to_sheet.dart';
+
+const double _unavailableOpacity = 0.4;
 
 class SongTile extends StatelessWidget {
   const SongTile({
@@ -43,108 +46,124 @@ class SongTile extends StatelessWidget {
     final progress = status == DownloadStatus.downloading
         ? context.select<DownloadManager, double>((d) => d.progressOf(song.id))
         : 0.0;
+    final isAvailable = context.select<PlayerController, bool>(
+      (p) => p.isAvailableNow(song),
+    );
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
-      child: Material(
-        color: isCurrent
-            ? context.accent.withValues(alpha: 0.10)
-            : Colors.transparent,
-        borderRadius: BorderRadius.circular(18),
-        child: InkWell(
+      child: Opacity(
+        opacity: isAvailable ? 1 : _unavailableOpacity,
+        child: Material(
+          color: isCurrent
+              ? context.accent.withValues(alpha: 0.10)
+              : Colors.transparent,
           borderRadius: BorderRadius.circular(18),
-          onTap: () {
-            HapticFeedback.selectionClick();
-            onTap();
-          },
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(10, 8, 4, 8),
-            child: Row(
-              children: [
-                if (leadingNumber != null)
-                  SizedBox(
-                    width: 40,
-                    child: Center(
-                      child: isCurrent
-                          ? EqualizerBars(isPlaying: isPlaying)
-                          : Text(
-                              '$leadingNumber',
-                              style: yomiText(
-                                15,
-                                weight: FontWeight.w600,
-                                color: YomiColors.textSecondary,
-                              ),
-                            ),
+          child: InkWell(
+            borderRadius: BorderRadius.circular(18),
+            onTap: () {
+              if (!isAvailable) {
+                ScaffoldMessenger.of(context)
+                  ..hideCurrentSnackBar()
+                  ..showSnackBar(
+                    const SnackBar(
+                      content: Text("This song isn't saved on this device"),
                     ),
-                  )
-                else
-                  CoverArt(
-                    coverArtId: song.coverArtId,
-                    artist: song.artist,
-                    album: song.album,
-                    title: song.title,
-                    size: 56,
-                    radius: 12,
-                    seed: song.album,
-                  ),
-                const SizedBox(width: 14),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        song.title,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: yomiText(
-                          16,
-                          weight: FontWeight.w700,
-                          color: isCurrent
-                              ? context.accent
-                              : YomiColors.textPrimary,
-                        ),
+                  );
+                return;
+              }
+              HapticFeedback.selectionClick();
+              onTap();
+            },
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(10, 8, 4, 8),
+              child: Row(
+                children: [
+                  if (leadingNumber != null)
+                    SizedBox(
+                      width: 40,
+                      child: Center(
+                        child: isCurrent
+                            ? EqualizerBars(isPlaying: isPlaying)
+                            : Text(
+                                '$leadingNumber',
+                                style: yomiText(
+                                  15,
+                                  weight: FontWeight.w600,
+                                  color: YomiColors.textSecondary,
+                                ),
+                              ),
                       ),
-                      const SizedBox(height: 3),
-                      Row(
-                        children: [
-                          if (status != DownloadStatus.none) ...[
-                            DownloadBadge(
-                              status: status,
-                              progress: progress,
-                              size: 14,
-                            ),
-                            const SizedBox(width: 5),
-                          ],
-                          Flexible(
-                            child: Text(
-                              '${song.artist} · ${formatDuration(song.duration)}',
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: yomiText(
-                                13,
-                                weight: FontWeight.w500,
-                                color: YomiColors.textSecondary,
+                    )
+                  else
+                    CoverArt(
+                      coverArtId: song.coverArtId,
+                      artist: song.artist,
+                      album: song.album,
+                      title: song.title,
+                      size: 56,
+                      radius: 12,
+                      seed: song.album,
+                    ),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          song.title,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: yomiText(
+                            16,
+                            weight: FontWeight.w700,
+                            color: isCurrent
+                                ? context.accent
+                                : YomiColors.textPrimary,
+                          ),
+                        ),
+                        const SizedBox(height: 3),
+                        Row(
+                          children: [
+                            if (status != DownloadStatus.none) ...[
+                              DownloadBadge(
+                                status: status,
+                                progress: progress,
+                                size: 14,
+                              ),
+                              const SizedBox(width: 5),
+                            ],
+                            Flexible(
+                              child: Text(
+                                '${song.artist} · ${formatDuration(song.duration)}',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: yomiText(
+                                  13,
+                                  weight: FontWeight.w500,
+                                  color: YomiColors.textSecondary,
+                                ),
                               ),
                             ),
-                          ),
-                        ],
-                      ),
-                    ],
+                          ],
+                        ),
+                      ],
+                    ),
                   ),
-                ),
-                if (isCurrent && leadingNumber == null)
-                  Padding(
-                    padding: const EdgeInsets.only(right: 6),
-                    child: EqualizerBars(isPlaying: isPlaying),
+                  if (isCurrent && leadingNumber == null)
+                    Padding(
+                      padding: const EdgeInsets.only(right: 6),
+                      child: EqualizerBars(isPlaying: isPlaying),
+                    ),
+                  IconButton(
+                    icon: const Icon(
+                      Icons.more_horiz_rounded,
+                      color: YomiColors.textSecondary,
+                    ),
+                    onPressed: () =>
+                        showSongMenu(context, song, extraActions: extraActions),
                   ),
-                IconButton(
-                  icon: const Icon(
-                    Icons.more_horiz_rounded,
-                    color: YomiColors.textSecondary,
-                  ),
-                  onPressed: () =>
-                      showSongMenu(context, song, extraActions: extraActions),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
         ),
@@ -194,6 +213,15 @@ Future<void> showSongMenu(
         player.addToQueue(song);
         tell('Added to queue');
       },
+    ),
+    SongAction(
+      icon: Icons.send_rounded,
+      label: 'Send to…',
+      onSelected: () => showSendTo(
+        context,
+        title: '${song.title} · ${song.artist}',
+        songId: song.id,
+      ),
     ),
     SongAction(
       icon: Icons.playlist_add_rounded,

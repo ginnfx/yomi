@@ -5,19 +5,28 @@ import 'package:provider/provider.dart';
 
 import '../../core/genres.dart';
 import '../../core/models.dart';
+import '../../core/song_sort.dart';
+import '../../core/taste.dart';
+import '../../core/spotify/imported_playlist.dart';
 import '../../core/subsonic_client.dart';
+import '../../state/catalog_controller.dart';
 import '../../state/connectivity_controller.dart';
+import '../../state/home_controller.dart';
+import '../../state/imports_controller.dart';
 import '../../state/player_controller.dart';
 import '../../state/settings.dart';
 import '../../state/session.dart';
-import '../../state/upload_queue.dart';
+import '../imports/imported_playlist_page.dart';
 import '../theme.dart';
 import '../widgets/async_section.dart';
 import '../widgets/cover_art.dart';
 import '../widgets/downloaded_songs.dart';
 import '../widgets/error_view.dart';
+import '../stats/spotify_import_page.dart';
 import '../widgets/genre_filter_bar.dart';
+import '../widgets/made_for_you.dart';
 import '../widgets/playlist_sheet.dart';
+import '../widgets/playlist_cover.dart';
 import '../widgets/shimmer.dart';
 import '../widgets/song_tile.dart';
 import 'collection_page.dart';
@@ -28,8 +37,11 @@ bool _matches(String text, String query) =>
 
 enum _Tab { playlists, songs, artists, downloaded }
 
-const int _pageSize = 100;
-const double _loadMoreThreshold = 600;
+enum _NewKind { empty, spotify }
+
+/// The most songs one tap queues. Playing the whole library at once would make every
+/// later queue change slow, and nobody hears 500 songs in a sitting.
+const int _maxQueueSize = 500;
 
 class LibraryPage extends StatefulWidget {
   const LibraryPage({super.key});
@@ -42,18 +54,7 @@ class _LibraryPageState extends State<LibraryPage> {
   late _Tab _tab = context.read<ConnectivityController>().isOffline
       ? _Tab.downloaded
       : _Tab.songs;
-  int _reloadKey = 0;
-  String? _serverUrl;
-
-  @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    final url = context.watch<SessionController>().serverUrl;
-    if (_serverUrl != url) {
-      _serverUrl = url;
-      _reloadKey++;
-    }
-  }
+  late final Set<_Tab> _visited = {_tab};
 
   bool _isSearching = false;
   String _query = '';
@@ -84,13 +85,26 @@ class _LibraryPageState extends State<LibraryPage> {
     });
   }
 
+  void _startNew(_NewKind kind) {
+    switch (kind) {
+      case _NewKind.empty:
+        unawaited(_newPlaylist());
+      case _NewKind.spotify:
+        unawaited(
+          Navigator.of(context).push(
+            MaterialPageRoute<void>(builder: (_) => const SpotifyImportPage()),
+          ),
+        );
+    }
+  }
+
   Future<void> _newPlaylist() async {
     final session = context.read<SessionController>();
     final name = await promptForName(context);
     if (name == null || name.isEmpty) return;
     try {
       await session.client.createPlaylist(name);
-      if (mounted) setState(() => _reloadKey++);
+      await session.client.refreshPlaylists();
     } on Exception catch (error) {
       if (mounted)
         ScaffoldMessenger.of(context).showSnackBar(
@@ -128,10 +142,27 @@ class _LibraryPageState extends State<LibraryPage> {
                   tooltip: 'Search library',
                   onPressed: _toggleSearch,
                 ),
-                IconButton(
+                PopupMenuButton<_NewKind>(
                   icon: const Icon(Icons.add_rounded, size: 30),
                   tooltip: 'New playlist',
-                  onPressed: _newPlaylist,
+                  onSelected: _startNew,
+                  itemBuilder: (context) => [
+                    const PopupMenuItem(
+                      value: _NewKind.empty,
+                      child: ListTile(
+                        leading: Icon(Icons.playlist_add_rounded),
+                        title: Text('New playlist'),
+                      ),
+                    ),
+                    const PopupMenuItem(
+                      value: _NewKind.spotify,
+                      child: ListTile(
+                        leading: Icon(Icons.download_rounded),
+                        title: Text('Import from Spotify'),
+                        subtitle: Text('Link or export file, same order'),
+                      ),
+                    ),
+                  ],
                 ),
                 IconButton(
                   icon: const Icon(Icons.tune_rounded),
@@ -184,7 +215,7 @@ class _LibraryPageState extends State<LibraryPage> {
                         _Tab.playlists => 'Playlists',
                         _Tab.songs => 'Songs',
                         _Tab.artists => 'Artists',
-                        _Tab.downloaded => 'Downloaded',
+                        _Tab.downloaded => 'On this device',
                       }),
                       selected: _tab == tab,
                       showCheckmark: false,
@@ -205,7 +236,10 @@ class _LibraryPageState extends State<LibraryPage> {
                             ? Colors.black
                             : YomiColors.textPrimary,
                       ),
-                      onSelected: (_) => setState(() => _tab = tab),
+                      onSelected: (_) => setState(() {
+                        _tab = tab;
+                        _visited.add(tab);
+                      }),
                     ),
                   ),
               ],
@@ -213,60 +247,75 @@ class _LibraryPageState extends State<LibraryPage> {
           ),
           const SizedBox(height: 6),
           Expanded(
-            child: AnimatedSwitcher(
-              duration: const Duration(milliseconds: 220),
-              child: KeyedSubtree(
-                key: ValueKey('$_tab-$_reloadKey-$_query'),
-                child: switch (_tab) {
-                  _Tab.playlists => _PlaylistsTab(
-                    client: client,
-                    query: _query,
+            // Each tab stays alive once opened, keeping its list and scroll position.
+            child: _query.isEmpty
+                ? IndexedStack(
+                    index: _tab.index,
+                    children: [
+                      for (final tab in _Tab.values)
+                        _visited.contains(tab)
+                            ? _body(tab, client)
+                            : const SizedBox.shrink(),
+                    ],
+                  )
+                : KeyedSubtree(
+                    key: ValueKey('$_tab-$_query'),
+                    child: _body(_tab, client),
                   ),
-                  _Tab.songs =>
-                    _query.isEmpty
-                        ? const _SongsTab()
-                        : _SongSearch(query: _query),
-                  _Tab.artists => AsyncSection<List<Artist>>(
-                    load: client.artists,
-                    builder: (context, all) {
-                      final artists = all
-                          .where((a) => _matches(a.name, _query))
-                          .toList();
-                      return ListView.builder(
-                        itemCount: artists.length,
-                        itemBuilder: (context, i) => ListTile(
-                          contentPadding: const EdgeInsets.symmetric(
-                            horizontal: kPagePadding,
-                            vertical: 4,
-                          ),
-                          leading: ArtistAvatar(
-                            artistId: artists[i].id,
-                            name: artists[i].name,
-                            size: 56,
-                          ),
-                          title: Text(
-                            artists[i].name,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: yomiText(16, weight: FontWeight.w700),
-                          ),
-                          onTap: () => openArtist(context, artists[i]),
-                        ),
-                      );
-                    },
-                  ),
-                  _Tab.downloaded => DownloadedSongs(query: _query),
-                },
-              ),
-            ),
           ),
         ],
       ),
     );
   }
+
+  Widget _body(_Tab tab, SubsonicClient client) => switch (tab) {
+    _Tab.playlists => _PlaylistsTab(client: client, query: _query),
+    _Tab.songs =>
+      _query.isEmpty ? const _SongsTab() : _SongSearch(query: _query),
+    _Tab.artists => AsyncSection<List<Artist>>(
+      initialData: client.cachedArtists,
+      reloadKey: client.baseUrl,
+      refreshOn: client.catalogUpdates,
+      refreshEndpoints: const {'getArtists'},
+      load: client.artists,
+      builder: (context, all) {
+        final artists = all.where((a) => _matches(a.name, _query)).toList();
+        return _pullToRefresh(
+          onRefresh: client.refreshArtists,
+          child: ListView.builder(
+            itemCount: artists.length,
+            itemBuilder: (context, i) => ListTile(
+              contentPadding: const EdgeInsets.symmetric(
+                horizontal: kPagePadding,
+                vertical: 4,
+              ),
+              leading: ArtistAvatar(
+                artistId: artists[i].id,
+                name: artists[i].name,
+                size: 56,
+              ),
+              title: Text(
+                artists[i].name,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: yomiText(16, weight: FontWeight.w700),
+              ),
+              onTap: () => openArtist(context, artists[i]),
+            ),
+          ),
+        );
+      },
+    ),
+    _Tab.downloaded => DownloadedSongs(query: _query),
+  };
 }
 
-/// Every song in the library, loaded 100 at a time as you scroll.
+Widget _pullToRefresh({
+  required Future<void> Function() onRefresh,
+  required Widget child,
+}) => RefreshIndicator(onRefresh: onRefresh, child: child);
+
+/// Every song in the library, read from the copy saved on this device.
 class _SongsTab extends StatefulWidget {
   const _SongsTab();
 
@@ -275,72 +324,47 @@ class _SongsTab extends StatefulWidget {
 }
 
 class _SongsTabState extends State<_SongsTab> {
-  final _scroll = ScrollController();
-  final List<Song> _songs = [];
   List<GenreGroup> _genres = const [];
   Set<String> _selectedGenres = const {};
-  GenrePager? _pager;
-  Object? _error;
-  bool _isLoading = false;
-  bool _isDone = false;
-  int _generation = 0;
-  int? _totalSongs;
-  bool _countLoading = false;
-  Timer? _countTimer;
-  UploadQueue? _uploads;
-  int _completedUploads = 0;
+  List<Song> _filterSource = const [];
+  Set<String> _filterSelection = const {};
+  List<Song> _filtered = const [];
+  SongSort _sort = SongSort.recentlyAdded;
+  bool _likedOnly = false;
+  bool _unplayedOnly = false;
+  List<Song>? _shown;
+  Object? _shownKey;
 
-  Future<void> _refreshCount() async {
-    if (!mounted || _countLoading) return;
-    _countLoading = true;
-    final client = context.read<SessionController>().client;
-    try {
-      final count = await client.songCount();
-      if (mounted && count != null) setState(() => _totalSongs = count);
-    } on Object {
-      /* Keep the last known total when offline. */
-    } finally {
-      _countLoading = false;
-    }
+  /// Filtered and sorted, worked out again only when something it depends on changes.
+  List<Song> _ordered(List<Song> base, TasteProfile taste) {
+    final key = (base, _sort, _likedOnly, _unplayedOnly, taste);
+    final shown = _shown;
+    if (shown != null && _sameKey(key, _shownKey)) return shown;
+    _shownKey = key;
+    return _shown = sortSongs(
+      filterSongs(base, likedOnly: _likedOnly, unplayedOnly: _unplayedOnly),
+      _sort,
+      taste: taste,
+    );
   }
 
-  void _onUploadsChanged() {
-    final completed = _uploads!.count(UploadState.done);
-    if (completed != _completedUploads) {
-      _completedUploads = completed;
-      unawaited(_refreshCount());
-    }
-  }
-
-  @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    final uploads = context.read<UploadQueue>();
-    if (!identical(uploads, _uploads)) {
-      _uploads?.removeListener(_onUploadsChanged);
-      _uploads = uploads;
-      _completedUploads = uploads.count(UploadState.done);
-      uploads.addListener(_onUploadsChanged);
-    }
-  }
+  static bool _sameKey(
+    (List<Song>, SongSort, bool, bool, TasteProfile) key,
+    Object? other,
+  ) =>
+      other is (List<Song>, SongSort, bool, bool, TasteProfile) &&
+      identical(key.$1, other.$1) &&
+      key.$2 == other.$2 &&
+      key.$3 == other.$3 &&
+      key.$4 == other.$4 &&
+      identical(key.$5, other.$5);
 
   @override
   void initState() {
     super.initState();
-    _scroll.addListener(_onScroll);
-    _loadMore();
-    _loadGenres();
-    final client = context.read<SessionController>().client;
-    client.cachedSongCount().then((count) {
-      if (mounted && _totalSongs == null && count != null) {
-        setState(() => _totalSongs = count);
-      }
-    });
-    unawaited(_refreshCount());
-    _countTimer = Timer.periodic(
-      const Duration(seconds: 5),
-      (_) => _refreshCount(),
-    );
+    unawaited(_loadGenres());
+    final catalog = context.read<CatalogController>();
+    if (!catalog.isLoaded) unawaited(catalog.sync());
   }
 
   Future<void> _loadGenres() async {
@@ -353,170 +377,147 @@ class _SongsTabState extends State<_SongsTab> {
     }
   }
 
-  void _setGenres(Set<String> selected) {
-    final client = context.read<SessionController>().client;
-    setState(() {
-      _selectedGenres = selected;
-      _pager = selected.isEmpty
-          ? null
-          : GenrePager(
-              client,
-              _genres.where((group) => selected.contains(group.name)),
-              pageSize: _pageSize,
-            );
-      _songs.clear();
-      _isDone = false;
-      _isLoading = false;
-      _error = null;
-      _generation++;
-    });
-    _loadMore();
-  }
-
-  @override
-  void dispose() {
-    _countTimer?.cancel();
-    _uploads?.removeListener(_onUploadsChanged);
-    _scroll.dispose();
-    super.dispose();
-  }
-
-  void _onScroll() {
-    if (_scroll.position.extentAfter < _loadMoreThreshold) _loadMore();
-  }
-
-  Future<void> _loadMore() async {
-    if (_isLoading || _isDone) return;
-    setState(() {
-      _isLoading = true;
-      _error = null;
-    });
-    final generation = _generation;
-    final pager = _pager;
-    try {
-      final page = pager != null
-          ? await pager.nextPage()
-          : await context.read<SessionController>().client.songs(
-              offset: _songs.length,
-              count: _pageSize,
-            );
-      // The filter changed while this page was on its way.
-      if (!mounted || generation != _generation) return;
-      setState(() {
-        _songs.addAll(page);
-        _isDone = pager != null ? pager.isDone : page.length < _pageSize;
-        _isLoading = false;
-      });
-    } on Object catch (error) {
-      if (!mounted || generation != _generation) return;
-      setState(() {
-        _error = error;
-        _isLoading = false;
-      });
+  /// Worked out again only when the songs or the chosen genres change.
+  List<Song> _songsFrom(List<Song> all) {
+    if (_selectedGenres.isEmpty) return all;
+    if (identical(all, _filterSource) &&
+        identical(_selectedGenres, _filterSelection)) {
+      return _filtered;
     }
+    final variants = {
+      for (final group in _genres)
+        if (_selectedGenres.contains(group.name)) ...group.variants,
+    };
+    _filterSource = all;
+    _filterSelection = _selectedGenres;
+    _filtered = List.unmodifiable(
+      all.where((song) => variants.contains(song.genre)),
+    );
+    return _filtered;
   }
+
+  /// A queue that starts at the tapped song, so a huge library stays quick to play.
+  void _playFrom(PlayerController player, List<Song> songs, int index) {
+    player.playQueue(songs.skip(index).take(_maxQueueSize).toList());
+  }
+
+  Future<void> _shuffle(PlayerController player, List<Song> songs) async {
+    await player.playQueue(
+      ([...songs]..shuffle()).take(_maxQueueSize).toList(),
+    );
+    if (!player.isShuffled) await player.toggleShuffle();
+  }
+
+  Widget _actions(PlayerController player, List<Song> songs) => Padding(
+    padding: const EdgeInsets.fromLTRB(kPagePadding, 4, kPagePadding, 10),
+    child: Row(
+      children: [
+        FilledButton.icon(
+          onPressed: songs.isEmpty ? null : () => _playFrom(player, songs, 0),
+          icon: const Icon(Icons.play_arrow_rounded),
+          label: const Text('Play'),
+        ),
+        const SizedBox(width: 10),
+        OutlinedButton.icon(
+          style: OutlinedButton.styleFrom(
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(28),
+            ),
+            side: const BorderSide(color: Colors.white24),
+          ),
+          onPressed: songs.isEmpty ? null : () => _shuffle(player, songs),
+          icon: const Icon(Icons.shuffle_rounded),
+          label: Text('Shuffle', style: yomiText(15, weight: FontWeight.w700)),
+        ),
+        const Spacer(),
+        PopupMenuButton<SongSort>(
+          tooltip: 'Sort songs',
+          initialValue: _sort,
+          onSelected: (sort) => setState(() => _sort = sort),
+          itemBuilder: (_) => [
+            for (final sort in SongSort.values)
+              PopupMenuItem(value: sort, child: Text(sort.label)),
+          ],
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.sort_rounded, size: 18),
+              const SizedBox(width: 4),
+              Text(_sort.label, style: yomiText(13, weight: FontWeight.w700)),
+            ],
+          ),
+        ),
+      ],
+    ),
+  );
+
+  Widget _quickFilters() => SizedBox(
+    height: 40,
+    child: ListView(
+      scrollDirection: Axis.horizontal,
+      padding: const EdgeInsets.symmetric(horizontal: kPagePadding),
+      children: [
+        FilterChip(
+          label: const Text('Liked'),
+          selected: _likedOnly,
+          onSelected: (on) => setState(() => _likedOnly = on),
+        ),
+        const SizedBox(width: 8),
+        FilterChip(
+          label: const Text('Not played yet'),
+          selected: _unplayedOnly,
+          onSelected: (on) => setState(() => _unplayedOnly = on),
+        ),
+      ],
+    ),
+  );
 
   @override
   Widget build(BuildContext context) {
     final player = context.read<PlayerController>();
-    if (_songs.isEmpty && _error != null)
-      return ListView(
-        children: [ErrorView(error: _error!, onRetry: _loadMore)],
-      );
-    if (_songs.isEmpty && _isLoading && _selectedGenres.isEmpty) {
-      return const SongListSkeleton(rows: 8);
+    final catalog = context.watch<CatalogController>();
+    final error = catalog.error;
+    if (!catalog.isLoaded) {
+      return error == null
+          ? const SongListSkeleton(rows: 8)
+          : ListView(
+              children: [ErrorView(error: error, onRetry: catalog.sync)],
+            );
     }
-    return ListView.builder(
-      controller: _scroll,
-      itemCount: _songs.length + 2,
-      itemBuilder: (context, i) {
-        if (i == 0) {
-          final actions = Padding(
-            padding: const EdgeInsets.fromLTRB(
-              kPagePadding,
-              4,
-              kPagePadding,
-              10,
-            ),
-            child: Row(
+    final songs = _ordered(
+      _songsFrom(catalog.songs),
+      context.watch<HomeController>().taste,
+    );
+    return _pullToRefresh(
+      onRefresh: () => catalog.sync(force: true),
+      child: ListView.builder(
+        itemCount: songs.length + 2,
+        itemBuilder: (context, i) {
+          if (i == 0) {
+            return Column(
               children: [
-                FilledButton.icon(
-                  onPressed: _songs.isEmpty
-                      ? null
-                      : () => player.playQueue(_songs),
-                  icon: const Icon(Icons.play_arrow_rounded),
-                  label: const Text('Play'),
+                _actions(player, songs),
+                _quickFilters(),
+                const SizedBox(height: 6),
+                GenreFilterBar(
+                  groups: _genres,
+                  selected: _selectedGenres,
+                  onChanged: (selected) =>
+                      setState(() => _selectedGenres = selected),
                 ),
-                const SizedBox(width: 10),
-                OutlinedButton.icon(
-                  style: OutlinedButton.styleFrom(
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(28),
-                    ),
-                    side: const BorderSide(color: Colors.white24),
-                  ),
-                  onPressed: _songs.isEmpty
-                      ? null
-                      : () async {
-                          await player.playQueue(_songs);
-                          if (!player.isShuffled) await player.toggleShuffle();
-                        },
-                  icon: const Icon(Icons.shuffle_rounded),
-                  label: Text(
-                    'Shuffle',
-                    style: yomiText(15, weight: FontWeight.w700),
-                  ),
-                ),
-                const Spacer(),
-                Text(
-                  _selectedGenres.isNotEmpty
-                      ? (_isDone
-                            ? '${_songs.length} songs'
-                            : '${_songs.length} loaded')
-                      : _totalSongs != null
-                      ? '$_totalSongs songs'
-                      : _isDone
-                      ? '${_songs.length} songs'
-                      : 'Counting…',
-                  style: yomiText(
-                    12.5,
-                    weight: FontWeight.w600,
-                    color: YomiColors.textSecondary,
-                  ),
-                ),
+                const SizedBox(height: YomiSpace.s),
               ],
-            ),
+            );
+          }
+          if (i == songs.length + 1) return const SizedBox(height: 8);
+          final song = songs[i - 1];
+          return SongTile(
+            key: ValueKey(song.id),
+            song: song,
+            onTap: () => _playFrom(player, songs, i - 1),
           );
-          return Column(
-            children: [
-              actions,
-              GenreFilterBar(
-                groups: _genres,
-                selected: _selectedGenres,
-                onChanged: _setGenres,
-              ),
-              const SizedBox(height: YomiSpace.s),
-            ],
-          );
-        }
-        if (i == _songs.length + 1) {
-          if (_error != null)
-            return ErrorView(error: _error!, onRetry: _loadMore);
-          return _isLoading
-              ? const Padding(
-                  padding: EdgeInsets.all(24),
-                  child: Center(
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  ),
-                )
-              : const SizedBox(height: 8);
-        }
-        final song = _songs[i - 1];
-        return SongTile(
-          song: song,
-          onTap: () => player.playQueue(_songs, startIndex: i - 1),
-        );
-      },
+        },
+      ),
     );
   }
 }
@@ -532,8 +533,20 @@ class _PlaylistsTab extends StatefulWidget {
 }
 
 class _PlaylistsTabState extends State<_PlaylistsTab> {
-  late final Future<List<Playlist>> _future = widget.client.playlists();
+  List<Playlist>? _source;
   List<Playlist>? _ordered;
+
+  /// The first cover among an imported playlist's songs that are in the library.
+  String? _firstCover(ImportedPlaylist playlist) {
+    final byId = {
+      for (final song in context.read<CatalogController>().songs) song.id: song,
+    };
+    for (final entry in playlist.entries) {
+      final cover = byId[entry.songId]?.coverArtId;
+      if (cover != null) return cover;
+    }
+    return null;
+  }
 
   void _reorder(int from, int to) {
     final list = [..._ordered!];
@@ -548,18 +561,22 @@ class _PlaylistsTabState extends State<_PlaylistsTab> {
   Widget build(BuildContext context) {
     final settings = context.read<SettingsController>();
     final client = widget.client;
-    return FutureBuilder<List<Playlist>>(
-      future: _future,
-      builder: (context, snapshot) {
-        if (snapshot.hasError)
-          return ListView(
-            children: [
-              ErrorView(error: snapshot.error!, onRetry: () => setState(() {})),
-            ],
-          );
-        final loaded = snapshot.data;
-        if (loaded == null) return const SongListSkeleton(rows: 6);
-        _ordered ??= settings.orderPlaylists(loaded);
+    return AsyncSection<List<Playlist>>(
+      initialData: client.cachedPlaylists,
+      reloadKey: client.baseUrl,
+      refreshOn: client.catalogUpdates,
+      refreshEndpoints: const {'getPlaylists'},
+      skeleton: const SongListSkeleton(rows: 6),
+      load: client.playlists,
+      builder: (context, loaded) {
+        if (!identical(loaded, _source)) {
+          _source = loaded;
+          _ordered = settings.orderPlaylists(loaded);
+        }
+        final imported = [
+          for (final playlist in context.watch<ImportsController>().playlists)
+            if (_matches(playlist.name, widget.query)) playlist,
+        ];
         final isFiltering = widget.query.isNotEmpty;
         final shown = [
           for (final p in _ordered!)
@@ -567,6 +584,33 @@ class _PlaylistsTabState extends State<_PlaylistsTab> {
         ];
         return ListView(
           children: [
+            if (widget.query.isEmpty) const MadeForYou(),
+            for (final playlist in imported)
+              ListTile(
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: kPagePadding,
+                  vertical: 4,
+                ),
+                leading: PlaylistCover(
+                  playlistId: playlist.id,
+                  coverArtId: _firstCover(playlist),
+                  size: 56,
+                  seed: playlist.name,
+                ),
+                title: Text(
+                  playlist.name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: yomiText(16, weight: FontWeight.w700),
+                ),
+                subtitle: Text('Playlist · ${playlist.entries.length} songs'),
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    builder: (_) =>
+                        ImportedPlaylistPage(playlistId: playlist.id),
+                  ),
+                ),
+              ),
             if (!isFiltering)
               ListTile(
                 contentPadding: const EdgeInsets.symmetric(
@@ -634,10 +678,10 @@ class _PlaylistsTabState extends State<_PlaylistsTab> {
                     horizontal: kPagePadding,
                     vertical: 4,
                   ),
-                  leading: CoverArt(
+                  leading: PlaylistCover(
+                    playlistId: playlist.id,
                     coverArtId: playlist.coverArtId,
                     size: 56,
-                    radius: 12,
                     seed: playlist.name,
                   ),
                   title: Text(
@@ -684,8 +728,14 @@ class _SongSearch extends StatelessWidget {
   Widget build(BuildContext context) {
     final client = context.read<SessionController>().client;
     final player = context.read<PlayerController>();
+    final catalog = context.read<CatalogController>();
     return AsyncSection<List<Song>>(
-      load: () async => (await client.search(query, count: 100)).songs,
+      initialData: catalog.isLoaded
+          ? catalog.searchIndex.search(query).songs
+          : null,
+      load: () async => catalog.isLoaded
+          ? catalog.searchIndex.search(query).songs
+          : (await client.search(query, count: 100)).songs,
       builder: (context, songs) {
         if (songs.isEmpty)
           return Center(

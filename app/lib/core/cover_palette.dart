@@ -1,6 +1,7 @@
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 
+import 'cover_crop.dart';
 import 'cover_sizes.dart';
 import 'subsonic_client.dart';
 
@@ -22,6 +23,7 @@ class CoverPalette {
         final provider = CachedNetworkImageProvider(
           client.coverArtUri(coverArtId, size: smallCoverPx).toString(),
           cacheKey: coverCacheKey(coverArtId, smallCoverPx),
+          cacheManager: coverCacheManager,
         );
         final scheme = await ColorScheme.fromImageProvider(
           provider: provider,

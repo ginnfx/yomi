@@ -1,21 +1,24 @@
 import 'dart:async';
 
-import 'package:shared_preferences/shared_preferences.dart';
-
 import 'dart:convert';
 import 'dart:math';
 
 import 'package:crypto/crypto.dart';
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
+import 'catalog_cache.dart';
 import 'lyrics.dart';
 import 'models.dart';
+import 'offline/outbox.dart';
 import 'saved_play_queue.dart';
 
 const String _apiVersion = '1.16.1';
 const String _clientName = 'Yomi';
 const int _saltLength = 10;
 const Duration _requestTimeout = Duration(seconds: 20);
+const Duration _scanTimeout = Duration(seconds: 8);
+const Duration _catalogPageTimeout = Duration(seconds: 60);
 
 enum ErrorKind {
   unreachable,
@@ -43,6 +46,17 @@ class SubsonicException implements Exception {
   String toString() => message;
 }
 
+@immutable
+class ScanStatus {
+  const ScanStatus({required this.isScanning, this.lastScan, this.count});
+
+  final bool isScanning;
+
+  /// When the last scan finished; changes whenever the library may have changed.
+  final String? lastScan;
+  final int? count;
+}
+
 /// Thin client for the Subsonic/OpenSubsonic API that Navidrome serves.
 class SubsonicClient {
   SubsonicClient({
@@ -50,11 +64,13 @@ class SubsonicClient {
     required this.username,
     required String password,
     http.Client? httpClient,
-    bool? cacheEnabled,
+    CatalogCache? cache,
+    Outbox? outbox,
     String Function()? saltGenerator,
     bool Function()? isReadOnly,
   }) : baseUrl = baseUrl.replaceAll(RegExp(r'/+$'), ''),
-       _cacheEnabled = cacheEnabled ?? httpClient == null,
+       _cache = cache,
+       _outbox = outbox,
        _password = password,
        _http = httpClient ?? http.Client(),
        _newSalt = saltGenerator ?? _randomSalt,
@@ -63,7 +79,8 @@ class SubsonicClient {
   final String baseUrl;
   final String username;
   final String _password;
-  final bool _cacheEnabled;
+  final CatalogCache? _cache;
+  final Outbox? _outbox;
   final http.Client _http;
   final String Function() _newSalt;
   final bool Function() _isReadOnly;
@@ -83,23 +100,34 @@ class SubsonicClient {
     }
   }
 
+  /// Sends a change to the server, then updates only the saved data it affects.
+  /// [clears] lists the endpoints whose saved data is now wrong. [refreshesAll] keeps
+  /// everything on screen but re-checks it on the next read, for changes such as a star
+  /// that appear inside many saved responses.
   Future<Map<String, dynamic>> _write(
     String endpoint, [
     Map<String, Object?> params = const {},
+    Set<String> clears = const {},
+    bool refreshesAll = false,
   ]) async {
     _requireWritable();
-    final result = await _get(endpoint, params);
-    if (_cacheEnabled) {
-      final account = sha256.convert(
-        utf8.encode('$baseUrl|$username|$_password'),
-      );
-      try {
-        await (await SharedPreferences.getInstance()).remove(
-          'catalog_v1_$account',
-        );
-      } on Object {
-        /* The write succeeded even if cache storage is unavailable. */
+    final Map<String, dynamic> result;
+    try {
+      result = await _get(endpoint, params);
+    } on SubsonicException catch (error) {
+      final outbox = _outbox;
+      if (error.kind != ErrorKind.unreachable ||
+          outbox == null ||
+          !_waitableEndpoints.contains(endpoint)) {
+        rethrow;
       }
+      await outbox.add(OutboxItem(endpoint, params));
+      return const {};
+    }
+    final cache = _cache;
+    if (cache != null) {
+      if (clears.isNotEmpty) cache.remove(clears);
+      if (refreshesAll) cache.markAllStale();
     }
     return result;
   }
@@ -151,10 +179,57 @@ class SubsonicClient {
     );
   }
 
+  static const Set<String> _playlistEndpoints = {'getPlaylists', 'getPlaylist'};
+
+  /// Changes that can safely wait until the server is back. A scan can't: it's only
+  /// useful now.
+  static const Set<String> _waitableEndpoints = {
+    'star',
+    'unstar',
+    'createPlaylist',
+    'updatePlaylist',
+    'deletePlaylist',
+  };
+
+  /// A saved action that isn't a single server call: removing a song once the server's
+  /// current list can be checked, so it can't remove the wrong one.
+  static const String _removeSongAction = 'removeSongFromPlaylist';
+
+  /// Sends changes made while the server couldn't be reached, in the order they were
+  /// made. Stops if it drops again. A change the server refuses can never succeed, so it's
+  /// dropped rather than blocking everything after it.
+  Future<void> flushOutbox() async {
+    final outbox = _outbox;
+    if (outbox == null) return;
+    await outbox.load();
+    while (outbox.items.isNotEmpty) {
+      final item = outbox.items.first;
+      try {
+        await _send(item);
+      } on SubsonicException catch (error) {
+        if (error.kind == ErrorKind.unreachable) return;
+        debugPrint('Dropping a saved change the server refused: $error');
+      }
+      await outbox.removeFirst();
+    }
+  }
+
+  Future<void> _send(OutboxItem item) async {
+    if (item.endpoint == _removeSongAction) {
+      await _removeSong(
+        item.params['playlistId'] as String,
+        item.params['songId'] as String,
+        (item.params['index'] as num).toInt(),
+      );
+      return;
+    }
+    await _get(item.endpoint, item.params);
+    _cache?.markAllStale();
+  }
+
   final Map<String, Future<Map<String, dynamic>>> _pendingReads = {};
   static const _cachedEndpoints = {
     'getSong',
-    'getRandomSongs',
     'getAlbumList2',
     'getAlbum',
     'getArtists',
@@ -173,64 +248,69 @@ class SubsonicClient {
     Duration? timeout,
     bool post = false,
   ]) async {
-    if (!_cacheEnabled || post || !_cachedEndpoints.contains(endpoint)) {
+    final cache = _cache;
+    if (cache == null || post || !_cachedEndpoints.contains(endpoint)) {
       return _fetch(endpoint, params, timeout, post);
     }
-    final account = sha256.convert(
-      utf8.encode('$baseUrl|$username|$_password'),
-    );
-    final key = 'catalog_v1_$account';
-    final query = jsonEncode([endpoint, params]);
-    final SharedPreferences prefs;
-    try {
-      prefs = await SharedPreferences.getInstance();
-    } on Object {
-      return _fetch(endpoint, params, timeout, post);
-    }
-    Map<String, dynamic> readCache() {
-      try {
-        return Map<String, dynamic>.from(
-          jsonDecode(prefs.getString(key) ?? '{}') as Map,
-        );
-      } on Object {
-        return {};
-      }
-    }
-
-    final cached = readCache()[query];
+    await cache.load();
     Future<Map<String, dynamic>> refresh() =>
-        _pendingReads.putIfAbsent(query, () async {
+        _pendingReads.putIfAbsent(jsonEncode([endpoint, params]), () async {
           try {
-            final result = await _fetch(
-              endpoint,
-              params,
-              timeout ?? const Duration(seconds: 5),
-              post,
-            );
-            final entries = readCache()..remove(query);
-            entries[query] = {
-              'at': DateTime.now().millisecondsSinceEpoch,
-              'data': result,
-            };
-            while (entries.length > 64) {
-              entries.remove(entries.keys.first);
-            }
-            await prefs.setString(key, jsonEncode(entries));
+            final result = await _fetch(endpoint, params, timeout, post);
+            cache.put(endpoint, params, result);
             return result;
           } finally {
-            _pendingReads.remove(query);
+            _pendingReads.remove(jsonEncode([endpoint, params]));
           }
         });
-    if (cached is Map && cached['data'] is Map) {
-      final age =
-          DateTime.now().millisecondsSinceEpoch - (cached['at'] as int? ?? 0);
-      if (age > const Duration(minutes: 5).inMilliseconds) {
-        unawaited(refresh().then<void>((_) {}, onError: (Object _) {}));
-      }
-      return Map<String, dynamic>.from(cached['data'] as Map);
+    final saved = cache.peek(endpoint, params);
+    if (saved == null) return refresh();
+    if (!saved.isFresh) {
+      unawaited(refresh().then<void>((_) {}, onError: (Object _) {}));
     }
-    return refresh();
+    return saved.data;
   }
+
+  /// Removes [song], checking the server's current list first, because the list on screen
+  /// may be out of date and a wrong position would remove a different song.
+  Future<void> removeSongFromPlaylist(
+    String playlistId,
+    Song song,
+    int shownIndex,
+  ) async {
+    try {
+      await _removeSong(playlistId, song.id, shownIndex);
+    } on SubsonicException catch (error) {
+      final outbox = _outbox;
+      if (error.kind != ErrorKind.unreachable || outbox == null) rethrow;
+      await outbox.add(
+        OutboxItem(_removeSongAction, {
+          'playlistId': playlistId,
+          'songId': song.id,
+          'index': shownIndex,
+        }),
+      );
+    }
+  }
+
+  Future<void> _removeSong(String playlistId, String songId, int index) async {
+    final current = await freshPlaylistSongs(playlistId);
+    final isStillThere = index < current.length && current[index].id == songId;
+    final at = isStillThere
+        ? index
+        : current.indexWhere((entry) => entry.id == songId);
+    if (at >= 0) await removeFromPlaylist(playlistId, [at]);
+  }
+
+  /// A saved response, available straight away, or null if there isn't one yet.
+  Map<String, dynamic>? _peek(
+    String endpoint, [
+    Map<String, Object?> params = const {},
+  ]) => _cache?.peek(endpoint, params)?.data;
+
+  /// Fires when saved data for an endpoint changes, so screens can show the new version.
+  Stream<String> get catalogUpdates =>
+      _cache?.updates ?? const Stream<String>.empty();
 
   Future<Map<String, dynamic>> _fetch(
     String endpoint, [
@@ -434,14 +514,22 @@ class SubsonicClient {
     if (time != null) 'time': '${time.millisecondsSinceEpoch}',
   });
 
-  Future<List<Artist>> artists() async {
-    final body = await _get('getArtists');
-    final indexes = jsonList(body['artists'] as Map<String, dynamic>?, 'index');
-    return [
-      for (final index in indexes)
-        ...jsonList(index, 'artist').map(Artist.fromJson),
-    ];
+  Future<List<Artist>> artists() async =>
+      _parseArtists(await _get('getArtists'));
+
+  /// The saved artists, without waiting, or null if there are none yet.
+  List<Artist>? get cachedArtists {
+    final body = _peek('getArtists');
+    return body == null ? null : _parseArtists(body);
   }
+
+  static List<Artist> _parseArtists(Map<String, dynamic> body) => [
+    for (final index in jsonList(
+      body['artists'] as Map<String, dynamic>?,
+      'index',
+    ))
+      ...jsonList(index, 'artist').map(Artist.fromJson),
+  ];
 
   Future<List<Album>> artistAlbums(String artistId) async {
     final body = await _get('getArtist', {'id': artistId});
@@ -451,49 +539,92 @@ class SubsonicClient {
     ).map(Album.fromJson).toList(growable: false);
   }
 
-  Future<List<Song>> albumSongs(String albumId) async {
-    final body = await _get('getAlbum', {'id': albumId});
-    return jsonList(
-      body['album'] as Map<String, dynamic>?,
-      'song',
-    ).map(Song.fromJson).toList(growable: false);
+  Future<List<Song>> albumSongs(String albumId) async =>
+      _parseAlbumSongs(await _get('getAlbum', {'id': albumId}));
+
+  /// The saved songs of an album, without waiting, or null if there are none yet.
+  List<Song>? cachedAlbumSongs(String albumId) {
+    final body = _peek('getAlbum', {'id': albumId});
+    return body == null ? null : _parseAlbumSongs(body);
   }
 
-  Future<List<Playlist>> playlists() async {
-    final body = await _get('getPlaylists');
-    return jsonList(
-      body['playlists'] as Map<String, dynamic>?,
-      'playlist',
-    ).map(Playlist.fromJson).toList(growable: false);
+  static List<Song> _parseAlbumSongs(Map<String, dynamic> body) => jsonList(
+    body['album'] as Map<String, dynamic>?,
+    'song',
+  ).map(Song.fromJson).toList(growable: false);
+
+  Future<List<Playlist>> playlists() async =>
+      _parsePlaylists(await _get('getPlaylists'));
+
+  /// Asks the server again, ignoring saved data. Screens hear through [catalogUpdates].
+  Future<void> refreshPlaylists() async {
+    _cache?.remove(_playlistEndpoints);
+    await playlists();
   }
 
-  Future<List<Song>> playlistSongs(String playlistId) async {
-    final body = await _get('getPlaylist', {'id': playlistId});
-    return jsonList(
-      body['playlist'] as Map<String, dynamic>?,
-      'entry',
-    ).map(Song.fromJson).toList(growable: false);
+  Future<void> refreshArtists() async {
+    _cache?.remove(const {'getArtists'});
+    await artists();
   }
+
+  /// The saved playlists, without waiting, or null if there are none yet.
+  List<Playlist>? get cachedPlaylists {
+    final body = _peek('getPlaylists');
+    return body == null ? null : _parsePlaylists(body);
+  }
+
+  static List<Playlist> _parsePlaylists(Map<String, dynamic> body) => jsonList(
+    body['playlists'] as Map<String, dynamic>?,
+    'playlist',
+  ).map(Playlist.fromJson).toList(growable: false);
+
+  Future<List<Song>> playlistSongs(String playlistId) async =>
+      _parsePlaylistSongs(await _get('getPlaylist', {'id': playlistId}));
+
+  /// The saved songs of a playlist, without waiting, or null if there are none yet.
+  List<Song>? cachedPlaylistSongs(String playlistId) {
+    final body = _peek('getPlaylist', {'id': playlistId});
+    return body == null ? null : _parsePlaylistSongs(body);
+  }
+
+  static List<Song> _parsePlaylistSongs(Map<String, dynamic> body) => jsonList(
+    body['playlist'] as Map<String, dynamic>?,
+    'entry',
+  ).map(Song.fromJson).toList(growable: false);
 
   Future<void> createPlaylist(String name, {List<String> songIds = const []}) =>
-      _write('createPlaylist', {'name': name, 'songId': songIds});
+      _write('createPlaylist', {
+        'name': name,
+        'songId': songIds,
+      }, _playlistEndpoints);
+
+  /// Replaces a playlist's songs with [songIds], in that order.
+  Future<void> replacePlaylistSongs(String playlistId, List<String> songIds) =>
+      _write('createPlaylist', {
+        'playlistId': playlistId,
+        'songId': songIds,
+      }, _playlistEndpoints);
 
   Future<void> addToPlaylist(String playlistId, List<String> songIds) => _write(
     'updatePlaylist',
     {'playlistId': playlistId, 'songIdToAdd': songIds},
+    _playlistEndpoints,
   );
 
   Future<void> removeFromPlaylist(String playlistId, List<int> indexes) =>
       _write('updatePlaylist', {
         'playlistId': playlistId,
         'songIndexToRemove': indexes,
-      });
+      }, _playlistEndpoints);
 
-  Future<void> renamePlaylist(String playlistId, String name) =>
-      _write('updatePlaylist', {'playlistId': playlistId, 'name': name});
+  Future<void> renamePlaylist(String playlistId, String name) => _write(
+    'updatePlaylist',
+    {'playlistId': playlistId, 'name': name},
+    _playlistEndpoints,
+  );
 
   Future<void> deletePlaylist(String playlistId) =>
-      _write('deletePlaylist', {'id': playlistId});
+      _write('deletePlaylist', {'id': playlistId}, _playlistEndpoints);
 
   Future<List<Song>> starredSongs() async {
     final body = await _get('getStarred2');
@@ -503,9 +634,11 @@ class SubsonicClient {
     ).map(Song.fromJson).toList(growable: false);
   }
 
-  Future<void> star(String songId) => _write('star', {'id': songId});
+  Future<void> star(String songId) =>
+      _write('star', {'id': songId}, const {}, true);
 
-  Future<void> unstar(String songId) => _write('unstar', {'id': songId});
+  Future<void> unstar(String songId) =>
+      _write('unstar', {'id': songId}, const {}, true);
 
   /// OpenSubsonic lyrics stored with the song; null when there are none.
   Future<Lyrics?> lyricsFor(String songId) async {
@@ -565,15 +698,15 @@ class SubsonicClient {
     );
   }
 
-  String get _countCacheKey =>
-      'song_count_${sha256.convert(utf8.encode('$baseUrl|$username'))}';
+  /// The last known total, read without any network call.
+  int? get cachedSongCount => _countFrom(_peek(_scanStatusKey));
 
-  Future<int?> cachedSongCount() async {
-    try {
-      return (await SharedPreferences.getInstance()).getInt(_countCacheKey);
-    } on Object {
-      return null;
-    }
+  static const String _scanStatusKey = 'scanStatus';
+
+  static int? _countFrom(Map<String, dynamic>? body) {
+    final scan = body?['scanStatus'];
+    final count = scan is Map ? (scan['count'] as num?)?.toInt() : null;
+    return count != null && count >= 0 ? count : null;
   }
 
   Future<int?> songCount() async {
@@ -582,23 +715,58 @@ class SubsonicClient {
       const {},
       const Duration(seconds: 5),
     );
-    final scan = body['scanStatus'];
-    final count = scan is Map ? (scan['count'] as num?)?.toInt() : null;
-    if (count != null && count >= 0) {
-      try {
-        await (await SharedPreferences.getInstance()).setInt(
-          _countCacheKey,
-          count,
-        );
-      } on Object {
-        /* A count still works without disk caching. */
-      }
-      return count;
-    }
-    return null;
+    final count = _countFrom(body);
+    if (count != null) _cache?.put(_scanStatusKey, const {}, body);
+    return count;
   }
 
-  Future<void> startScan() => _write('startScan');
+  /// What the server says about its library right now, never from saved data.
+  Future<ScanStatus> scanStatus() async {
+    final body = await _fetch('getScanStatus', const {}, _scanTimeout);
+    _cache?.put(_scanStatusKey, const {}, body);
+    final scan = body['scanStatus'];
+    return scan is Map
+        ? ScanStatus(
+            isScanning: scan['scanning'] == true,
+            lastScan: scan['lastScan']?.toString(),
+            count: _countFrom(body),
+          )
+        : const ScanStatus(isScanning: false);
+  }
+
+  /// A page of the whole library straight from the server, for building the local copy.
+  Future<List<Song>> freshSongs({
+    required int offset,
+    required int count,
+  }) async {
+    final body = await _fetch('search3', {
+      'query': '',
+      'artistCount': 0,
+      'albumCount': 0,
+      'songCount': count,
+      'songOffset': offset,
+    }, _catalogPageTimeout);
+    return jsonList(
+      body['searchResult3'] as Map<String, dynamic>?,
+      'song',
+    ).map(Song.fromJson).toList(growable: false);
+  }
+
+  /// A playlist as the server has it right now, for edits that go by position.
+  Future<List<Song>> freshPlaylistSongs(String playlistId) async =>
+      _parsePlaylistSongs(
+        await _fetch('getPlaylist', {'id': playlistId}, _requestTimeout),
+      );
+
+  Future<List<Song>> freshStarredSongs() async {
+    final body = await _fetch('getStarred2', const {}, _catalogPageTimeout);
+    return jsonList(
+      body['starred2'] as Map<String, dynamic>?,
+      'song',
+    ).map(Song.fromJson).toList(growable: false);
+  }
+
+  Future<void> startScan() => _write('startScan', const {}, const {}, true);
 
   Uri streamUri(String songId, {int? maxBitRate}) =>
       _uri('stream', {'id': songId, 'maxBitRate': maxBitRate});

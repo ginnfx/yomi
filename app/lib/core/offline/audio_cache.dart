@@ -20,6 +20,21 @@ class AudioCache {
 
   bool isCached(String songId) => find(songId) != null;
 
+  /// Every saved song by its safe file ID, from a single look at the folder.
+  Map<String, File> savedFiles() {
+    final found = <String, File>{};
+    try {
+      for (final entity in directory.listSync()) {
+        if (entity is! File || !hasAudioExtension(entity.path)) continue;
+        final name = entity.uri.pathSegments.last;
+        found[name.substring(0, name.lastIndexOf('.'))] = entity;
+      }
+    } on FileSystemException {
+      // A missing folder just means nothing is saved yet.
+    }
+    return found;
+  }
+
   /// Marks a song as just used, so it is evicted last.
   Future<void> touch(String songId) async {
     final file = find(songId);

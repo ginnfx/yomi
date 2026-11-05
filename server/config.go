@@ -16,6 +16,7 @@ const (
 	defaultTailscaleBin  = "/data/local/tmp/tailscale/tailscale"
 	defaultTailscaleSock = "/data/local/tmp/tailscale/tailscaled.sock"
 	defaultMessagesDir   = "/data/local/tmp/navidrome/yomi-messages"
+	defaultTagsDir       = "/data/local/tmp/navidrome/yomi-ai"
 	defaultMaxFileMB     = 150
 	defaultScanDebounce  = 5 * time.Minute
 	maxConcurrentUploads = 2
@@ -43,6 +44,11 @@ type Config struct {
 	MessagesDir     string
 	RelayURL        string
 	RelayKey        string
+	LLMURL          string
+	LLMKey          string
+	LLMModel        string
+	TagsDir         string
+	HistoryDir      string
 	MaxFileBytes    int64
 	ScanDebounce    time.Duration
 }
@@ -69,6 +75,11 @@ func loadConfig() Config {
 		MessagesDir:     envOr("YOMI_MESSAGES_DIR", defaultMessagesDir),
 		RelayURL:        os.Getenv("YOMI_RELAY_URL"),
 		RelayKey:        os.Getenv("YOMI_RELAY_KEY"),
+		LLMURL:          os.Getenv("YOMI_LLM_URL"),
+		LLMKey:          os.Getenv("YOMI_LLM_KEY"),
+		LLMModel:        os.Getenv("YOMI_LLM_MODEL"),
+		TagsDir:         envOr("YOMI_TAGS_DIR", defaultTagsDir),
+		HistoryDir:      envOr("YOMI_HISTORY_DIR", defaultHistoryDir),
 		MaxFileBytes:    int64(envInt("YOMI_MAX_FILE_MB", defaultMaxFileMB)) << 20,
 		ScanDebounce:    defaultScanDebounce,
 	}

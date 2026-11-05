@@ -29,6 +29,9 @@ const songs = [
 ];
 
 class _Player extends ChangeNotifier implements PlayerController {
+  @override
+  int userSkips = 0;
+
   List<Song> _queue = const [];
   int? _index;
   Duration _position = Duration.zero;

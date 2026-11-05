@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import '../../core/models.dart';
 import '../theme.dart';
 import 'cover_art.dart';
+import 'playlist_cover.dart';
 
 const double kCardWidth = 150;
 
@@ -14,13 +15,20 @@ class AlbumCard extends StatelessWidget {
     required this.subtitle,
     required this.coverArtId,
     required this.onTap,
+    this.onLongPress,
+    this.cover,
   });
 
-  factory AlbumCard.song(Song song, VoidCallback onTap) => AlbumCard(
+  factory AlbumCard.song(
+    Song song,
+    VoidCallback onTap, {
+    VoidCallback? onLongPress,
+  }) => AlbumCard(
     title: song.title,
     subtitle: song.artist,
     coverArtId: song.coverArtId,
     onTap: onTap,
+    onLongPress: onLongPress,
   );
 
   factory AlbumCard.playlist(Playlist playlist, VoidCallback onTap) =>
@@ -29,12 +37,24 @@ class AlbumCard extends StatelessWidget {
         subtitle: '${playlist.songCount} songs',
         coverArtId: playlist.coverArtId,
         onTap: onTap,
+        cover: PlaylistCover(
+          playlistId: playlist.id,
+          coverArtId: playlist.coverArtId,
+          size: kCardWidth,
+          radius: kCardRadius,
+          elevated: true,
+          seed: playlist.name,
+        ),
       );
 
   final String title;
   final String subtitle;
   final String? coverArtId;
   final VoidCallback onTap;
+  final VoidCallback? onLongPress;
+
+  /// Shown instead of [coverArtId]'s picture, such as a mosaic for a mix.
+  final Widget? cover;
 
   @override
   Widget build(BuildContext context) {
@@ -43,18 +63,20 @@ class AlbumCard extends StatelessWidget {
         HapticFeedback.selectionClick();
         onTap();
       },
+      onLongPress: onLongPress,
       child: SizedBox(
         width: kCardWidth,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            CoverArt(
-              coverArtId: coverArtId,
-              size: kCardWidth,
-              radius: kCardRadius,
-              elevated: true,
-              seed: title,
-            ),
+            cover ??
+                CoverArt(
+                  coverArtId: coverArtId,
+                  size: kCardWidth,
+                  radius: kCardRadius,
+                  elevated: true,
+                  seed: title,
+                ),
             const SizedBox(height: 12),
             Text(
               title,

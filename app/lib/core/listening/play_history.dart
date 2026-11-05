@@ -34,10 +34,13 @@ class PlayEvent {
 
 /// What was played and skipped on this device, kept in one small JSON file.
 class PlayHistory extends ChangeNotifier {
-  PlayHistory(this.file, {DateTime Function()? now})
-    : _now = now ?? DateTime.now;
+  PlayHistory(File file, {DateTime Function()? now})
+    : _file = file,
+      _now = now ?? DateTime.now;
 
-  final File file;
+  File _file;
+
+  File get file => _file;
   final DateTime Function() _now;
   List<PlayEvent> _events = const [];
   Map<String, Song> _songs = const {};
@@ -67,6 +70,37 @@ class PlayHistory extends ChangeNotifier {
       _events = const [];
       _songs = const {};
     }
+  }
+
+  /// Switches to one account's history, so plays never mix between people on a device.
+  /// [legacy] is the shared file from older versions, which the first account inherits.
+  Future<void> openFor(File next, {File? legacy}) async {
+    try {
+      final old = legacy;
+      if (old != null && !await next.exists() && await old.exists()) {
+        await next.parent.create(recursive: true);
+        await old.rename(next.path);
+      }
+    } on FileSystemException catch (error) {
+      debugPrint('Could not move the old play history: $error');
+    }
+    _file = next;
+    _events = const [];
+    _songs = const {};
+    await load();
+    notifyListeners();
+  }
+
+  /// Forgets this account's history, on signing out.
+  Future<void> clear() async {
+    _events = const [];
+    _songs = const {};
+    try {
+      if (await _file.exists()) await _file.delete();
+    } on FileSystemException catch (error) {
+      debugPrint('Could not delete the play history: $error');
+    }
+    notifyListeners();
   }
 
   Future<void> record(Song song, PlayKind kind, DateTime at) async {

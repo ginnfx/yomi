@@ -5,7 +5,6 @@ import '../../dev_hooks.dart';
 
 import 'package:provider/provider.dart';
 
-import '../../state/connectivity_controller.dart';
 import '../../state/profile_controller.dart';
 import '../../state/session.dart';
 import '../theme.dart';
@@ -18,7 +17,6 @@ import '../widgets/profile_panel.dart';
 import '../widgets/update_banner.dart';
 import 'home_page.dart';
 import 'library_page.dart';
-import 'offline_page.dart';
 import 'now_playing_page.dart';
 import 'search_page.dart';
 import 'settings_page.dart';
@@ -89,10 +87,7 @@ class _ShellPageState extends State<ShellPage>
   Widget build(BuildContext context) {
     final media = MediaQuery.of(context);
     final bottomSafe = media.padding.bottom;
-    final isDisconnected =
-        context.select<SessionController, bool>((s) => !s.isServerReachable) ||
-        context.select<ConnectivityController, bool>((c) => c.isOffline);
-    if (context.isWideLayout) return _desktop(context, media, isDisconnected);
+    if (context.isWideLayout) return _desktop(context, media);
     return PageBackground(
       child: Scaffold(
         backgroundColor: Colors.transparent,
@@ -125,10 +120,7 @@ class _ShellPageState extends State<ShellPage>
                             parent: _fade,
                             curve: Curves.easeOut,
                           ),
-                          child: IndexedStack(
-                            index: isDisconnected ? _pages.length : _index,
-                            children: [..._pages, const OfflinePage()],
-                          ),
+                          child: IndexedStack(index: _index, children: _pages),
                         ),
                       ),
                     ),
@@ -158,12 +150,11 @@ class _ShellPageState extends State<ShellPage>
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       const MiniPlayer(),
-                      if (!isDisconnected)
-                        YomiNavBar(
-                          items: _items,
-                          index: _index,
-                          onSelected: _select,
-                        ),
+                      YomiNavBar(
+                        items: _items,
+                        index: _index,
+                        onSelected: _select,
+                      ),
                     ],
                   ),
                 ),
@@ -175,11 +166,7 @@ class _ShellPageState extends State<ShellPage>
     );
   }
 
-  Widget _desktop(
-    BuildContext context,
-    MediaQueryData media,
-    bool isDisconnected,
-  ) {
+  Widget _desktop(BuildContext context, MediaQueryData media) {
     return PageBackground(
       child: Scaffold(
         backgroundColor: Colors.transparent,
@@ -203,7 +190,7 @@ class _ShellPageState extends State<ShellPage>
                                 padding: const EdgeInsets.only(bottom: 5),
                                 child: ListTile(
                                   dense: true,
-                                  selected: !isDisconnected && _index == i,
+                                  selected: _index == i,
                                   selectedColor: YomiColors.textPrimary,
                                   selectedTileColor: YomiColors.surfaceHigh,
                                   shape: RoundedRectangleBorder(
@@ -257,8 +244,8 @@ class _ShellPageState extends State<ShellPage>
                                 curve: Curves.easeOut,
                               ),
                               child: IndexedStack(
-                                index: isDisconnected ? _pages.length : _index,
-                                children: [..._pages, const OfflinePage()],
+                                index: _index,
+                                children: _pages,
                               ),
                             ),
                           ),

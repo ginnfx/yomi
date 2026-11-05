@@ -3,7 +3,9 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/format.dart';
+import '../../core/listening/wrapped_window.dart';
 import '../../core/models.dart';
+import '../../state/catalog_controller.dart';
 import '../../state/home_controller.dart';
 import '../../state/messages_controller.dart';
 import '../../state/player_controller.dart';
@@ -11,10 +13,12 @@ import '../../state/profile_controller.dart';
 import '../../state/session.dart';
 import '../../state/settings.dart';
 import '../settings/profile_section.dart';
+import '../settings/home_layout_section.dart';
+import '../stats/wrapped_page.dart';
 import '../theme.dart';
 import '../widgets/album_card.dart';
-import '../widgets/async_section.dart';
 import '../widgets/cover_art.dart';
+import '../widgets/playlist_cover.dart';
 import '../widgets/error_view.dart';
 import '../widgets/continue_listening.dart';
 import '../widgets/compact_music_grid.dart';
@@ -24,7 +28,7 @@ import 'collection_page.dart';
 import 'messages_page.dart';
 
 const int _shuffleBatch = 60;
-const int _quickPickCount = 6;
+const int _quickPlaylistCount = 3;
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key, this.greetingTime});
@@ -37,8 +41,6 @@ class HomePage extends StatefulWidget {
 }
 
 class _HomePageState extends State<HomePage> {
-  int _refresh = 0;
-
   Future<void> _shuffleEverything() async {
     final player = context.read<PlayerController>();
     final client = context.read<SessionController>().client;
@@ -64,32 +66,164 @@ class _HomePageState extends State<HomePage> {
         color: context.accent,
         backgroundColor: YomiColors.surfaceHigh,
         onRefresh: () async {
-          setState(() => _refresh++);
           await context.read<HomeController>().refresh();
         },
-        child: ListView(
-          children: [
-            _Header(
-              name: profile.displayName(session.username),
-              greetingTime: widget.greetingTime,
+        child: _lazyList([
+          () => _Header(
+            name: profile.displayName(session.username),
+            greetingTime: widget.greetingTime,
+          ),
+          () => const ContinueListening(),
+          if (isWrappedOpen(
+            DateTime.now().year,
+            widget.greetingTime ?? DateTime.now(),
+          ))
+            () => Padding(
+              padding: const EdgeInsets.fromLTRB(
+                kPagePadding,
+                16,
+                kPagePadding,
+                0,
+              ),
+              child: FilledButton.tonalIcon(
+                onPressed: () => openWrapped(context, DateTime.now().year),
+                icon: const Icon(Icons.auto_awesome_rounded),
+                label: Text('Your ${DateTime.now().year} Wrapped is ready'),
+              ),
             ),
-            const ContinueListening(),
-            for (final id in sections) _section(id, session),
-            const _Shelves(),
-            if (sections.isEmpty && home.shelves.isEmpty && !home.isLoading)
-              Padding(
-                padding: const EdgeInsets.all(48),
-                child: Text(
-                  'Every section is hidden',
-                  textAlign: TextAlign.center,
-                  style: yomiText(
-                    14,
-                    weight: FontWeight.w500,
-                    color: YomiColors.textSecondary,
-                    height: 1.4,
-                  ),
+          for (final id in sections) () => _section(id, session),
+          ..._friendsPlaying(),
+          ..._shelfBuilders(home),
+          () => Center(
+            child: TextButton.icon(
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute<void>(builder: (_) => const _EditHomePage()),
+              ),
+              icon: const Icon(Icons.tune_rounded, size: 18),
+              label: const Text('Edit Home'),
+            ),
+          ),
+          if (sections.isEmpty && home.shelves.isEmpty && !home.isLoading)
+            () => Padding(
+              padding: const EdgeInsets.all(48),
+              child: Text(
+                'Every section is hidden',
+                textAlign: TextAlign.center,
+                style: yomiText(
+                  14,
+                  weight: FontWeight.w500,
+                  color: YomiColors.textSecondary,
+                  height: 1.4,
                 ),
               ),
+            ),
+        ]),
+      ),
+    );
+  }
+
+  /// Only what's near the screen is built, so a long Home stays quick.
+  Widget _lazyList(List<Widget Function()> items) => ListView.builder(
+    itemCount: items.length,
+    itemBuilder: (_, i) => items[i](),
+  );
+
+  /// What friends are playing, only if you've chosen to share with each other.
+  List<Widget Function()> _friendsPlaying() {
+    if (!context.watch<SettingsController>().shareListening) return const [];
+    final friends = context.watch<MessagesController>().friendsPlaying;
+    if (friends.isEmpty) return const [];
+    final library = {
+      for (final song in context.watch<CatalogController>().songs)
+        song.id: song,
+    };
+    final songs = [
+      for (final friend in friends) ?library[friend.nowPlaying!.songId],
+    ];
+    if (songs.isEmpty) return const [];
+    final player = context.read<PlayerController>();
+    return [
+      () => Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const SectionTitle('What friends are playing'),
+          CardRow(
+            children: [
+              for (var i = 0; i < songs.length; i++)
+                AlbumCard.song(
+                  songs[i],
+                  () => player.playQueue(songs, startIndex: i),
+                ),
+            ],
+          ),
+        ],
+      ),
+    ];
+  }
+
+  /// One builder per shelf. See [HomeController].
+  List<Widget Function()> _shelfBuilders(HomeController home) {
+    final player = context.read<PlayerController>();
+    final shelves = home.shelves;
+    if (shelves.isEmpty) {
+      final error = home.error;
+      return [
+        if (home.isLoading)
+          () => const Padding(
+            padding: EdgeInsets.only(top: YomiSpace.xl),
+            child: CardRowSkeleton(),
+          )
+        else if (error != null)
+          () => ErrorView(error: error, onRetry: home.refresh),
+      ];
+    }
+    return [
+      for (final shelf in shelves)
+        () => Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            SectionTitle(shelf.title),
+            CardRow(
+              children: [
+                for (var i = 0; i < shelf.songs.length; i++)
+                  AlbumCard.song(
+                    shelf.songs[i],
+                    () => player.playQueue(shelf.songs, startIndex: i),
+                    onLongPress: () => _showLess(shelf.songs[i]),
+                  ),
+              ],
+            ),
+          ],
+        ),
+    ];
+  }
+
+  void _showLess(Song song) {
+    final home = context.read<HomeController>();
+    HapticFeedback.mediumImpact();
+    showModalBottomSheet<void>(
+      context: context,
+      builder: (sheet) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.thumb_down_outlined),
+              title: const Text('Show less like this'),
+              subtitle: Text(song.title),
+              onTap: () {
+                Navigator.pop(sheet);
+                home.showLess(song, wholeArtist: false);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.person_off_outlined),
+              title: Text('Show less from ${song.artist}'),
+              onTap: () {
+                Navigator.pop(sheet);
+                home.showLess(song, wholeArtist: true);
+              },
+            ),
           ],
         ),
       ),
@@ -98,7 +232,6 @@ class _HomePageState extends State<HomePage> {
 
   Widget _section(String id, SessionController session) {
     final isWide = context.isWideLayout;
-    final client = session.client;
     final player = context.read<PlayerController>();
     switch (id) {
       case 'shuffle':
@@ -122,120 +255,89 @@ class _HomePageState extends State<HomePage> {
               : _ShuffleHero(onTap: _shuffleEverything),
         );
       case 'quick':
-        return AsyncSection<List<_QuickPick>>(
-          key: ValueKey('quick-${session.serverUrl}-$_refresh'),
-          skeleton: const Padding(
-            padding: EdgeInsets.only(top: 18),
-            child: Shimmer(child: SkeletonBox(height: 190, radius: 16)),
-          ),
-          load: () async {
-            final results = await Future.wait([
-              client.playlists(),
-              client.randomSongs(size: _quickPickCount),
-            ]);
-            final playlists = (results[0] as List<Playlist>)
-                .take(3)
-                .map(
-                  (p) => _QuickPick(
-                    p.name,
-                    '${p.songCount} songs · Playlist',
-                    p.coverArtId,
-                    () => openPlaylist(context, p),
-                  ),
-                );
-            final songs = results[1] as List<Song>;
-            final recent = [
-              for (var i = 0; i < songs.length; i++)
-                _QuickPick(
-                  songs[i].title,
-                  songs[i].artist,
-                  songs[i].coverArtId,
-                  () => player.playQueue(songs, startIndex: i),
-                ),
-            ];
-            return [
-              ...playlists,
-              ...recent,
-            ].take(_quickPickCount).toList(growable: false);
-          },
-          builder: (context, picks) => picks.isEmpty
-              ? const SizedBox.shrink()
-              : Padding(
-                  padding: const EdgeInsets.fromLTRB(
-                    kPagePadding,
-                    18,
-                    kPagePadding,
-                    0,
-                  ),
-                  child: isWide
-                      ? CompactMusicGrid(
-                          items: [
-                            for (final pick in picks)
-                              MusicShortcut(
-                                title: pick.title,
-                                subtitle: pick.subtitle,
-                                coverArtId: pick.coverArtId,
-                                onTap: pick.onTap,
-                              ),
-                          ],
-                        )
-                      : GridView.count(
-                          crossAxisCount: 2,
-                          shrinkWrap: true,
-                          physics: const NeverScrollableScrollPhysics(),
-                          mainAxisSpacing: YomiSpace.s,
-                          crossAxisSpacing: YomiSpace.s,
-                          childAspectRatio: 3.1,
-                          children: [
-                            for (final pick in picks) _QuickTile(pick: pick),
-                          ],
-                        ),
-                ),
-        );
+        return _quickSection(isWide, player);
     }
     return const SizedBox.shrink();
   }
-}
 
-/// The shelves that change with listening. See [HomeController].
-class _Shelves extends StatelessWidget {
-  const _Shelves();
-
-  @override
-  Widget build(BuildContext context) {
+  Widget _quickSection(bool isWide, PlayerController player) {
     final home = context.watch<HomeController>();
-    final player = context.read<PlayerController>();
-    final shelves = home.shelves;
-    if (shelves.isEmpty) {
-      if (home.isLoading) {
-        return const Padding(
-          padding: EdgeInsets.only(top: YomiSpace.xl),
-          child: CardRowSkeleton(),
-        );
-      }
-      final error = home.error;
-      return error == null
-          ? const SizedBox.shrink()
-          : ErrorView(error: error, onRetry: home.refresh);
+    final songs = home.quickSongs;
+    final picks = [
+      for (final playlist in home.quickPlaylists.take(_quickPlaylistCount))
+        _QuickPick(
+          playlist.name,
+          '${playlist.songCount} songs · Playlist',
+          playlist.coverArtId,
+          () => openPlaylist(context, playlist),
+          playlistId: playlist.id,
+        ),
+      for (var i = 0; i < songs.length; i++)
+        _QuickPick(
+          songs[i].title,
+          songs[i].artist,
+          songs[i].coverArtId,
+          () => player.playQueue(songs, startIndex: i),
+        ),
+    ].take(quickPickCount).toList(growable: false);
+    if (picks.isEmpty) {
+      return home.isLoading
+          ? const Padding(
+              padding: EdgeInsets.only(top: 18),
+              child: Shimmer(child: SkeletonBox(height: 190, radius: 16)),
+            )
+          : const SizedBox.shrink();
     }
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        for (final shelf in shelves) ...[
-          SectionTitle(shelf.title),
-          CardRow(
-            children: [
-              for (var i = 0; i < shelf.songs.length; i++)
-                AlbumCard.song(
-                  shelf.songs[i],
-                  () => player.playQueue(shelf.songs, startIndex: i),
-                ),
-            ],
-          ),
-        ],
-      ],
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(kPagePadding, 18, kPagePadding, 0),
+      child: isWide
+          ? CompactMusicGrid(
+              items: [
+                for (final pick in picks)
+                  MusicShortcut(
+                    title: pick.title,
+                    subtitle: pick.subtitle,
+                    coverArtId: pick.coverArtId,
+                    onTap: pick.onTap,
+                  ),
+              ],
+            )
+          : GridView.count(
+              crossAxisCount: 2,
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              mainAxisSpacing: YomiSpace.s,
+              crossAxisSpacing: YomiSpace.s,
+              childAspectRatio: 3.1,
+              children: [for (final pick in picks) _QuickTile(pick: pick)],
+            ),
     );
   }
+}
+
+class _EditHomePage extends StatelessWidget {
+  const _EditHomePage();
+
+  @override
+  Widget build(BuildContext context) => PageBackground(
+    child: Scaffold(
+      backgroundColor: Colors.transparent,
+      appBar: AppBar(
+        title: Text('Edit Home', style: yomiText(20, weight: FontWeight.w800)),
+      ),
+      body: SingleChildScrollView(
+        child: Column(
+          children: [
+            const HomeLayoutSection(),
+            TextButton(
+              onPressed: () => context.read<SettingsController>().clearLess(),
+              child: const Text('Forget "show less" choices'),
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
 }
 
 class _Header extends StatelessWidget {
@@ -306,12 +408,21 @@ class _MessagesButton extends StatelessWidget {
 }
 
 class _QuickPick {
-  const _QuickPick(this.title, this.subtitle, this.coverArtId, this.onTap);
+  const _QuickPick(
+    this.title,
+    this.subtitle,
+    this.coverArtId,
+    this.onTap, {
+    this.playlistId,
+  });
 
   final String title;
   final String subtitle;
   final String? coverArtId;
   final VoidCallback onTap;
+
+  /// Set for a playlist, so its chosen picture shows.
+  final String? playlistId;
 }
 
 class _QuickTile extends StatelessWidget {
@@ -332,12 +443,21 @@ class _QuickTile extends StatelessWidget {
         },
         child: Row(
           children: [
-            CoverArt(
-              coverArtId: pick.coverArtId,
-              size: 60,
-              radius: 0,
-              seed: pick.title,
-            ),
+            if (pick.playlistId case final id?)
+              PlaylistCover(
+                playlistId: id,
+                coverArtId: pick.coverArtId,
+                size: 60,
+                radius: 0,
+                seed: pick.title,
+              )
+            else
+              CoverArt(
+                coverArtId: pick.coverArtId,
+                size: 60,
+                radius: 0,
+                seed: pick.title,
+              ),
             const SizedBox(width: 12),
             Expanded(
               child: Text(

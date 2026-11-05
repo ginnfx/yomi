@@ -385,15 +385,6 @@ void main() {
       expect(harness.downloads.isDownloaded('s1'), isTrue);
     });
 
-    test('the setting turns automatic downloads off', () async {
-      await harness.settings.setAutoDownloadRepeats(false);
-      for (var i = 0; i < kRepeatPlays; i++) {
-        await harness.playFully(song);
-      }
-      await harness.settle();
-      expect(harness.fetcher.fetched, isEmpty);
-    });
-
     test('a play made offline reaches the server once back online', () async {
       harness.network.add(const [ConnectivityResult.none]);
       await harness.playFully(song);
