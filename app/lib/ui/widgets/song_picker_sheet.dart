@@ -4,15 +4,14 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/listening/play_history.dart';
+import '../../core/messaging/music_to_send.dart';
 import '../../core/messaging/send_suggestions.dart';
 import '../../core/models.dart';
 import '../../state/catalog_controller.dart';
 import '../../state/player_controller.dart';
+import '../../state/session.dart';
 import '../theme.dart';
 import 'cover_art.dart';
-
-/// How many search results to offer.
-const int _maxResults = 40;
 
 /// How long the search bar takes to open out.
 const Duration _barOpening = Duration(milliseconds: 420);
@@ -22,25 +21,70 @@ const Duration _rowIn = Duration(milliseconds: 260);
 const int _rowStaggerMs = 28;
 const int _maxStaggeredRows = 12;
 
-/// Lets you pick a song to send: what you played lately is ready, or search the library.
-Future<Song?> pickSongToSend(BuildContext context) =>
-    showModalBottomSheet<Song>(
-      context: context,
-      isScrollControlled: true,
-      useSafeArea: true,
-      backgroundColor: YomiColors.surface,
-      builder: (_) => const _SongPicker(),
-    );
+/// Loads the playlists a picker can offer.
+typedef PlaylistLoader = Future<List<Playlist>> Function();
 
-class _SongPicker extends StatefulWidget {
-  const _SongPicker();
+enum _Tab {
+  recent('Recent'),
+  songs('Songs'),
+  albums('Albums'),
+  playlists('Playlists'),
+  liked('Liked');
 
-  @override
-  State<_SongPicker> createState() => _SongPickerState();
+  const _Tab(this.label);
+  final String label;
 }
 
-class _SongPickerState extends State<_SongPicker> {
+/// Lets you pick music to send: recent plays are ready, every song, album, playlist and
+/// liked song can be browsed, and the search bar looks through all of them.
+Future<PickedMusic?> pickMusicToSend(
+  BuildContext context, {
+  PlaylistLoader? loadPlaylists,
+}) {
+  final loader =
+      loadPlaylists ?? context.read<SessionController>().client.playlists;
+  return showModalBottomSheet<PickedMusic>(
+    context: context,
+    isScrollControlled: true,
+    useSafeArea: true,
+    backgroundColor: YomiColors.surface,
+    builder: (_) => _MusicPicker(loadPlaylists: loader),
+  );
+}
+
+class _MusicPicker extends StatefulWidget {
+  const _MusicPicker({required this.loadPlaylists});
+
+  final PlaylistLoader loadPlaylists;
+
+  @override
+  State<_MusicPicker> createState() => _MusicPickerState();
+}
+
+class _MusicPickerState extends State<_MusicPicker> {
   final _query = TextEditingController();
+  _Tab _tab = _Tab.recent;
+  List<Playlist> _playlists = const [];
+  bool _isLoadingPlaylists = true;
+  String? _playlistError;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadPlaylists();
+  }
+
+  Future<void> _loadPlaylists() async {
+    try {
+      final playlists = await widget.loadPlaylists();
+      if (mounted) setState(() => _playlists = List.unmodifiable(playlists));
+    } on Exception catch (error) {
+      debugPrint('Picker could not load playlists: $error');
+      if (mounted) setState(() => _playlistError = "Couldn't load playlists.");
+    } finally {
+      if (mounted) setState(() => _isLoadingPlaylists = false);
+    }
+  }
 
   @override
   void dispose() {
@@ -48,29 +92,55 @@ class _SongPickerState extends State<_SongPicker> {
     super.dispose();
   }
 
-  List<Song> _songs(BuildContext context) {
-    final text = _query.text.trim();
-    if (text.isNotEmpty) {
-      return context
-          .read<CatalogController>()
-          .searchIndex
-          .search(text)
-          .songs
-          .take(_maxResults)
-          .toList();
+  bool get _isSearching => _query.text.trim().isNotEmpty;
+
+  List<PickedMusic> _items(BuildContext context) {
+    final catalog = context.read<CatalogController>();
+    if (_isSearching) {
+      return searchToSend(
+        _query.text,
+        index: catalog.searchIndex,
+        playlists: _playlists,
+      );
     }
+    return switch (_tab) {
+      _Tab.recent => _recent(context),
+      _Tab.songs => [for (final song in catalog.songs) PickedSong(song)],
+      _Tab.albums => albumsToSend(catalog.songs),
+      _Tab.playlists => [for (final p in _playlists) PickedPlaylist(p)],
+      _Tab.liked => likedToSend(catalog.songs),
+    };
+  }
+
+  List<PickedMusic> _recent(BuildContext context) {
     final history = context.read<PlayHistory>();
-    return recentToSend(
-      events: history.events,
-      songFor: history.songFor,
-      nowPlaying: context.read<PlayerController>().current,
-    );
+    return [
+      for (final song in recentToSend(
+        events: history.events,
+        songFor: history.songFor,
+        nowPlaying: context.read<PlayerController>().current,
+      ))
+        PickedSong(song),
+    ];
+  }
+
+  String get _emptyText {
+    if (_isSearching) return 'Nothing matches that.';
+    return switch (_tab) {
+      _Tab.recent => 'Play something, or search above.',
+      _Tab.songs || _Tab.albums => 'Your library is still loading.',
+      _Tab.playlists =>
+        _isLoadingPlaylists
+            ? 'Loading playlists…'
+            : _playlistError ?? 'No playlists yet.',
+      _Tab.liked => 'Songs you like show up here.',
+    };
   }
 
   @override
   Widget build(BuildContext context) {
-    final songs = _songs(context);
-    final isSearching = _query.text.trim().isNotEmpty;
+    final items = _items(context);
+    final playingId = context.read<PlayerController>().current?.id;
     return DraggableScrollableSheet(
       expand: false,
       initialChildSize: 0.75,
@@ -99,55 +169,80 @@ class _SongPickerState extends State<_SongPicker> {
               onChanged: (_) => setState(() {}),
             ),
           ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(
-              kPagePadding,
-              8,
-              kPagePadding,
-              4,
-            ),
-            child: Align(
-              alignment: Alignment.centerLeft,
-              child: Text(
-                isSearching ? 'Results' : 'Recently played',
-                style: yomiText(14, weight: FontWeight.w800),
-              ),
-            ),
+          AnimatedSize(
+            duration: YomiMotion.standard,
+            child: _isSearching
+                ? const SizedBox(width: double.infinity)
+                : _TabChips(
+                    selected: _tab,
+                    onSelected: (tab) => setState(() => _tab = tab),
+                  ),
           ),
           Expanded(
-            child: songs.isEmpty
-                ? Center(
-                    child: Text(
-                      isSearching
-                          ? 'Nothing matches that.'
-                          : 'Play something, or search above.',
-                      style: yomiText(14, color: YomiColors.textSecondary),
-                    ),
-                  )
-                : ListView.builder(
-                    controller: scroll,
-                    keyboardDismissBehavior:
-                        ScrollViewKeyboardDismissBehavior.onDrag,
-                    itemCount: songs.length,
-                    itemBuilder: (context, i) => _SlidesIn(
-                      key: ValueKey('${_query.text}|${songs[i].id}'),
-                      index: i,
-                      child: _SongRow(
-                        song: songs[i],
-                        isPlaying:
-                            !isSearching &&
-                            i == 0 &&
-                            context.read<PlayerController>().current?.id ==
-                                songs[i].id,
-                        onSend: () => Navigator.pop(context, songs[i]),
+            child: AnimatedSwitcher(
+              duration: YomiMotion.standard,
+              child: items.isEmpty
+                  ? Center(
+                      key: ValueKey('empty|$_tab|$_isSearching'),
+                      child: Text(
+                        _emptyText,
+                        style: yomiText(14, color: YomiColors.textSecondary),
+                      ),
+                    )
+                  : ListView.builder(
+                      key: ValueKey('list|$_tab|$_isSearching'),
+                      controller: scroll,
+                      keyboardDismissBehavior:
+                          ScrollViewKeyboardDismissBehavior.onDrag,
+                      itemCount: items.length,
+                      itemBuilder: (context, i) => _SlidesIn(
+                        key: ValueKey('${_query.text}|${items[i].id}'),
+                        index: i,
+                        child: _MusicRow(
+                          item: items[i],
+                          isPlaying:
+                              _tab == _Tab.recent &&
+                              !_isSearching &&
+                              i == 0 &&
+                              items[i] is PickedSong &&
+                              (items[i] as PickedSong).song.id == playingId,
+                          onSend: () => Navigator.pop(context, items[i]),
+                        ),
                       ),
                     ),
-                  ),
+            ),
           ),
         ],
       ),
     );
   }
+}
+
+class _TabChips extends StatelessWidget {
+  const _TabChips({required this.selected, required this.onSelected});
+
+  final _Tab selected;
+  final ValueChanged<_Tab> onSelected;
+
+  @override
+  Widget build(BuildContext context) => SizedBox(
+    height: 48,
+    child: ListView(
+      scrollDirection: Axis.horizontal,
+      padding: const EdgeInsets.symmetric(horizontal: kPagePadding),
+      children: [
+        for (final tab in _Tab.values)
+          Padding(
+            padding: const EdgeInsets.only(right: YomiSpace.s),
+            child: ChoiceChip(
+              label: Text(tab.label),
+              selected: tab == selected,
+              onSelected: (_) => onSelected(tab),
+            ),
+          ),
+      ],
+    ),
+  );
 }
 
 /// A search bar that opens out from a small pill when the sheet appears.
@@ -175,7 +270,7 @@ class _OpeningSearchBar extends StatelessWidget {
       textInputAction: TextInputAction.search,
       style: yomiText(16, weight: FontWeight.w600),
       decoration: InputDecoration(
-        hintText: 'Search songs to send',
+        hintText: 'Search songs, albums, playlists',
         prefixIcon: Icon(Icons.search_rounded, color: context.accent),
         suffixIcon: controller.text.isEmpty
             ? null
@@ -219,14 +314,14 @@ class _SlidesIn extends StatelessWidget {
   }
 }
 
-class _SongRow extends StatelessWidget {
-  const _SongRow({
-    required this.song,
+class _MusicRow extends StatelessWidget {
+  const _MusicRow({
+    required this.item,
     required this.isPlaying,
     required this.onSend,
   });
 
-  final Song song;
+  final PickedMusic item;
   final bool isPlaying;
   final VoidCallback onSend;
 
@@ -234,24 +329,24 @@ class _SongRow extends StatelessWidget {
   Widget build(BuildContext context) => ListTile(
     contentPadding: const EdgeInsets.symmetric(horizontal: kPagePadding),
     leading: CoverArt(
-      coverArtId: song.coverArtId,
+      coverArtId: item.coverArtId,
       size: 48,
       radius: YomiRadius.art,
-      seed: song.album,
+      seed: item.title,
     ),
     title: Text(
-      song.title,
+      item.title,
       maxLines: 1,
       overflow: TextOverflow.ellipsis,
       style: yomiText(15, weight: FontWeight.w700),
     ),
     subtitle: Text(
-      isPlaying ? 'Playing now · ${song.artist}' : song.artist,
+      isPlaying ? 'Playing now · ${item.subtitle}' : item.subtitle,
       maxLines: 1,
       overflow: TextOverflow.ellipsis,
     ),
     trailing: IconButton(
-      tooltip: 'Send ${song.title}',
+      tooltip: 'Send ${item.title}',
       icon: Icon(Icons.send_rounded, color: context.accent),
       onPressed: onSend,
     ),

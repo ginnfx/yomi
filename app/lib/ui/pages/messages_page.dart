@@ -307,14 +307,17 @@ class _ThreadPageState extends State<ThreadPage> {
     setState(() => _isSending = false);
   }
 
-  Future<void> _sendASong() async {
+  Future<void> _sendMusic() async {
     if (_isSending) return;
-    final song = await pickSongToSend(context);
-    if (song == null || !mounted) return;
+    final picked = await pickMusicToSend(context);
+    if (picked == null || !mounted) return;
     setState(() => _isSending = true);
+    final message = picked.message;
     await _messages.send(
-      songId: song.id,
-      songTitle: '${song.title} · ${song.artist}',
+      songId: message.songId,
+      songTitle: message.songTitle,
+      albumId: message.albumId,
+      playlistId: message.playlistId,
     );
     if (mounted) setState(() => _isSending = false);
   }
@@ -463,9 +466,9 @@ class _ThreadPageState extends State<ThreadPage> {
               child: Row(
                 children: [
                   IconButton(
-                    tooltip: 'Send a song',
+                    tooltip: 'Send music',
                     icon: const Icon(Icons.music_note_rounded),
-                    onPressed: _isSending ? null : _sendASong,
+                    onPressed: _isSending ? null : _sendMusic,
                   ),
                   Expanded(
                     child: TextField(
