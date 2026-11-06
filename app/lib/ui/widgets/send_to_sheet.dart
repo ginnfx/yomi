@@ -1,10 +1,30 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../../core/messaging/messaging_api.dart';
 import '../../state/messages_controller.dart';
 import '../../state/session.dart';
 import '../theme.dart';
 import 'person_avatar.dart';
+
+/// Friends to offer when sending something, most recently talked to first, so a share
+/// is usually one tap.
+List<ChatProfile> sendCandidates(MessagesController messages, String me) {
+  final lastTalked = {
+    for (final chat in messages.conversations) chat.withUser: chat.last.sentAt,
+  };
+  return [
+    for (final person in messages.people)
+      if (person.user != me) person,
+  ]..sort((a, b) {
+    final first = lastTalked[a.user];
+    final second = lastTalked[b.user];
+    if (first == null || second == null) {
+      return (first == null ? 1 : 0) - (second == null ? 1 : 0);
+    }
+    return second.compareTo(first);
+  });
+}
 
 /// Asks who to send something to, then sends it. Works for a song, album or playlist.
 Future<void> showSendTo(
@@ -16,23 +36,10 @@ Future<void> showSendTo(
 }) {
   final messenger = ScaffoldMessenger.of(context);
   final messages = context.read<MessagesController>();
-  final me = context.read<SessionController>().username;
-  // People you talked to most recently come first, so a share is usually one tap.
-  final lastTalked = {
-    for (final chat in messages.conversations) chat.withUser: chat.last.sentAt,
-  };
-  final people =
-      [
-        for (final person in messages.people)
-          if (person.user != me) person,
-      ]..sort((a, b) {
-        final first = lastTalked[a.user];
-        final second = lastTalked[b.user];
-        if (first == null || second == null) {
-          return (first == null ? 1 : 0) - (second == null ? 1 : 0);
-        }
-        return second.compareTo(first);
-      });
+  final people = sendCandidates(
+    messages,
+    context.read<SessionController>().username,
+  );
   return showModalBottomSheet<void>(
     context: context,
     builder: (sheet) => SafeArea(

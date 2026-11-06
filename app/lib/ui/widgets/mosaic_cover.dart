@@ -12,12 +12,20 @@ class MosaicCover extends StatelessWidget {
     required this.size,
     required this.radius,
     this.seed,
+    this.elevated = true,
   });
 
   final List<Song> songs;
   final double size;
   final double radius;
   final String? seed;
+
+  /// Casts a soft shadow, as large covers do at the top of a page.
+  final bool elevated;
+
+  /// Whether [songs] have enough different covers to make a mosaic.
+  static bool canTile(List<Song> songs) =>
+      songs.map((s) => s.coverArtId).nonNulls.toSet().length >= 4;
 
   @override
   Widget build(BuildContext context) {
@@ -32,12 +40,12 @@ class MosaicCover extends StatelessWidget {
         coverArtId: covers.firstOrNull,
         size: size,
         radius: radius,
-        elevated: true,
+        elevated: elevated,
         seed: seed,
       );
     }
     final half = size / 2;
-    return ClipRRect(
+    final tiles = ClipRRect(
       borderRadius: BorderRadius.circular(radius),
       child: SizedBox.square(
         dimension: size,
@@ -48,6 +56,20 @@ class MosaicCover extends StatelessWidget {
           ],
         ),
       ),
+    );
+    if (!elevated) return tiles;
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(radius),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x80000000),
+            blurRadius: 32,
+            offset: Offset(0, 12),
+          ),
+        ],
+      ),
+      child: tiles,
     );
   }
 }

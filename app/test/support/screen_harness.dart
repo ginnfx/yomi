@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:provider/provider.dart';
+import 'package:provider/single_child_widget.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:yomi/core/cover_palette.dart';
 import 'package:yomi/core/lyrics.dart';
@@ -135,6 +136,12 @@ class FakeDownloads extends ChangeNotifier implements DownloadManager {
   DownloadStatus statusOf(String songId) => DownloadStatus.none;
   @override
   double progressOf(String songId) => 0;
+  @override
+  int downloadedCountOf(Iterable<Song> songs) => 0;
+  @override
+  List<Song> get downloadedSongs => const [];
+  @override
+  String? get pausedReason => null;
 
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
@@ -150,6 +157,7 @@ Future<void> pumpScreen(
   Map<String, Object> prefs = const {},
   Directory? profileDir,
   Brightness brightness = Brightness.dark,
+  List<SingleChildWidget> extraProviders = const [],
 }) async {
   YomiColors.useBrightness(brightness);
   addTearDown(() => YomiColors.useBrightness(Brightness.dark));
@@ -176,6 +184,7 @@ Future<void> pumpScreen(
         ),
         Provider<LyricsService>.value(value: FakeLyricsService(lyrics)),
         Provider<CoverPalette>.value(value: CoverPalette()),
+        ...extraProviders,
       ],
       child: MaterialApp(
         debugShowCheckedModeBanner: false,

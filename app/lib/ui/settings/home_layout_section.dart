@@ -16,6 +16,11 @@ const Map<String, (String, String, IconData)> homeSectionInfo = {
     'Your playlists and a few songs as tiles',
     Icons.grid_view_rounded,
   ),
+  'mixes': (
+    'Made for you',
+    'Mixes from your favourite moods',
+    Icons.auto_awesome_mosaic_outlined,
+  ),
   'jumpBack': (
     'Jump back in',
     'What you played most recently',

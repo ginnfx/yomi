@@ -540,6 +540,7 @@ class _Bubble extends StatelessWidget {
               title: title,
               subtitle: '',
               savedSongs: client.cachedAlbumSongs(id),
+              kind: CollectionKind.album,
               loadSongs: () => client.albumSongs(id),
             ),
           ),

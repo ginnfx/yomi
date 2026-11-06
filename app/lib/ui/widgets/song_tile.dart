@@ -2,19 +2,16 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
-import '../../core/format.dart';
 import '../../core/models.dart';
 import '../../state/download_manager.dart';
 import '../../state/player_controller.dart';
-import '../../state/reports_controller.dart';
-import '../../state/session.dart';
 import '../theme.dart';
-import 'report_sheet.dart';
 import 'cover_art.dart';
 import 'download_badge.dart';
 import 'equalizer.dart';
-import 'playlist_sheet.dart';
-import 'send_to_sheet.dart';
+import 'song_menu.dart';
+
+export 'song_menu.dart' show SongAction, showSongMenu;
 
 const double _unavailableOpacity = 0.4;
 
@@ -25,7 +22,11 @@ class SongTile extends StatelessWidget {
     required this.onTap,
     this.extraActions = const [],
     this.leadingNumber,
+    this.onRemoveFromPlaylist,
   });
+
+  /// Set when listed in one of your playlists; adds "Remove from this playlist".
+  final VoidCallback? onRemoveFromPlaylist;
 
   final Song song;
   final VoidCallback onTap;
@@ -140,7 +141,7 @@ class SongTile extends StatelessWidget {
                             ],
                             Flexible(
                               child: Text(
-                                '${song.artist} · ${formatDuration(song.duration)}',
+                                song.artist,
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
                                 style: yomiText(
@@ -165,8 +166,13 @@ class SongTile extends StatelessWidget {
                       Icons.more_horiz_rounded,
                       color: YomiColors.textSecondary,
                     ),
-                    onPressed: () =>
-                        showSongMenu(context, song, extraActions: extraActions),
+                    tooltip: 'More options',
+                    onPressed: () => showSongMenu(
+                      context,
+                      song,
+                      extraActions: extraActions,
+                      onRemoveFromPlaylist: onRemoveFromPlaylist,
+                    ),
                   ),
                 ],
               ),
@@ -195,150 +201,6 @@ class _CleanTag extends StatelessWidget {
         9,
         weight: FontWeight.w800,
         color: YomiColors.textSecondary,
-      ),
-    ),
-  );
-}
-
-class SongAction {
-  const SongAction({
-    required this.icon,
-    required this.label,
-    required this.onSelected,
-  });
-
-  final IconData icon;
-  final String label;
-  final VoidCallback onSelected;
-}
-
-Future<void> showSongMenu(
-  BuildContext context,
-  Song song, {
-  List<SongAction> extraActions = const [],
-}) {
-  final player = context.read<PlayerController>();
-  final downloads = context.read<DownloadManager>();
-  final session = context.read<SessionController>();
-  final messenger = ScaffoldMessenger.of(context);
-  void tell(String text) =>
-      messenger.showSnackBar(SnackBar(content: Text(text)));
-  final isSaved = downloads.statusOf(song.id).isSavedOrSaving;
-
-  final actions = <SongAction>[
-    SongAction(
-      icon: Icons.playlist_play_rounded,
-      label: 'Play next',
-      onSelected: () {
-        player.playNext(song);
-        tell('Playing next');
-      },
-    ),
-    SongAction(
-      icon: Icons.queue_music_rounded,
-      label: 'Add to queue',
-      onSelected: () {
-        player.addToQueue(song);
-        tell('Added to queue');
-      },
-    ),
-    SongAction(
-      icon: Icons.send_rounded,
-      label: 'Send to…',
-      onSelected: () => showSendTo(
-        context,
-        title: '${song.title} · ${song.artist}',
-        songId: song.id,
-      ),
-    ),
-    SongAction(
-      icon: Icons.playlist_add_rounded,
-      label: 'Add to playlist',
-      onSelected: () => showAddToPlaylist(context, song),
-    ),
-    SongAction(
-      icon: isSaved ? Icons.delete_outline_rounded : Icons.download_rounded,
-      label: isSaved ? 'Remove download' : 'Download for offline',
-      onSelected: () {
-        if (isSaved) {
-          downloads.remove(song);
-          tell('Removed from this phone');
-        } else {
-          downloads.enqueue([song]);
-          tell(downloads.pausedReason ?? 'Downloading…');
-        }
-      },
-    ),
-    SongAction(
-      icon: song.isStarred
-          ? Icons.favorite_rounded
-          : Icons.favorite_border_rounded,
-      label: song.isStarred ? 'Remove from Liked' : 'Like',
-      onSelected: () async {
-        try {
-          await (song.isStarred
-              ? session.client.unstar(song.id)
-              : session.client.star(song.id));
-          tell(song.isStarred ? 'Removed from Liked' : 'Added to Liked');
-        } on Exception catch (error) {
-          tell('$error');
-        }
-      },
-    ),
-    ...extraActions,
-    // Absent in screens and tests built without a server connection.
-    if (Provider.of<ReportsController?>(context, listen: false) != null)
-      SongAction(
-        icon: Icons.flag_outlined,
-        label: song.isClean ? 'Want the explicit version' : 'Report a problem…',
-        onSelected: () => showReportSheet(context, song),
-      ),
-  ];
-
-  return showModalBottomSheet<void>(
-    context: context,
-    builder: (sheetContext) => SafeArea(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          ListTile(
-            leading: CoverArt(
-              coverArtId: song.coverArtId,
-              artist: song.artist,
-              album: song.album,
-              title: song.title,
-              size: 52,
-              radius: 12,
-            ),
-            title: Text(
-              song.title,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: yomiText(16, weight: FontWeight.w800),
-            ),
-            subtitle: Text(
-              song.artist,
-              style: yomiText(
-                13,
-                weight: FontWeight.w500,
-                color: YomiColors.textSecondary,
-              ),
-            ),
-          ),
-          Divider(height: 1, color: YomiColors.faint(0.10)),
-          for (final action in actions)
-            ListTile(
-              leading: Icon(action.icon),
-              title: Text(
-                action.label,
-                style: yomiText(15, weight: FontWeight.w600),
-              ),
-              onTap: () {
-                Navigator.pop(sheetContext);
-                action.onSelected();
-              },
-            ),
-        ],
       ),
     ),
   );

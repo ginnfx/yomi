@@ -6,7 +6,9 @@ import 'package:provider/provider.dart';
 
 import '../../state/playlist_covers_controller.dart';
 import '../theme.dart';
+import '../../core/models.dart';
 import 'cover_art.dart';
+import 'mosaic_cover.dart';
 
 /// Lets the owner choose a picture for a playlist from their photos.
 Future<void> pickPlaylistPicture(
@@ -27,7 +29,8 @@ Future<void> pickPlaylistPicture(
   }
 }
 
-/// A playlist's cover: the picture its owner chose, or the usual album cover.
+/// A playlist's cover: the picture its owner chose, else four of its songs' covers
+/// tiled together like Spotify does, else the usual album cover.
 class PlaylistCover extends StatelessWidget {
   const PlaylistCover({
     super.key,
@@ -38,7 +41,11 @@ class PlaylistCover extends StatelessWidget {
     this.elevated = false,
     this.seed,
     this.onPick,
+    this.songs,
   });
+
+  /// The playlist's songs when known, for the tiled cover.
+  final List<Song>? songs;
 
   final String playlistId;
   final String? coverArtId;
@@ -92,13 +99,22 @@ class PlaylistCover extends StatelessWidget {
   }
 
   Widget _cover(BuildContext context) {
-    final fallback = CoverArt(
-      coverArtId: coverArtId,
-      size: size,
-      radius: radius,
-      elevated: elevated,
-      seed: seed,
-    );
+    final known = songs;
+    final fallback = known != null && MosaicCover.canTile(known)
+        ? MosaicCover(
+            songs: known,
+            size: size,
+            radius: radius,
+            elevated: elevated,
+            seed: seed,
+          )
+        : CoverArt(
+            coverArtId: coverArtId,
+            size: size,
+            radius: radius,
+            elevated: elevated,
+            seed: seed,
+          );
     String? url;
     try {
       url = context.watch<PlaylistCoversController>().urlFor(playlistId);

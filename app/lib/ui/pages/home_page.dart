@@ -23,6 +23,7 @@ import '../widgets/cover_art.dart';
 import '../widgets/playlist_cover.dart';
 import '../widgets/error_view.dart';
 import '../widgets/continue_listening.dart';
+import '../widgets/made_for_you.dart';
 import '../widgets/compact_music_grid.dart';
 import '../widgets/shimmer.dart';
 import '../widgets/profile_panel.dart';
@@ -261,6 +262,8 @@ class _HomePageState extends State<HomePage> {
         );
       case 'quick':
         return _quickSection(isWide, player);
+      case 'mixes':
+        return const MadeForYou();
     }
     return const SizedBox.shrink();
   }

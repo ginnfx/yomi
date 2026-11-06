@@ -6,6 +6,8 @@ import 'package:provider/provider.dart';
 import 'package:yomi/core/models.dart';
 import 'package:yomi/core/recommendations.dart';
 import 'package:yomi/core/taste.dart';
+import 'package:yomi/state/ai_controller.dart';
+import 'package:yomi/state/catalog_controller.dart';
 import 'package:yomi/state/home_controller.dart';
 import 'package:yomi/state/messages_controller.dart';
 import 'package:yomi/state/playback_sync_controller.dart';
@@ -32,6 +34,25 @@ class _FakeHome extends ChangeNotifier implements HomeController {
 
   @override
   TasteProfile get taste => TasteProfile.empty;
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
+
+/// An empty library, so Made for you has no mixes to show.
+class _FakeCatalog extends ChangeNotifier implements CatalogController {
+  @override
+  List<Song> get songs => const [];
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
+
+class _FakeAi extends ChangeNotifier implements AiController {
+  @override
+  int get labelledCount => 0;
+  @override
+  bool get isAvailable => false;
+
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
@@ -74,6 +95,8 @@ void main() {
         ]),
       ),
       ChangeNotifierProvider<PlaybackSyncController>.value(value: _FakeSync()),
+      ChangeNotifierProvider<CatalogController>.value(value: _FakeCatalog()),
+      ChangeNotifierProvider<AiController>.value(value: _FakeAi()),
       ChangeNotifierProvider<MessagesController>(
         create: (_) => MessagesController(),
       ),

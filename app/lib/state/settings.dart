@@ -123,6 +123,7 @@ class SettingsController extends ChangeNotifier {
   static const homeSectionIds = [
     'shuffle',
     'quick',
+    'mixes',
     'jumpBack',
     'becauseYouPlayed',
     'topGenre',
@@ -166,6 +167,18 @@ class SettingsController extends ChangeNotifier {
 
   Future<void> setPlaylistOrder(List<String> ids) =>
       _set(() => _prefs.setStringList('playlistOrder', ids));
+
+  /// Whether Your Library shows a grid of covers instead of a list.
+  bool get libraryIsGrid => _prefs.getBool('libraryIsGrid') ?? false;
+
+  Future<void> setLibraryIsGrid(bool value) =>
+      _set(() => _prefs.setBool('libraryIsGrid', value));
+
+  /// How Your Library is ordered, by name; unknown names mean the custom order.
+  String? get librarySort => _prefs.getString('librarySort');
+
+  Future<void> setLibrarySort(String name) =>
+      _set(() => _prefs.setString('librarySort', name));
 
   /// Playlists in the saved order; ones not seen before go on top, deleted ones are ignored.
   List<Playlist> orderPlaylists(List<Playlist> playlists) {

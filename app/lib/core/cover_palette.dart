@@ -13,32 +13,38 @@ class CoverPalette {
   final Map<String, Color> _ready = {};
 
   /// The colour if already known, so a screen can start in it with no flash.
-  Color? peek(String? coverArtId) =>
-      coverArtId == null ? null : _ready[coverArtId];
+  Color? peek(String? key) => key == null ? null : _ready[key];
 
   Future<Color?> colorFor(SubsonicClient client, String? coverArtId) {
     if (coverArtId == null) return Future.value();
-    return _cache.putIfAbsent(coverArtId, () async {
-      try {
-        final provider = CachedNetworkImageProvider(
-          client.coverArtUri(coverArtId, size: smallCoverPx).toString(),
-          cacheKey: coverCacheKey(coverArtId, smallCoverPx),
-          cacheManager: coverCacheManager,
-        );
-        final scheme = await ColorScheme.fromImageProvider(
-          provider: provider,
-          brightness: Brightness.dark,
-        );
-        final color = Color.lerp(
-          scheme.primary,
-          const Color(0xFF000000),
-          _darken,
-        );
-        if (color != null) _ready[coverArtId] = color;
-        return color;
-      } on Object {
-        return null;
-      }
-    });
+    return colorForImage(
+      coverArtId,
+      () => CachedNetworkImageProvider(
+        client.coverArtUri(coverArtId, size: smallCoverPx).toString(),
+        cacheKey: coverCacheKey(coverArtId, smallCoverPx),
+        cacheManager: coverCacheManager,
+      ),
+    );
   }
+
+  /// The colour of any picture, such as a playlist's own photo, remembered by [key].
+  Future<Color?> colorForImage(String key, ImageProvider Function() provider) =>
+      _cache.putIfAbsent(key, () async {
+        try {
+          final scheme = await ColorScheme.fromImageProvider(
+            provider: provider(),
+            brightness: Brightness.dark,
+          );
+          final color = Color.lerp(
+            scheme.primary,
+            const Color(0xFF000000),
+            _darken,
+          );
+          if (color != null) _ready[key] = color;
+          return color;
+        } on Object catch (error) {
+          debugPrint('Could not read the colour of $key: $error');
+          return null;
+        }
+      });
 }

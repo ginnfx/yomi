@@ -10,6 +10,17 @@ String formatDuration(Duration duration) {
   return '$minutes:$secondsText';
 }
 
+/// How long a whole playlist or album runs, the way Spotify writes it: "2 h 10 min",
+/// "34 min", or "45 sec" for something very short.
+String formatTotalDuration(Duration duration) {
+  final totalSeconds = duration.inSeconds < 0 ? 0 : duration.inSeconds;
+  final hours = totalSeconds ~/ 3600;
+  final minutes = (totalSeconds % 3600) ~/ 60;
+  if (hours > 0) return minutes == 0 ? '$hours h' : '$hours h $minutes min';
+  if (minutes > 0) return '$minutes min';
+  return '$totalSeconds sec';
+}
+
 String greetingFor(DateTime now) {
   if (now.hour < 5) return 'Good night';
   if (now.hour < 12) return 'Good morning';

@@ -24,8 +24,9 @@ class LocalResults extends StatelessWidget {
       yomiRoute<void>(
         builder: (_) => CollectionPage(
           title: artist.name,
-          subtitle: '${artist.songCount} songs',
+          subtitle: '',
           coverArtId: artist.coverArtId,
+          kind: CollectionKind.artist,
           loadSongs: () async => [
             for (final song in songs)
               if (song.artist == artist.name) song,
@@ -45,6 +46,7 @@ class LocalResults extends StatelessWidget {
           subtitle: album.artist,
           coverArtId: album.coverArtId,
           savedSongs: client.cachedAlbumSongs(album.id),
+          kind: CollectionKind.album,
           loadSongs: () => client.albumSongs(album.id),
         ),
       ),
