@@ -33,6 +33,8 @@ import 'core/offline/download_store.dart';
 import 'core/offline/outbox.dart';
 import 'core/tunnel/tunnel_bridge.dart';
 import 'core/spotify/imported_playlist.dart';
+import 'core/reports/reports_api.dart';
+import 'core/spotify/missing_songs.dart';
 import 'core/subsonic_client.dart';
 import 'dev_hooks.dart';
 import 'state/appearance_controller.dart';
@@ -50,6 +52,7 @@ import 'state/player_controller.dart';
 import 'state/playlist_covers_controller.dart';
 import 'state/playback_sync_controller.dart';
 import 'state/profile_controller.dart';
+import 'state/reports_controller.dart';
 import 'state/session.dart';
 import 'state/settings.dart';
 import 'state/tunnel_controller.dart';
@@ -185,10 +188,15 @@ Future<void> main() async {
   final ai = AiController(file: File('$listeningDir/ai-labels.json'));
   await ai.load();
   final playlistCovers = PlaylistCoversController();
+  final reports = ReportsController(prefs);
   final imports = ImportsController(
     file: File('$listeningDir/imported-playlists.json'),
   );
   await imports.load();
+  // Songs an import couldn't find go on the server's to-add list, once each.
+  void requestMissingSongs() =>
+      unawaited(reports.requestMissing(missingFromImports(imports.playlists)));
+  imports.addListener(requestMissingSongs);
   late final CatalogController catalog;
   final keeper = OfflineKeeper(
     downloads: downloads,
@@ -394,6 +402,19 @@ Future<void> main() async {
             .then((_) => home.refreshIfDue()),
       );
     }
+    if (client == null) {
+      reports.attach(null);
+    } else if (client.baseUrl != aiUrl) {
+      reports.attach(
+        ReportsApi(
+          serverUrl: client.baseUrl,
+          auth: client,
+          port: session.uploadServicePort,
+        ),
+      );
+      unawaited(reports.refresh());
+      requestMissingSongs();
+    }
     final addressChanged = client != null && client.baseUrl != aiUrl;
     aiUrl = client?.baseUrl;
     final isReachable = session.isServerReachable;
@@ -510,6 +531,7 @@ Future<void> main() async {
       ai: ai,
       listeningLog: listeningLog,
       imports: imports,
+      reports: reports,
       playlistCovers: playlistCovers,
       tunnel: tunnel,
       messages: messages,
@@ -633,6 +655,7 @@ class YomiApp extends StatelessWidget {
     required this.ai,
     required this.listeningLog,
     required this.imports,
+    required this.reports,
     required this.playlistCovers,
     required this.tunnel,
     required this.messages,
@@ -657,6 +680,7 @@ class YomiApp extends StatelessWidget {
   final AiController ai;
   final ListeningLog listeningLog;
   final ImportsController imports;
+  final ReportsController reports;
   final PlaylistCoversController playlistCovers;
   final TunnelController tunnel;
   final MessagesController messages;
@@ -675,6 +699,7 @@ class YomiApp extends StatelessWidget {
         ChangeNotifierProvider<AiController>.value(value: ai),
         ChangeNotifierProvider<ListeningLog>.value(value: listeningLog),
         ChangeNotifierProvider<ImportsController>.value(value: imports),
+        ChangeNotifierProvider<ReportsController>.value(value: reports),
         ChangeNotifierProvider<PlaylistCoversController>.value(
           value: playlistCovers,
         ),

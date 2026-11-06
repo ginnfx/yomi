@@ -37,6 +37,8 @@ type Server struct {
 
 	PlaylistCovers *PlaylistCoverStore
 	PlaylistOwner  func(ctx context.Context, query url.Values, id string) (string, error)
+	Reports        *ReportStore
+	SongPath       func(ctx context.Context, query url.Values, id string) (string, error)
 	slots          chan struct{}
 	limits         *loginLimiter
 	scans          *scanDebouncer
@@ -102,6 +104,11 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("PUT /v1/playlists/{id}/cover", s.handleSavePlaylistCover)
 	mux.HandleFunc("DELETE /v1/playlists/{id}/cover", s.handleDeletePlaylistCover)
 	mux.HandleFunc("POST /v1/ai/names", s.handleMixNames)
+	mux.HandleFunc("POST /v1/reports", s.handleAddReport)
+	mux.HandleFunc("GET /v1/reports", s.handleListReports)
+	mux.HandleFunc("PATCH /v1/reports/{id}", s.handleCloseReport)
+	mux.HandleFunc("POST /v1/reports/{id}/added", s.handleReportAdded)
+	mux.HandleFunc("POST /v1/reports/{id}/replace", s.handleReplaceReport)
 	return mux
 }
 

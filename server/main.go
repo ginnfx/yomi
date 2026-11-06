@@ -31,6 +31,12 @@ func main() {
 		server.PlaylistCovers = covers
 		server.PlaylistOwner = navidromePlaylistOwner(cfg.NavidromeURL, &http.Client{Timeout: playlistOwnerTimeout})
 	}
+	if reports, err := openReportStore(filepath.Join(cfg.MessagesDir, "reports"), time.Now); err != nil {
+		log.Printf("song reports disabled: %v", err)
+	} else {
+		server.Reports = reports
+		server.SongPath = navidromeSongPath(cfg.NavidromeURL, cfg.MusicDir, index, &http.Client{Timeout: songLookupTimeout})
+	}
 	server.Backups = newBackupSource(cfg)
 	messages, err := openMessageStore(cfg.MessagesDir, time.Now)
 	if err != nil {
@@ -57,7 +63,7 @@ func main() {
 		go sync.Run(context.Background())
 	}
 	if cfg.CoversOn {
-		startCovers(cfg)
+		startCovers(cfg, server.Reports)
 	}
 	startAI(cfg, server)
 	history, err := openHistoryStore(cfg.HistoryDir)
@@ -78,13 +84,18 @@ func main() {
 }
 
 // startCovers runs in the background; a failure only means art isn't fetched.
-func startCovers(cfg Config) {
+func startCovers(cfg Config, reports *ReportStore) {
 	client, err := newInternetClient()
 	if err != nil {
 		log.Printf("covers disabled: %v", err)
 		return
 	}
-	go newCoverFetcher(cfg.MusicDir, cfg.CoverState, client).Run(context.Background())
+	fetcher := newCoverFetcher(cfg.MusicDir, cfg.CoverState, client)
+	if reports != nil {
+		fetcher.OnMiss = func(dir, artist, album string) { reports.AddAuto(reportCoverMissing, dir, artist, album) }
+		fetcher.OnFound = func(dir string) { reports.ResolveAuto(reportCoverMissing, dir) }
+	}
+	go fetcher.Run(context.Background())
 }
 
 // navidromeScan asks Navidrome to rescan using the uploader's own credentials.

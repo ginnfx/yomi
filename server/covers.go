@@ -58,8 +58,12 @@ type CoverFetcher struct {
 	Now             func() time.Time
 	Sleep           func(time.Duration)
 
-	mu         sync.Mutex
-	misses     map[string]coverMiss
+	mu     sync.Mutex
+	misses map[string]coverMiss
+	// OnMiss and OnFound, when set, hear about albums still without art and albums
+	// that got some, so they can show up as needed fixes.
+	OnMiss     func(dir, artist, album string)
+	OnFound    func(dir string)
 	lastITunes time.Time
 	lastMB     time.Time
 }
@@ -403,6 +407,9 @@ func (f *CoverFetcher) isDue(album albumFolder) bool {
 
 // recordMiss doubles the wait each time, from a day up to a month.
 func (f *CoverFetcher) recordMiss(album albumFolder) {
+	if f.OnMiss != nil {
+		f.OnMiss(album.dir, album.artist, album.album)
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	miss := f.misses[album.dir]
@@ -419,6 +426,9 @@ func (f *CoverFetcher) recordMiss(album albumFolder) {
 }
 
 func (f *CoverFetcher) clearMiss(album albumFolder) {
+	if f.OnFound != nil {
+		f.OnFound(album.dir)
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if _, known := f.misses[album.dir]; known {

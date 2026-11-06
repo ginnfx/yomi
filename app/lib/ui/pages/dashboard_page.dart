@@ -3,8 +3,10 @@ import 'package:provider/provider.dart';
 
 import '../../core/server_status.dart';
 import '../../state/dashboard_controller.dart';
+import '../../state/reports_controller.dart';
 import '../../state/session.dart';
 import '../theme.dart';
+import '../widgets/reports_section.dart';
 
 void openDashboard(BuildContext context) {
   final session = context.read<SessionController>();
@@ -86,6 +88,12 @@ class DashboardPage extends StatelessWidget {
           children: [
             _Headline(dashboard: dashboard),
             const SizedBox(height: YomiSpace.xl),
+            // Absent in builds and tests without a server connection.
+            if (Provider.of<ReportsController?>(context, listen: false) !=
+                null) ...[
+              const ReportsSection(),
+              const SizedBox(height: YomiSpace.xl),
+            ],
             _Group(
               title: 'This device',
               rows: [

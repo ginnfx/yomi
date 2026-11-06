@@ -24,6 +24,7 @@ class Song {
     this.genre,
     this.playCount = 0,
     this.addedAt,
+    this.explicitStatus,
   });
 
   /// Untagged files arrive with the file name as the title and no artist. Files named
@@ -60,6 +61,10 @@ class Song {
         genre: (json['genre'] as String?)?.trim(),
         playCount: (json['playCount'] as num?)?.toInt() ?? 0,
         addedAt: DateTime.tryParse(json['created']?.toString() ?? ''),
+        explicitStatus: switch (json['explicitStatus']) {
+          final String status when status.isNotEmpty => status,
+          _ => null,
+        },
       );
 
   final String id;
@@ -80,6 +85,12 @@ class Song {
   /// When the song joined the library, if the server said.
   final DateTime? addedAt;
 
+  /// OpenSubsonic's "explicit" or "clean" when the file is tagged, else null.
+  final String? explicitStatus;
+
+  /// A censored version: someone may want the explicit one instead.
+  bool get isClean => explicitStatus == 'clean';
+
   Duration get duration => Duration(seconds: durationSeconds);
 
   Map<String, Object?> toJson() => {
@@ -95,6 +106,7 @@ class Song {
     'genre': genre,
     'playCount': playCount,
     'created': addedAt?.toIso8601String(),
+    'explicitStatus': explicitStatus,
   };
 
   Song copyWith({bool? isStarred}) => Song(
@@ -110,6 +122,7 @@ class Song {
     genre: genre,
     playCount: playCount,
     addedAt: addedAt,
+    explicitStatus: explicitStatus,
   );
 }
 

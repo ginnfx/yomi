@@ -6,8 +6,10 @@ import '../../core/format.dart';
 import '../../core/models.dart';
 import '../../state/download_manager.dart';
 import '../../state/player_controller.dart';
+import '../../state/reports_controller.dart';
 import '../../state/session.dart';
 import '../theme.dart';
+import 'report_sheet.dart';
 import 'cover_art.dart';
 import 'download_badge.dart';
 import 'equalizer.dart';
@@ -132,6 +134,10 @@ class SongTile extends StatelessWidget {
                               ),
                               const SizedBox(width: 5),
                             ],
+                            if (song.isClean) ...[
+                              const _CleanTag(),
+                              const SizedBox(width: 5),
+                            ],
                             Flexible(
                               child: Text(
                                 '${song.artist} · ${formatDuration(song.duration)}',
@@ -170,6 +176,28 @@ class SongTile extends StatelessWidget {
       ),
     );
   }
+}
+
+/// Marks a censored copy, so it's clear why someone might ask for the explicit one.
+class _CleanTag extends StatelessWidget {
+  const _CleanTag();
+
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+    decoration: BoxDecoration(
+      borderRadius: BorderRadius.circular(3),
+      border: Border.all(color: YomiColors.textSecondary),
+    ),
+    child: Text(
+      'CLEAN',
+      style: yomiText(
+        9,
+        weight: FontWeight.w800,
+        color: YomiColors.textSecondary,
+      ),
+    ),
+  );
 }
 
 class SongAction {
@@ -258,6 +286,13 @@ Future<void> showSongMenu(
       },
     ),
     ...extraActions,
+    // Absent in screens and tests built without a server connection.
+    if (Provider.of<ReportsController?>(context, listen: false) != null)
+      SongAction(
+        icon: Icons.flag_outlined,
+        label: song.isClean ? 'Want the explicit version' : 'Report a problem…',
+        onSelected: () => showReportSheet(context, song),
+      ),
   ];
 
   return showModalBottomSheet<void>(
