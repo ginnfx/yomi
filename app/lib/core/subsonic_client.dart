@@ -587,10 +587,16 @@ class SubsonicClient {
     return body == null ? null : _parsePlaylists(body);
   }
 
-  static List<Playlist> _parsePlaylists(Map<String, dynamic> body) => jsonList(
+  /// Navidrome also lists other people's public playlists, and shows every playlist to
+  /// admins. Yomi has no sharing, so only this account's own are kept.
+  List<Playlist> _parsePlaylists(Map<String, dynamic> body) => jsonList(
     body['playlists'] as Map<String, dynamic>?,
     'playlist',
-  ).map(Playlist.fromJson).toList(growable: false);
+  ).map(Playlist.fromJson).where(_isOwnPlaylist).toList(growable: false);
+
+  bool _isOwnPlaylist(Playlist playlist) =>
+      playlist.owner == null ||
+      playlist.owner!.toLowerCase() == username.toLowerCase();
 
   Future<List<Song>> playlistSongs(String playlistId) async =>
       _parsePlaylistSongs(await _get('getPlaylist', {'id': playlistId}));

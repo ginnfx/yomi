@@ -62,7 +62,12 @@ void main() {
           'playlists': {
             'playlist': [
               {'id': 'mine', 'name': 'Mine', 'owner': 'me', 'songCount': 2},
-              {'id': 'theirs', 'name': 'Theirs', 'owner': 'you', 'songCount': 1},
+              {
+                'id': 'theirs',
+                'name': 'Theirs',
+                'owner': 'you',
+                'songCount': 1,
+              },
             ],
           },
         });
@@ -163,7 +168,7 @@ void main() {
     expect(fetcher.fetched, isEmpty);
   });
 
-  test('a per-playlist choice overrides the default both ways', () async {
+  test('a per-playlist choice applies, and other accounts\' playlists are never kept', () async {
     await setUpKeeper(
       network: const [ConnectivityResult.wifi],
       prefs: const {'keepPlaylist.mine': false, 'keepPlaylist.theirs': true},
@@ -172,7 +177,7 @@ void main() {
     await keeper.run();
     await settle();
 
-    expect(fetcher.fetched, ['c']);
+    expect(fetcher.fetched, isEmpty);
   });
 
   test('a song you removed is not saved again', () async {
@@ -181,7 +186,13 @@ void main() {
     await keeper.run();
     await settle();
     await downloads.remove(
-      const Song(id: 'a', title: 'A', artist: '', album: '', durationSeconds: 1),
+      const Song(
+        id: 'a',
+        title: 'A',
+        artist: '',
+        album: '',
+        durationSeconds: 1,
+      ),
     );
     fetcher.fetched.clear();
 
