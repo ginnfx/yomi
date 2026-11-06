@@ -18,6 +18,10 @@
 		97C147011CF9000F007C117D /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 97C146FF1CF9000F007C117D /* LaunchScreen.storyboard */; };
 		FA73890739F8C333A5B47785 /* TailscaleBridge.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 9BFAD2400C18119D1E5E3799 /* TailscaleBridge.xcframework */; };
 		A0A65A037C0E3B8CAE7DE33D /* TunnelChannel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 649D863CB3A14C32826BF1CD /* TunnelChannel.swift */; };
+		A1B2C3D40000000000000011 /* YtDlpChannel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D40000000000000001 /* YtDlpChannel.swift */; };
+		A1B2C3D40000000000000012 /* YoutubeSearch.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D40000000000000002 /* YoutubeSearch.swift */; };
+		A1B2C3D40000000000000013 /* YoutubeAudioDownload.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D40000000000000003 /* YoutubeAudioDownload.swift */; };
+		A1B2C3D40000000000000022 /* YouTubeKit in Frameworks */ = {isa = PBXBuildFile; productRef = A1B2C3D40000000000000021 /* YouTubeKit */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -63,6 +67,9 @@
 		97C147021CF9000F007C117D /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		9BFAD2400C18119D1E5E3799 /* TailscaleBridge.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = TailscaleBridge.xcframework; path = ../../tailscale_bridge/build/TailscaleBridge.xcframework; sourceTree = SOURCE_ROOT; };
 		649D863CB3A14C32826BF1CD /* TunnelChannel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = TunnelChannel.swift; path = Runner/TunnelChannel.swift; sourceTree = SOURCE_ROOT; };
+		A1B2C3D40000000000000001 /* YtDlpChannel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = YtDlpChannel.swift; path = Runner/YtDlpChannel.swift; sourceTree = SOURCE_ROOT; };
+		A1B2C3D40000000000000002 /* YoutubeSearch.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = YoutubeSearch.swift; path = Runner/YoutubeSearch.swift; sourceTree = SOURCE_ROOT; };
+		A1B2C3D40000000000000003 /* YoutubeAudioDownload.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = YoutubeAudioDownload.swift; path = Runner/YoutubeAudioDownload.swift; sourceTree = SOURCE_ROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -72,6 +79,7 @@
 			files = (
 				78A318202AECB46A00862997 /* FlutterGeneratedPluginSwiftPackage in Frameworks */,
 				FA73890739F8C333A5B47785 /* TailscaleBridge.xcframework in Frameworks */,
+				A1B2C3D40000000000000022 /* YouTubeKit in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -128,6 +136,9 @@
 				1498D2331E8E89220040F4C2 /* GeneratedPluginRegistrant.m */,
 				74858FAE1ED2DC5600515810 /* AppDelegate.swift */,
 				649D863CB3A14C32826BF1CD /* TunnelChannel.swift */,
+				A1B2C3D40000000000000001 /* YtDlpChannel.swift */,
+				A1B2C3D40000000000000002 /* YoutubeSearch.swift */,
+				A1B2C3D40000000000000003 /* YoutubeAudioDownload.swift */,
 				9BFAD2400C18119D1E5E3799 /* TailscaleBridge.xcframework */,
 				7884E8672EC3CC0400C636F2 /* SceneDelegate.swift */,
 				74858FAD1ED2DC5600515810 /* Runner-Bridging-Header.h */,
@@ -173,6 +184,7 @@
 			name = Runner;
 			packageProductDependencies = (
 				78A3181F2AECB46A00862997 /* FlutterGeneratedPluginSwiftPackage */,
+				A1B2C3D40000000000000021 /* YouTubeKit */,
 			);
 			productName = Runner;
 			productReference = 97C146EE1CF9000F007C117D /* Runner.app */;
@@ -209,6 +221,7 @@
 			mainGroup = 97C146E51CF9000F007C117D;
 			packageReferences = (
 				781AD8BC2B33823900A9FFBB /* XCLocalSwiftPackageReference "Flutter/ephemeral/Packages/FlutterGeneratedPluginSwiftPackage" */,
+				A1B2C3D40000000000000020 /* XCRemoteSwiftPackageReference "YouTubeKit" */,
 			);
 			productRefGroup = 97C146EF1CF9000F007C117D /* Products */;
 			projectDirPath = "";
@@ -290,6 +303,9 @@
 			files = (
 				74858FAF1ED2DC5600515810 /* AppDelegate.swift in Sources */,
 				A0A65A037C0E3B8CAE7DE33D /* TunnelChannel.swift in Sources */,
+				A1B2C3D40000000000000011 /* YtDlpChannel.swift in Sources */,
+				A1B2C3D40000000000000012 /* YoutubeSearch.swift in Sources */,
+				A1B2C3D40000000000000013 /* YoutubeAudioDownload.swift in Sources */,
 				1498D2341E8E89220040F4C2 /* GeneratedPluginRegistrant.m in Sources */,
 				7884E8682EC3CC0700C636F2 /* SceneDelegate.swift in Sources */,
 			);
@@ -650,10 +666,26 @@
 		};
 /* End XCLocalSwiftPackageReference section */
 
+/* Begin XCRemoteSwiftPackageReference section */
+		A1B2C3D40000000000000020 /* XCRemoteSwiftPackageReference "YouTubeKit" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/alexeichhorn/YouTubeKit.git";
+			requirement = {
+				kind = upToNextMinorVersion;
+				minimumVersion = 0.4.10;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
 /* Begin XCSwiftPackageProductDependency section */
 		78A3181F2AECB46A00862997 /* FlutterGeneratedPluginSwiftPackage */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = FlutterGeneratedPluginSwiftPackage;
+		};
+		A1B2C3D40000000000000021 /* YouTubeKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = A1B2C3D40000000000000020 /* XCRemoteSwiftPackageReference "YouTubeKit" */;
+			productName = YouTubeKit;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

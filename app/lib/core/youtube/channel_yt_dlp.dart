@@ -4,7 +4,7 @@ import 'package:flutter/services.dart';
 
 import 'yt_dlp.dart';
 
-/// yt-dlp on Android, run by youtubedl-android behind a method channel.
+/// yt-dlp behind a method channel: youtubedl-android on Android, YouTubeKit on iPhone.
 class ChannelYtDlp implements YtDlp {
   ChannelYtDlp() {
     _channel.setMethodCallHandler(_onCall);

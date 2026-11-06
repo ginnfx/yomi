@@ -126,7 +126,11 @@ downloaded on first use and updated by itself.
   use, checks it against the release's SHA-256 sums, and updates it with `-U`. Debug
   builds stay sandboxed, and a sandboxed app can't run it, so YouTube needs a release
   build on the Mac.
-- iPhone has none yet; it opens a YouTube search instead.
+- iPhone can't run Python, so `ios/Runner/YtDlpChannel.swift` answers the same
+  search and download commands with the Swift
+  [YouTubeKit](https://github.com/alexeichhorn/YouTubeKit) extractor (the route
+  OSTTracker uses), downloading in 10 MB ranges like yt-dlp. It can't update itself;
+  bump the YouTubeKit package and ship a new build when YouTube breaks it.
 
 To check yt-dlp on a device, run a debug build with
 `--dart-define='YOMI_YTDLP_SPIKE=Artist - Title;Artist - Title'` and watch the log

@@ -6,9 +6,10 @@ import 'yt_dlp.dart';
 
 const int _resultsPerSearch = 5;
 
-/// The yt-dlp this device can run.
+/// The yt-dlp this device can run: a platform channel on phones, the official
+/// binary on desktops.
 YtDlp ytDlpForThisDevice(Directory supportDir) {
-  if (Platform.isAndroid) return ChannelYtDlp();
+  if (Platform.isAndroid || Platform.isIOS) return ChannelYtDlp();
   final binary = ProcessYtDlp.binaryFor(Platform.operatingSystem);
   if (binary == null) return const UnavailableYtDlp();
   return ProcessYtDlp(

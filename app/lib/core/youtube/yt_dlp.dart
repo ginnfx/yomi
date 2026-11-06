@@ -40,7 +40,8 @@ class YoutubeResult {
 }
 
 /// Runs yt-dlp on this device. Desktop runs the official binary; Android runs the
-/// copy bundled with youtubedl-android; iPhone has none yet.
+/// copy bundled with youtubedl-android; iPhone answers the same commands with the
+/// Swift YouTubeKit extractor (ios/Runner/YtDlpChannel.swift).
 abstract class YtDlp {
   bool get isAvailable;
 

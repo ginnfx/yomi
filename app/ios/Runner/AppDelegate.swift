@@ -4,6 +4,7 @@ import UIKit
 @main
 @objc class AppDelegate: FlutterAppDelegate, FlutterImplicitEngineDelegate {
   private var tunnel: TunnelChannel?
+  private var ytDlp: YtDlpChannel?
 
   override func application(
     _ application: UIApplication,
@@ -16,6 +17,9 @@ import UIKit
     GeneratedPluginRegistrant.register(with: engineBridge.pluginRegistry)
     if let registrar = engineBridge.pluginRegistry.registrar(forPlugin: "TunnelChannel") {
       tunnel = TunnelChannel(messenger: registrar.messenger())
+    }
+    if let registrar = engineBridge.pluginRegistry.registrar(forPlugin: "YtDlpChannel") {
+      ytDlp = YtDlpChannel(messenger: registrar.messenger())
     }
   }
 }
