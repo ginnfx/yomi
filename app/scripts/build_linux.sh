@@ -24,7 +24,9 @@ mkdir -p "$APPDIR/usr/bin" "$APPDIR/usr/share/applications" \
 # The Flutter executable looks for data/ and lib/ beside itself.
 cp -R "$BUNDLE/." "$APPDIR/usr/bin/"
 cp "$APP_DIR/linux/packaging/yomi.desktop" "$APPDIR/usr/share/applications/"
-cp "$APP_DIR/assets/icon/icon.png" "$APPDIR/usr/share/icons/hicolor/512x512/apps/yomi.png"
+# linuxdeploy accepts icons up to 512px; the shared source icon is 1024px.
+cp "$APP_DIR/macos/Runner/Assets.xcassets/AppIcon.appiconset/app_icon_512.png" \
+  "$APPDIR/usr/share/icons/hicolor/512x512/apps/yomi.png"
 
 mkdir -p "$TOOLS"
 [ -x "$TOOLS/linuxdeploy" ] || { curl -fsSL -o "$TOOLS/linuxdeploy" "$LINUXDEPLOY_URL"; chmod +x "$TOOLS/linuxdeploy"; }
