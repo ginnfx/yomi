@@ -30,6 +30,7 @@ class _BannerBody extends StatelessWidget {
 
   String get _title => switch (updates.phase) {
     UpdatePhase.downloading => _downloadingTitle,
+    UpdatePhase.installing => 'Installing update…',
     UpdatePhase.readyToInstall => 'Update ready to install',
     UpdatePhase.failed => updates.errorMessage ?? "The update couldn't finish.",
     _ => 'Yomi ${updates.release?.version} is available',
@@ -43,16 +44,23 @@ class _BannerBody extends StatelessWidget {
   }
 
   String? get _actionLabel => switch (updates.phase) {
-    UpdatePhase.downloading || UpdatePhase.idle => null,
+    UpdatePhase.downloading ||
+    UpdatePhase.installing ||
+    UpdatePhase.idle => null,
     UpdatePhase.readyToInstall => 'Install',
     UpdatePhase.failed => 'Retry',
     UpdatePhase.available =>
-      updates.mode == UpdateMode.openReleasePage ? 'Download' : 'Update',
+      updates.mode == UpdateMode.openReleasePage
+          ? 'Download'
+          : updates.isDesktopInstall
+          ? 'Update & restart'
+          : 'Update',
   };
 
   @override
   Widget build(BuildContext context) {
     final isDownloading = updates.phase == UpdatePhase.downloading;
+    final isBusy = isDownloading || updates.phase == UpdatePhase.installing;
     final label = _actionLabel;
     return Container(
       width: double.infinity,
@@ -89,7 +97,7 @@ class _BannerBody extends StatelessWidget {
                   onPressed: () => unawaited(updates.startUpdate()),
                   child: Text(label),
                 ),
-              if (!isDownloading)
+              if (!isBusy)
                 IconButton(
                   tooltip: 'Not now',
                   iconSize: 18,

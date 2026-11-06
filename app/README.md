@@ -122,8 +122,10 @@ downloaded on first use and updated by itself.
 ### yt-dlp on the other platforms
 
 - Android runs the yt-dlp bundled by youtubedl-android and updates it each session.
-- The Mac app is sandboxed, so `build_macos.sh` puts the one-folder yt-dlp build
-  inside the app (`scripts/bundle_ytdlp_macos.sh`); it updates with each release.
+- The Mac release app (unsandboxed, see Releasing) downloads `yt-dlp_macos` on first
+  use, checks it against the release's SHA-256 sums, and updates it with `-U`. Debug
+  builds stay sandboxed, and a sandboxed app can't run it, so YouTube needs a release
+  build on the Mac.
 - iPhone has none yet; it opens a YouTube search instead.
 
 To check yt-dlp on a device, run a debug build with
@@ -134,8 +136,30 @@ beside the real app.
 ## Releasing
 
 Tagging `vX.Y.Z` runs the tests, builds the signed APK, the Mac app and the Linux
-AppImage, and publishes them as a GitHub release (a failed Linux build doesn't hold
-back the others). Android and Mac users then see an update banner.
+AppImage, and publishes them with SHA-256 sidecars as a GitHub release (a failed
+Linux build doesn't hold back the others). Android, Mac and Linux users then see an
+update banner.
+
+Android downloads and verifies the APK before opening the system confirmation.
+On macOS and Linux, **Update & restart** downloads and verifies the new app,
+prepares it beside the current one, pauses playback and saves the listening
+position, then a small helper swaps it in and starts it. The helper keeps the old
+copy until the new one starts, and puts it back if it doesn't. Failures are logged
+in the app cache's `updates/install.log`. Settings, credentials, downloads and other
+data live outside the app, so they are kept. iOS in-app updating remains disabled.
+
+- **Mac:** the sideloaded release is unsandboxed so it can replace its own bundle.
+  Debug builds stay sandboxed. The first launch keeps earlier sandboxed
+  preferences and links the old Application Support and cache folders before
+  Flutter starts. Mac versions that only open the release page need one manual
+  install of this version; later updates happen in the app. Move the app out of a
+  download preview (translocated) location into a writable Applications folder first.
+- **Linux:** the AppImage replaces itself (the file in `$APPIMAGE`), so keep it in a
+  folder you can write to, such as your home folder. Builds not started from the
+  AppImage open the release page instead.
+
+The existing ad-hoc signing policy is unchanged; hashes protect download integrity,
+and release publishing permissions remain the trust boundary. Android and Mac users then see an update banner.
 
 ```sh
 git tag v1.0.2 && git push origin v1.0.2

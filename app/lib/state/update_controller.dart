@@ -14,9 +14,24 @@ const String _latestKey = 'update.latest';
 const String _dismissedKey = 'update.dismissed';
 
 /// How this platform takes an update.
-enum UpdateMode { androidInstall, openReleasePage, disabled }
+enum UpdateMode {
+  androidInstall,
+  macosInstall,
 
-enum UpdatePhase { idle, available, downloading, readyToInstall, failed }
+  /// Replaces the AppImage the app was started from.
+  linuxAppImageInstall,
+  openReleasePage,
+  disabled,
+}
+
+enum UpdatePhase {
+  idle,
+  available,
+  downloading,
+  installing,
+  readyToInstall,
+  failed,
+}
 
 /// What a check the user asked for found.
 enum UpdateCheckResult { available, upToDate, failed, unsupported }
@@ -38,7 +53,7 @@ class UpdateController extends ChangeNotifier {
   final UpdateClient client;
   final SharedPreferences prefs;
   final Directory downloadDir;
-  final Future<void> Function(File apk) install;
+  final Future<void> Function(File package) install;
   final Future<void> Function(Uri url) openPage;
   final DateTime Function() now;
 
@@ -46,7 +61,7 @@ class UpdateController extends ChangeNotifier {
   ReleaseInfo? _release;
   double? _progress;
   String? _errorMessage;
-  File? _verifiedApk;
+  File? _verifiedPackage;
   bool _isChecking = false;
 
   UpdatePhase get phase => _phase;
@@ -56,8 +71,21 @@ class UpdateController extends ChangeNotifier {
   double? get progress => _progress;
   String? get errorMessage => _errorMessage;
 
+  String? get assetName => switch (mode) {
+    UpdateMode.androidInstall => kApkAssetName,
+    UpdateMode.macosInstall => kMacAssetName,
+    UpdateMode.linuxAppImageInstall => kLinuxAppImageAssetName,
+    _ => null,
+  };
+
+  bool get isDesktopInstall =>
+      mode == UpdateMode.macosInstall ||
+      mode == UpdateMode.linuxAppImageInstall;
+
   bool get _isBusy =>
-      _phase == UpdatePhase.downloading || _phase == UpdatePhase.readyToInstall;
+      _phase == UpdatePhase.installing ||
+      _phase == UpdatePhase.downloading ||
+      _phase == UpdatePhase.readyToInstall;
 
   /// Safe to call often: GitHub is contacted at most every [kUpdateCheckInterval].
   Future<void> check() async {
@@ -96,12 +124,17 @@ class UpdateController extends ChangeNotifier {
 
   Future<void> startUpdate() async {
     final release = _release;
-    if (release == null || _phase == UpdatePhase.downloading) return;
+    if (release == null ||
+        mode == UpdateMode.disabled ||
+        _phase == UpdatePhase.downloading ||
+        _phase == UpdatePhase.installing) {
+      return;
+    }
     if (mode == UpdateMode.openReleasePage) {
       await _openReleasePage(release);
       return;
     }
-    final existing = _verifiedApk;
+    final existing = _verifiedPackage;
     if (existing != null) {
       await _launchInstaller(existing);
       return;
@@ -111,10 +144,15 @@ class UpdateController extends ChangeNotifier {
 
   Future<void> dismiss() async {
     final release = _release;
-    if (release == null || _phase == UpdatePhase.downloading) return;
+    if (release == null ||
+        mode == UpdateMode.disabled ||
+        _phase == UpdatePhase.downloading ||
+        _phase == UpdatePhase.installing) {
+      return;
+    }
     await prefs.setString(_dismissedKey, release.version.toString());
     _release = null;
-    _verifiedApk = null;
+    _verifiedPackage = null;
     _errorMessage = null;
     _setPhase(UpdatePhase.idle);
   }
@@ -164,7 +202,7 @@ class UpdateController extends ChangeNotifier {
       return;
     }
     _release = latest;
-    _verifiedApk = null;
+    _verifiedPackage = null;
     _errorMessage = null;
     _setPhase(UpdatePhase.available);
   }
@@ -174,7 +212,7 @@ class UpdateController extends ChangeNotifier {
     if (prefs.getString(_dismissedKey) == latest.version.toString()) {
       return false;
     }
-    return mode != UpdateMode.androidInstall || latest.canInstallApk;
+    return assetName == null || latest.canInstall(assetName!);
   }
 
   Future<void> _openReleasePage(ReleaseInfo release) async {
@@ -190,19 +228,25 @@ class UpdateController extends ChangeNotifier {
     _errorMessage = null;
     _progress = null;
     _setPhase(UpdatePhase.downloading);
-    final target = File('${downloadDir.path}/Yomi-${release.version}.apk');
+    final name = assetName!;
+    final suffix = mode == UpdateMode.androidInstall
+        ? '.apk'
+        : name.substring(4);
+    final target = File('${downloadDir.path}/Yomi-${release.version}$suffix');
     try {
       await _removeOtherFiles(target);
-      final hash = await client.fetchChecksum(release.checksumUrl!);
-      final apk = await client.downloadVerified(
-        release.apkUrl!,
+      final hash = await client.fetchChecksum(
+        release.assetUrl('$name.sha256')!,
+      );
+      final package = await client.downloadVerified(
+        release.assetUrl(name)!,
         expectedSha256: hash,
         destination: target,
         onProgress: _reportProgress,
       );
-      _verifiedApk = apk;
+      _verifiedPackage = package;
       _setPhase(UpdatePhase.readyToInstall);
-      await _launchInstaller(apk);
+      await _launchInstaller(package);
     } on UpdateException catch (error) {
       debugPrint('Update failed: $error');
       _fail(error.message);
@@ -212,15 +256,22 @@ class UpdateController extends ChangeNotifier {
     }
   }
 
-  Future<void> _launchInstaller(File apk) async {
+  Future<void> _launchInstaller(File package) async {
+    _setPhase(UpdatePhase.installing);
     try {
-      await install(apk);
+      await install(package);
       _setPhase(UpdatePhase.readyToInstall);
     } on Exception catch (error) {
       debugPrint('Could not start the installer: $error');
       // The file may be gone (the system can clear caches), so retry from the start.
-      _verifiedApk = null;
-      _fail("Yomi couldn't open the Android installer.");
+      _verifiedPackage = null;
+      _fail(
+        error is UpdateException
+            ? error.message
+            : isDesktopInstall
+            ? "Yomi couldn't install the update. Try again."
+            : "Yomi couldn't open the Android installer.",
+      );
     }
   }
 

@@ -157,23 +157,3 @@ String? _lastLine(String text) {
 
 @visibleForTesting
 String? expectedHashFor(String sums, String name) => _expectedHash(sums, name);
-
-/// A yt-dlp shipped inside the app (the sandboxed Mac app can't run anything else).
-/// It can't update itself; each app release brings a newer one.
-class BundledYtDlp implements YtDlp {
-  BundledYtDlp(this.binary, {ProcessStarter? start})
-    : _start = start ?? Process.start;
-
-  final File binary;
-  final ProcessStarter _start;
-
-  @override
-  bool get isAvailable => true;
-
-  @override
-  Future<String> run(List<String> args, {void Function(String line)? onLine}) =>
-      runYtDlpProcess(_start, binary.path, args, onLine: onLine);
-
-  @override
-  Future<void> update() async {}
-}

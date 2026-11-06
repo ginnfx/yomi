@@ -27,6 +27,13 @@ Future<(UpdateController, List<Uri>)> _controller(
     'body': 'Lyrics are now always visible',
     'html_url': 'https://github.com/ginnfx/yomi/releases/tag/v1.0.2',
     'assets': [
+      if (mode == UpdateMode.macosInstall) ...[
+        {'name': kMacAssetName, 'browser_download_url': '$base/$kMacAssetName'},
+        {
+          'name': '$kMacAssetName.sha256',
+          'browser_download_url': '$base/$kMacAssetName.sha256',
+        },
+      ],
       {
         'name': 'Yomi-android.apk',
         'browser_download_url': '$base/Yomi-android.apk',
@@ -80,6 +87,18 @@ Future<void> _pump(WidgetTester tester, UpdateController controller) async {
 }
 
 void main() {
+  testWidgets('desktop update action explains that Yomi restarts', (
+    tester,
+  ) async {
+    final (controller, _) = await _controller(
+      tester,
+      mode: UpdateMode.macosInstall,
+    );
+    await _pump(tester, controller);
+    expect(find.text('Update & restart'), findsOneWidget);
+    controller.dispose();
+  });
+
   testWidgets('shows nothing when there is no update', (tester) async {
     final (controller, _) = await _controller(tester);
 
@@ -148,9 +167,7 @@ void main() {
     expect(find.textContaining("couldn't"), findsOneWidget);
   });
 
-  testWidgets('macOS offers a Download link to the release page', (
-    tester,
-  ) async {
+  testWidgets('release-page fallback offers a Download link', (tester) async {
     final (controller, opened) = await _controller(
       tester,
       mode: UpdateMode.openReleasePage,

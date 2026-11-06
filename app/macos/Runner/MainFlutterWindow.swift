@@ -5,6 +5,7 @@ class MainFlutterWindow: NSWindow {
   private var tunnel: TunnelChannel?
 
   override func awakeFromNib() {
+    AppDelegate.preserveSandboxData()
     let flutterViewController = FlutterViewController()
     let windowFrame = self.frame
     self.contentViewController = flutterViewController

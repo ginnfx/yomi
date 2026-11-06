@@ -126,7 +126,7 @@ void main() {
     expect(c.phase, UpdatePhase.idle);
   });
 
-  test('offers a macOS update without needing the APK checksum', () async {
+  test('release-page fallback does not require an APK checksum', () async {
     final h = Harness(
       latest: release('1.0.2', withChecksum: false),
       mode: UpdateMode.openReleasePage,
@@ -319,6 +319,67 @@ void main() {
     });
   });
 
+  group('desktop install', () {
+    for (final entry in {
+      UpdateMode.macosInstall: kMacAssetName,
+      UpdateMode.linuxAppImageInstall: kLinuxAppImageAssetName,
+    }.entries) {
+      Map<String, dynamic> desktopRelease({bool checksum = true}) {
+        final json = release('1.0.2');
+        final base = 'https://github.com/ginnfx/yomi/releases/download/v1.0.2';
+        (json['assets'] as List).addAll(<Map<String, String>>[
+          {'name': entry.value, 'browser_download_url': '$base/${entry.value}'},
+          if (checksum)
+            {
+              'name': '${entry.value}.sha256',
+              'browser_download_url': '$base/${entry.value}.sha256',
+            },
+        ]);
+        return json;
+      }
+
+      test(
+        '${entry.key} downloads its own verified package from cached metadata',
+        () async {
+          final h = Harness(latest: desktopRelease(), mode: entry.key);
+          await (await h.build()).check();
+          final c = await h.controller();
+          await c.check();
+          await c.startUpdate();
+          expect(h.apiCalls, 1);
+          expect(h.opened, isEmpty);
+          expect(
+            h.installed.single.path,
+            endsWith('Yomi-1.0.2${entry.value.substring(4)}'),
+          );
+          expect(await h.installed.single.readAsBytes(), apkBytes);
+          expect(c.phase, UpdatePhase.readyToInstall);
+        },
+      );
+
+      test('${entry.key} requires its own checksum', () async {
+        final h = Harness(
+          latest: desktopRelease(checksum: false),
+          mode: entry.key,
+        );
+        final c = await h.build();
+        await c.check();
+        expect(c.phase, UpdatePhase.idle);
+        expect(h.installed, isEmpty);
+      });
+
+      test('${entry.key} rejects a corrupt desktop download', () async {
+        final h = Harness(latest: desktopRelease(), mode: entry.key)
+          ..checksum = 'b' * 64;
+        final c = await h.build();
+        await c.check();
+        await c.startUpdate();
+        expect(c.phase, UpdatePhase.failed);
+        expect(h.installed, isEmpty);
+      });
+    }
+  });
+
   group('Android install', () {
     test('downloads, verifies, then launches the installer', () async {
       final h = Harness(latest: release('1.0.2'));
@@ -450,7 +511,7 @@ void main() {
     });
   });
 
-  test('macOS opens the release page instead of installing', () async {
+  test('release-page fallback opens the page without installing', () async {
     final h = Harness(
       latest: release('1.0.2'),
       mode: UpdateMode.openReleasePage,

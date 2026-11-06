@@ -8,6 +8,8 @@ import 'package:http/http.dart' as http;
 const String kUpdateRepo = 'ginnfx/yomi';
 const String kApkAssetName = 'Yomi-android.apk';
 const String kApkChecksumAssetName = 'Yomi-android.apk.sha256';
+const String kMacAssetName = 'Yomi-macOS.zip';
+const String kLinuxAppImageAssetName = 'Yomi-linux-x86_64.AppImage';
 const int kMaxReleaseNotesLength = 4000;
 
 const int _defaultMaxDownloadBytes = 300 * 1024 * 1024;
@@ -56,6 +58,7 @@ class ReleaseInfo {
     required this.pageUrl,
     this.apkUrl,
     this.checksumUrl,
+    this.desktopAssets = const {},
   });
 
   final AppVersion version;
@@ -63,6 +66,17 @@ class ReleaseInfo {
   final Uri pageUrl;
   final Uri? apkUrl;
   final Uri? checksumUrl;
+
+  final Map<String, Uri> desktopAssets;
+
+  Uri? assetUrl(String name) => switch (name) {
+    kApkAssetName => apkUrl,
+    kApkChecksumAssetName => checksumUrl,
+    _ => desktopAssets[name],
+  };
+
+  bool canInstall(String name) =>
+      assetUrl(name) != null && assetUrl('$name.sha256') != null;
 
   bool get canInstallApk => apkUrl != null && checksumUrl != null;
 
@@ -82,6 +96,11 @@ class ReleaseInfo {
       pageUrl: page,
       apkUrl: _assetUrl(json['assets'], kApkAssetName),
       checksumUrl: _assetUrl(json['assets'], kApkChecksumAssetName),
+      desktopAssets: {
+        for (final name in [kMacAssetName, kLinuxAppImageAssetName])
+          for (final asset in [name, '$name.sha256'])
+            if (_assetUrl(json['assets'], asset) case final Uri url) asset: url,
+      },
     );
   }
 
@@ -92,6 +111,8 @@ class ReleaseInfo {
     'body': notes,
     'html_url': pageUrl.toString(),
     'assets': [
+      for (final entry in desktopAssets.entries)
+        {'name': entry.key, 'browser_download_url': entry.value.toString()},
       if (apkUrl != null)
         {'name': kApkAssetName, 'browser_download_url': apkUrl.toString()},
       if (checksumUrl != null)
@@ -181,7 +202,7 @@ class UpdateClient {
   }
 
   /// Returns [destination] only once its contents match [expectedSha256].
-  /// Writes to a side file first, so a failure never leaves a partial APK.
+  /// Writes to a side file first, so a failure never leaves a partial update.
   Future<File> downloadVerified(
     Uri url, {
     required String expectedSha256,

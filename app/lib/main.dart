@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:ffi' show Abi;
 import 'dart:io';
 import 'dart:math';
 
@@ -17,6 +18,7 @@ import 'core/ai/ai_api.dart';
 import 'core/apk_installer.dart';
 import 'core/app_info.dart';
 import 'core/app_update.dart';
+import 'core/desktop_installer.dart';
 import 'core/audio/yomi_audio_handler.dart';
 import 'core/catalog_cache.dart';
 import 'core/cover_palette.dart';
@@ -553,7 +555,16 @@ Future<void> main() async {
       await prefs.remove(key);
     }
   }
-  final updates = await _buildUpdateController(prefs);
+  final updates = await _buildUpdateController(
+    prefs,
+    beforeRestart: () async {
+      await player.pause();
+      await sync.saveNow().timeout(
+        const Duration(seconds: 5),
+        onTimeout: () {},
+      );
+    },
+  );
   DateTime? hiddenSince;
   AppLifecycleListener(
     onHide: () {
@@ -692,7 +703,10 @@ Future<AppInfo> _loadAppInfo() async {
   }
 }
 
-Future<UpdateController> _buildUpdateController(SharedPreferences prefs) async {
+Future<UpdateController> _buildUpdateController(
+  SharedPreferences prefs, {
+  required Future<void> Function() beforeRestart,
+}) async {
   final info = await PackageInfo.fromPlatform();
   final version = AppVersion.tryParse(info.version);
   // Must stay in step with res/xml/update_paths.xml on Android.
@@ -703,7 +717,10 @@ Future<UpdateController> _buildUpdateController(SharedPreferences prefs) async {
     client: UpdateClient(),
     prefs: prefs,
     downloadDir: Directory('${cacheDir.path}/updates'),
-    install: launchApkInstaller,
+    install: Platform.isAndroid
+        ? launchApkInstaller
+        : (file) =>
+              DesktopInstaller(beforeRestart: beforeRestart).install(file),
     openPage: openReleasePage,
   );
 }
@@ -711,7 +728,14 @@ Future<UpdateController> _buildUpdateController(SharedPreferences prefs) async {
 UpdateMode _updateMode({required bool hasValidVersion}) {
   if (!hasValidVersion) return UpdateMode.disabled;
   if (Platform.isAndroid) return UpdateMode.androidInstall;
-  if (Platform.isMacOS || Platform.isLinux) return UpdateMode.openReleasePage;
+  if (Platform.isMacOS) return UpdateMode.macosInstall;
+  if (Platform.isLinux) {
+    // Only the release AppImage can replace itself; other builds open the page.
+    final isAppImage = (Platform.environment['APPIMAGE'] ?? '').isNotEmpty;
+    return isAppImage && Abi.current() == Abi.linuxX64
+        ? UpdateMode.linuxAppImageInstall
+        : UpdateMode.openReleasePage;
+  }
   return UpdateMode.disabled;
 }
 

@@ -82,7 +82,9 @@ jobs:
       - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
         with:
           name: macos
-          path: release/Yomi-macOS.zip
+          path: |
+            release/Yomi-macOS.zip
+            release/Yomi-macOS.zip.sha256
           if-no-files-found: error
 
   linux:
@@ -113,7 +115,9 @@ jobs:
       - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
         with:
           name: linux
-          path: release/Yomi-linux-x86_64.AppImage
+          path: |
+            release/Yomi-linux-x86_64.AppImage
+            release/Yomi-linux-x86_64.AppImage.sha256
           if-no-files-found: error
 
   publish:
@@ -136,9 +140,12 @@ jobs:
             dist/Yomi-android.apk
             dist/Yomi-android.apk.sha256
             dist/Yomi-macOS.zip
+            dist/Yomi-macOS.zip.sha256
       - name: Attach the Linux app
         if: ${{ needs.linux.result == 'success' }}
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           fail_on_unmatched_files: true
-          files: dist/Yomi-linux-x86_64.AppImage
+          files: |
+            dist/Yomi-linux-x86_64.AppImage
+            dist/Yomi-linux-x86_64.AppImage.sha256

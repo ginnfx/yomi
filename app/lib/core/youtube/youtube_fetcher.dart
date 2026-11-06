@@ -11,15 +11,6 @@ YtDlp ytDlpForThisDevice(Directory supportDir) {
   if (Platform.isAndroid) return ChannelYtDlp();
   final binary = ProcessYtDlp.binaryFor(Platform.operatingSystem);
   if (binary == null) return const UnavailableYtDlp();
-  // The Mac app is sandboxed, which only lets it run programs inside its own bundle.
-  if (Platform.isMacOS) {
-    final helper = File(
-      '${File(Platform.resolvedExecutable).parent.parent.path}/Resources/yt-dlp/$binary',
-    );
-    return helper.existsSync()
-        ? BundledYtDlp(helper)
-        : const UnavailableYtDlp();
-  }
   return ProcessYtDlp(
     directory: Directory('${supportDir.path}/yt-dlp'),
     binaryName: binary,

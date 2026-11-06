@@ -45,4 +45,6 @@ APPIMAGE_EXTRACT_AND_RUN=1 "$TOOLS/linuxdeploy" --appdir "$APPDIR" \
 mkdir -p "$RELEASE_DIR"
 APPIMAGE_EXTRACT_AND_RUN=1 ARCH=x86_64 "$TOOLS/appimagetool" "$APPDIR" \
   "$RELEASE_DIR/Yomi-linux-x86_64.AppImage"
+# The app checks this before replacing itself with a downloaded update.
+(cd "$RELEASE_DIR" && sha256sum Yomi-linux-x86_64.AppImage > Yomi-linux-x86_64.AppImage.sha256)
 printf 'Linux app: %s/Yomi-linux-x86_64.AppImage\n' "$RELEASE_DIR"
