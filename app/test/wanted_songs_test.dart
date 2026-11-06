@@ -1,11 +1,13 @@
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:yomi/core/export/wanted_export.dart';
 import 'package:yomi/core/reports/reports_api.dart';
 import 'package:yomi/core/subsonic_client.dart';
 import 'package:yomi/state/reports_controller.dart';
@@ -96,8 +98,9 @@ void main() {
   group('WantedSongsSection', () {
     Future<void> pumpSection(
       WidgetTester tester,
-      ReportsController controller,
-    ) => tester.pumpWidget(
+      ReportsController controller, {
+      Future<void> Function(BuildContext, ExportedFile)? shareFile,
+    }) => tester.pumpWidget(
       ChangeNotifierProvider<ReportsController>.value(
         value: controller,
         child: MaterialApp(
@@ -105,8 +108,10 @@ void main() {
           home: YomiTheme(
             palette: accentPalettes.first,
             isTrueBlack: false,
-            child: const Scaffold(
-              body: SingleChildScrollView(child: WantedSongsSection()),
+            child: Scaffold(
+              body: SingleChildScrollView(
+                child: WantedSongsSection(shareFile: shareFile),
+              ),
             ),
           ),
         ),
@@ -155,6 +160,59 @@ void main() {
       await tester.pump();
 
       expect(find.text('Wanted by everyone'), findsNothing);
+    });
+
+    testWidgets('exports the list in the format picked', (tester) async {
+      final controller = await _controller(_api([_song('Blue Hour', 3)]));
+      ExportedFile? shared;
+      await pumpSection(
+        tester,
+        controller,
+        shareFile: (_, file) async => shared = file,
+      );
+      await tester.pump();
+      await tester.pump();
+
+      await tester.tap(find.byTooltip('Export list'));
+      await tester.pumpAndSettle();
+      expect(find.text('Text file'), findsOneWidget);
+      expect(find.text('Spreadsheet'), findsOneWidget);
+      expect(find.text('JSON'), findsOneWidget);
+      await tester.tap(find.text('Spreadsheet'));
+      await tester.pumpAndSettle();
+
+      expect(shared?.name, 'yomi-wanted-songs.csv');
+      expect(shared?.content, contains('Mira,Blue Hour,3'));
+    });
+
+    testWidgets('copies the list as text', (tester) async {
+      final controller = await _controller(_api([_song('Blue Hour', 3)]));
+      String? copied;
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        SystemChannels.platform,
+        (call) async {
+          if (call.method == 'Clipboard.setData') {
+            copied = (call.arguments as Map)['text'] as String?;
+          }
+          return null;
+        },
+      );
+      addTearDown(
+        () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+          SystemChannels.platform,
+          null,
+        ),
+      );
+      await pumpSection(tester, controller);
+      await tester.pump();
+      await tester.pump();
+
+      await tester.tap(find.byTooltip('Export list'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Copy as text'));
+      await tester.pumpAndSettle();
+
+      expect(copied, 'Mira - Blue Hour\n');
     });
   });
 }
