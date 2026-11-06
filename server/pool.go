@@ -24,7 +24,7 @@ import (
 
 const (
 	defaultPoolDir     = "/data/local/tmp/navidrome/yomi-pool"
-	defaultPoolMB      = 1024
+	defaultPoolMB      = 256
 	poolChunkBytes     = 1 << 20
 	poolFillTimeout    = 60 * time.Second
 	poolCoverFresh     = 15 * time.Minute
