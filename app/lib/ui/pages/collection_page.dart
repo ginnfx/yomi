@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:math';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -44,6 +43,14 @@ const Set<String> _songEndpoints = {
 
 /// An artist's page can refresh many albums at once, so these become one reload.
 const Duration _reloadDelay = Duration(milliseconds: 500);
+
+/// How tall the header-coloured fill behind the list must be. When the list is pulled past
+/// its top by `-offset`, the pinned bar stays put and the header slides down below it, so
+/// the gap runs from the bar's bottom to that far below it. Nothing is needed otherwise.
+double overscrollFillHeight({
+  required double offset,
+  required double barHeight,
+}) => offset < 0 ? barHeight - offset : 0;
 
 /// An album, a playlist, or Liked songs: coloured header, play controls, and the tracks.
 class CollectionPage extends StatefulWidget {
@@ -378,9 +385,12 @@ class _CollectionPageState extends State<CollectionPage> {
                     child: ListenableBuilder(
                       listenable: _scroll,
                       builder: (context, _) => SizedBox(
-                        height: _scroll.hasClients
-                            ? max(0, -_scroll.offset)
-                            : 0,
+                        height: overscrollFillHeight(
+                          offset: _scroll.hasClients ? _scroll.offset : 0,
+                          barHeight:
+                              MediaQuery.paddingOf(context).top +
+                              kToolbarHeight,
+                        ),
                         child: ColoredBox(color: color),
                       ),
                     ),

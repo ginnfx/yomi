@@ -85,6 +85,7 @@ Widget _album() => CollectionPage(
 
 void main() {
   setUpAll(loadAppFonts);
+  overscrollTests();
 
   testWidgets('an album reads "Album · 6 songs, 23 min" under its artist', (
     tester,
@@ -202,5 +203,21 @@ void main() {
         matchesGoldenFile('goldens/share_sheet.png'),
       );
     }
+  });
+}
+
+void overscrollTests() {
+  group('overscrollFillHeight', () {
+    test('is nothing while the list is not pulled past its top', () {
+      expect(overscrollFillHeight(offset: 0, barHeight: 100), 0);
+      expect(overscrollFillHeight(offset: 300, barHeight: 100), 0);
+    });
+
+    test(
+      'covers the bar plus the whole pull, so no gap shows below the bar',
+      () {
+        expect(overscrollFillHeight(offset: -330, barHeight: 110), 440);
+      },
+    );
   });
 }

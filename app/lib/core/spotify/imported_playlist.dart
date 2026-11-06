@@ -98,6 +98,19 @@ class ImportedPlaylist {
   ImportedPlaylist withEntries(List<ImportEntry> next) =>
       ImportedPlaylist(id: id, name: name, entries: List.unmodifiable(next));
 
+  /// This playlist with [song] on the end, as a song you picked yourself.
+  ImportedPlaylist withSongAdded(Song song) => withEntries([
+    ...entries,
+    ImportEntry(
+      title: song.title,
+      artist: song.artist,
+      album: song.album,
+      durationSeconds: song.durationSeconds,
+      songId: song.id,
+      isUserChoice: true,
+    ),
+  ]);
+
   /// Fills empty places with songs now in the library, as after you upload a missing one.
   /// A sure match only, so nothing changes without you knowing.
   ImportedPlaylist rematched(TrackMatcher matcher) {

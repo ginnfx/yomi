@@ -90,19 +90,7 @@ class ImportedPlaylistPage extends StatelessWidget {
     BuildContext context,
     ImportedPlaylist playlist,
     Song song,
-  ) => context.read<ImportsController>().update(
-    playlist.withEntries([
-      ...playlist.entries,
-      ImportEntry(
-        title: song.title,
-        artist: song.artist,
-        album: song.album,
-        durationSeconds: song.durationSeconds,
-        songId: song.id,
-        isUserChoice: true,
-      ),
-    ]),
-  );
+  ) => context.read<ImportsController>().update(playlist.withSongAdded(song));
 
   @override
   Widget build(BuildContext context) {
