@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Yomi
+Comment=Your music library, at home and away
+Exec=yomi
+Icon=yomi
+Categories=AudioVideo;Audio;Player;
+StartupWMClass=com.yomi.yomi

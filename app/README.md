@@ -1,6 +1,6 @@
 # Yomi client
 
-One Flutter app for iOS, Android, and macOS. The Mac version uses the same
+One Flutter app for iOS, Android, macOS and Linux. The Mac version uses the same
 Subsonic/Navidrome client and Yomi upload service as the mobile app.
 
 ## macOS
@@ -100,10 +100,42 @@ locally. Pending warm-ups follow the current queue and run one at a time.
 The menu bar also offers editing, playback, shuffle, repeat, and window commands.
 Closing the last window quits the app; minimizing keeps playback running.
 
+## Linux
+
+The Linux app ships as one AppImage for x86_64, built on Linux (the release
+workflow's Ubuntu job does it on every tag):
+
+```sh
+sudo apt-get install clang cmake ninja-build pkg-config file \
+  libgtk-3-dev libmpv-dev libsecret-1-dev
+./app/scripts/build_linux.sh --build-name=1.2.0
+chmod +x release/Yomi-linux-x86_64.AppImage && ./release/Yomi-linux-x86_64.AppImage
+```
+
+It plays through libmpv (bundled in the AppImage), keeps the login in the desktop
+keyring (libsecret), and embeds the same Tailscale node as the phones
+(`tailscale_bridge/build.sh linux` makes `libtailscale_bridge.so`), so it reaches the
+server away from home without a system VPN. Handoff with the phone works as on the
+Mac. Songs missing from the library play through the official `yt-dlp_linux`,
+downloaded on first use and updated by itself.
+
+### yt-dlp on the other platforms
+
+- Android runs the yt-dlp bundled by youtubedl-android and updates it each session.
+- The Mac app is sandboxed, so `build_macos.sh` puts the one-folder yt-dlp build
+  inside the app (`scripts/bundle_ytdlp_macos.sh`); it updates with each release.
+- iPhone has none yet; it opens a YouTube search instead.
+
+To check yt-dlp on a device, run a debug build with
+`--dart-define='YOMI_YTDLP_SPIKE=Artist - Title;Artist - Title'` and watch the log
+for `YTSPIKE`. On Android, `--android-project-arg yomiSideBySide=true` installs it
+beside the real app.
+
 ## Releasing
 
-Tagging `vX.Y.Z` runs the tests, builds the signed APK and Mac app, and publishes
-them as a GitHub release. Android and Mac users then see an update banner.
+Tagging `vX.Y.Z` runs the tests, builds the signed APK, the Mac app and the Linux
+AppImage, and publishes them as a GitHub release (a failed Linux build doesn't hold
+back the others). Android and Mac users then see an update banner.
 
 ```sh
 git tag v1.0.2 && git push origin v1.0.2

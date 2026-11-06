@@ -3,6 +3,8 @@ import 'dart:io';
 import 'dart:math';
 
 import 'package:flutter/material.dart';
+import 'package:just_audio_media_kit/just_audio_media_kit.dart';
+import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:audio_service/audio_service.dart';
 import 'package:package_info_plus/package_info_plus.dart';
@@ -31,12 +33,12 @@ import 'core/cover_sizes.dart';
 import 'core/offline/cover_warmer.dart';
 import 'core/offline/download_store.dart';
 import 'core/offline/outbox.dart';
-import 'core/tunnel/tunnel_bridge.dart';
 import 'core/spotify/imported_playlist.dart';
 import 'core/models.dart';
 import 'core/radio.dart';
 import 'core/reports/reports_api.dart';
 import 'core/spotify/missing_songs.dart';
+import 'core/tunnel/ffi_tunnel_bridge.dart';
 import 'core/youtube/youtube_fetcher.dart';
 import 'core/subsonic_client.dart';
 import 'dev_hooks.dart';
@@ -72,8 +74,12 @@ import 'ui/widgets/desktop_controls.dart';
 
 final _navigatorKey = GlobalKey<NavigatorState>();
 
+/// Computers get the quicker handoff polling and the background caching phones skip.
+final bool _isDesktop = Platform.isMacOS || Platform.isLinux;
+
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  if (Platform.isLinux) _prepareLinux();
   // Before any server request, so each one says which version is asking.
   appInfo = await _loadAppInfo();
 
@@ -120,7 +126,7 @@ Future<void> main() async {
   );
   await downloads.loadQueue();
   final tunnel = TunnelController(
-    bridge: const MethodChannelTunnelBridge(),
+    bridge: tunnelBridgeForThisDevice(),
     prefs: prefs,
     stateDir: Directory('${supportDir.path}/tailscale'),
   );
@@ -314,7 +320,7 @@ Future<void> main() async {
     player: player,
     settings: settings,
     deviceId: deviceId,
-    pollInterval: Duration(seconds: Platform.isMacOS ? 2 : 5),
+    pollInterval: Duration(seconds: _isDesktop ? 2 : 5),
   );
   final messages = MessagesController(
     savedChats: Directory('${supportDir.path}/chats'),
@@ -662,6 +668,14 @@ Future<void> _followCatalog(
   if (client != null) await catalog.sync();
 }
 
+/// Linux has no built-in player or SQLite for the plugins Yomi uses: media_kit (libmpv)
+/// plays audio and sqflite's FFI build backs the cover cache.
+void _prepareLinux() {
+  JustAudioMediaKit.ensureInitialized(linux: true, windows: false);
+  sqfliteFfiInit();
+  databaseFactory = databaseFactoryFfi;
+}
+
 /// A broken version lookup must not stop the app from starting; it then just
 /// shows no version.
 Future<AppInfo> _loadAppInfo() async {
@@ -697,7 +711,7 @@ Future<UpdateController> _buildUpdateController(SharedPreferences prefs) async {
 UpdateMode _updateMode({required bool hasValidVersion}) {
   if (!hasValidVersion) return UpdateMode.disabled;
   if (Platform.isAndroid) return UpdateMode.androidInstall;
-  if (Platform.isMacOS) return UpdateMode.openReleasePage;
+  if (Platform.isMacOS || Platform.isLinux) return UpdateMode.openReleasePage;
   return UpdateMode.disabled;
 }
 

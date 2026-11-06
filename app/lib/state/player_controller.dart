@@ -473,7 +473,8 @@ class PlayerController extends ChangeNotifier implements TransportCommands {
     if (!autoplay &&
         generation == _loadGeneration &&
         _error == null &&
-        defaultTargetPlatform == TargetPlatform.macOS &&
+        (defaultTargetPlatform == TargetPlatform.macOS ||
+            defaultTargetPlatform == TargetPlatform.linux) &&
         connectivity.isOnWifi) {
       // Prepare a handoff in the background while the phone keeps playing.
       _scheduleCaching(includeCurrent: connectivity.isOnWifi);

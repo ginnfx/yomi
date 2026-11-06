@@ -11,9 +11,15 @@ class ConnectivityController extends ChangeNotifier {
   }) : _check = check ?? (() => Connectivity().checkConnectivity()) {
     _subscription = (changes ?? Connectivity().onConnectivityChanged).listen(
       _update,
+      onError: _unknown,
     );
-    _check().then(_update);
+    _check().then(_update, onError: _unknown);
   }
+
+  /// Linux without NetworkManager (and other odd setups) can't report the network.
+  /// Assume it works: the server checks will say if it doesn't.
+  void _unknown(Object error) =>
+      debugPrint('Network state unknown, assuming online: $error');
 
   final Future<List<ConnectivityResult>> Function() _check;
   late final StreamSubscription<List<ConnectivityResult>> _subscription;

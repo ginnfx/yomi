@@ -85,8 +85,41 @@ jobs:
           path: release/Yomi-macOS.zip
           if-no-files-found: error
 
+  linux:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - name: Install Linux build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang cmake ninja-build pkg-config file \
+            libgtk-3-dev libmpv-dev libsecret-1-dev
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
+        with:
+          flutter-version: 3.47.9
+          channel: stable
+          cache: true
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: tailscale_bridge/go.mod
+          cache: false
+      - name: Build AppImage
+        env:
+          TAG: ${{ github.ref_name }}
+        run: app/scripts/build_linux.sh --build-name="${TAG#v}"
+      - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
+        with:
+          name: linux
+          path: release/Yomi-linux-x86_64.AppImage
+          if-no-files-found: error
+
   publish:
-    needs: [android, macos]
+    needs: [android, macos, linux]
+    # Linux is newer: a failed AppImage build mustn't hold back the phone and Mac apps.
+    if: ${{ !cancelled() && needs.android.result == 'success' && needs.macos.result == 'success' }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -103,3 +136,9 @@ jobs:
             dist/Yomi-android.apk
             dist/Yomi-android.apk.sha256
             dist/Yomi-macOS.zip
+      - name: Attach the Linux app
+        if: ${{ needs.linux.result == 'success' }}
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
+        with:
+          fail_on_unmatched_files: true
+          files: dist/Yomi-linux-x86_64.AppImage
