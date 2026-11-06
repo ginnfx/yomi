@@ -15,7 +15,9 @@ import '../../state/settings.dart';
 import '../settings/profile_section.dart';
 import '../settings/home_layout_section.dart';
 import '../stats/wrapped_page.dart';
+import '../assistant/ask_yomi_button.dart';
 import '../theme.dart';
+import '../widgets/discover_section.dart';
 import '../widgets/album_card.dart';
 import '../widgets/cover_art.dart';
 import '../widgets/playlist_cover.dart';
@@ -94,6 +96,10 @@ class _HomePageState extends State<HomePage> {
           for (final id in sections) () => _section(id, session),
           ..._friendsPlaying(),
           ..._shelfBuilders(home),
+          () => const DiscoverSection(),
+          () => const Center(
+            child: AskYomiButton(padding: EdgeInsets.only(top: YomiSpace.l)),
+          ),
           () => Center(
             child: TextButton.icon(
               onPressed: () => Navigator.of(context)

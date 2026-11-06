@@ -33,6 +33,8 @@ import 'core/offline/download_store.dart';
 import 'core/offline/outbox.dart';
 import 'core/tunnel/tunnel_bridge.dart';
 import 'core/spotify/imported_playlist.dart';
+import 'core/models.dart';
+import 'core/radio.dart';
 import 'core/reports/reports_api.dart';
 import 'core/spotify/missing_songs.dart';
 import 'core/youtube/youtube_fetcher.dart';
@@ -42,6 +44,7 @@ import 'state/appearance_controller.dart';
 import 'state/connectivity_controller.dart';
 import 'state/download_manager.dart';
 import 'state/ai_controller.dart';
+import 'state/assistant_controller.dart';
 import 'state/catalog_controller.dart';
 import 'state/home_controller.dart';
 import 'state/imports_controller.dart';
@@ -191,6 +194,25 @@ Future<void> main() async {
   await ai.load();
   final playlistCovers = PlaylistCoversController();
   final reports = ReportsController(prefs);
+  late final CatalogController catalogForAi;
+  late final HomeController homeForAi;
+  TasteSummary tasteSummary() => (
+    topArtists: topArtistsOf(homeForAi.taste),
+    moods: topMoodsOf(
+      library: catalogForAi.songs,
+      taste: homeForAi.taste,
+      tagFor: ai.tagFor,
+    ),
+  );
+  final assistant = AssistantController(
+    index: () => catalogForAi.searchIndex,
+    taste: tasteSummary,
+  );
+  final discover = DiscoverController(
+    prefs,
+    index: () => catalogForAi.searchIndex,
+    taste: tasteSummary,
+  );
   final youtube = YoutubeFetcher(
     ytDlp: ytDlpForThisDevice(supportDir),
     cacheDir: Directory(
@@ -236,15 +258,36 @@ Future<void> main() async {
     libraryVersion: () => catalog.lastScan,
   );
   await home.loadCache();
+  catalogForAi = catalog;
+  homeForAi = home;
   WidgetsBinding.instance.addObserver(_CoverMemoryObserver());
   await CoverImageService.instance.warm(
     _coversOnFirstScreen(home),
     limit: _coverWarmLimit,
   );
-  player.suggestNext = () =>
-      [for (final shelf in home.shelves) ...shelf.songs]
-          .take(_suggestedSongsPerSkip)
-          .toList();
+  // When the queue runs out: songs like the last one, else what Home suggests.
+  // The player asks often while building, so the radio is kept per song.
+  (Object, List<Song>)? radioMemo;
+  player.suggestNext = () {
+    final seed = player.current;
+    if (seed != null) {
+      final memoKey = (seed.id, catalog.songs, ai.labelledCount);
+      final memo = radioMemo;
+      final radio = memo != null && memo.$1 == memoKey
+          ? memo.$2
+          : radioFrom(
+              seed,
+              library: catalog.songs,
+              tagFor: ai.tagFor,
+              similarArtists: ai.similarArtists,
+            );
+      radioMemo = (memoKey, radio);
+      if (radio.isNotEmpty) return radio.take(_suggestedSongsPerSkip).toList();
+    }
+    return [for (final shelf in home.shelves) ...shelf.songs]
+        .take(_suggestedSongsPerSkip)
+        .toList();
+  };
   final uploadsDir = '${supportDir.path}/uploads';
   final uploads = UploadQueue(
     queueFile: File('$uploadsDir/queue.json'),
@@ -372,14 +415,17 @@ Future<void> main() async {
     keeper.attach(client, session.username);
     if (client == null) {
       ai.attach(null);
+      assistant.attach(null);
+      discover.attach(null);
     } else if (client.baseUrl != aiUrl) {
-      ai.attach(
-        AiApi(
-          serverUrl: client.baseUrl,
-          auth: client,
-          port: session.uploadServicePort,
-        ),
+      final aiApi = AiApi(
+        serverUrl: client.baseUrl,
+        auth: client,
+        port: session.uploadServicePort,
       );
+      ai.attach(aiApi);
+      assistant.attach(aiApi);
+      discover.attach(aiApi);
     }
     if (client == null) {
       playlistCovers.attach(null);
@@ -551,6 +597,8 @@ Future<void> main() async {
       imports: imports,
       reports: reports,
       youtubeSongs: youtubeSongs,
+      assistant: assistant,
+      discover: discover,
       playlistCovers: playlistCovers,
       tunnel: tunnel,
       messages: messages,
@@ -677,6 +725,8 @@ class YomiApp extends StatelessWidget {
     required this.imports,
     required this.reports,
     required this.youtubeSongs,
+    required this.assistant,
+    required this.discover,
     required this.playlistCovers,
     required this.tunnel,
     required this.messages,
@@ -703,6 +753,8 @@ class YomiApp extends StatelessWidget {
   final ImportsController imports;
   final ReportsController reports;
   final YoutubeController youtubeSongs;
+  final AssistantController assistant;
+  final DiscoverController discover;
   final PlaylistCoversController playlistCovers;
   final TunnelController tunnel;
   final MessagesController messages;
@@ -723,6 +775,8 @@ class YomiApp extends StatelessWidget {
         ChangeNotifierProvider<ImportsController>.value(value: imports),
         ChangeNotifierProvider<ReportsController>.value(value: reports),
         ChangeNotifierProvider<YoutubeController>.value(value: youtubeSongs),
+        ChangeNotifierProvider<AssistantController>.value(value: assistant),
+        ChangeNotifierProvider<DiscoverController>.value(value: discover),
         ChangeNotifierProvider<PlaylistCoversController>.value(
           value: playlistCovers,
         ),

@@ -17,6 +17,7 @@ import '../../state/catalog_controller.dart';
 import '../../state/home_controller.dart';
 import '../../state/settings.dart';
 import '../../core/subsonic_client.dart';
+import '../assistant/ask_yomi_button.dart';
 import '../theme.dart';
 import '../widgets/album_card.dart';
 import '../widgets/async_section.dart';
@@ -347,9 +348,20 @@ class _SearchPageState extends State<SearchPage> {
               kPagePadding,
               16,
             ),
-            child: Text(
-              'Search',
-              style: yomiText(36, weight: FontWeight.w800, letterSpacing: -1),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    'Search',
+                    style: yomiText(
+                      36,
+                      weight: FontWeight.w800,
+                      letterSpacing: -1,
+                    ),
+                  ),
+                ),
+                const AskYomiButton(),
+              ],
             ),
           ),
           Padding(

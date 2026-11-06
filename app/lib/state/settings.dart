@@ -77,6 +77,11 @@ class SettingsController extends ChangeNotifier {
 
   /// Whether friends can see what you're playing, and you theirs. Off until you choose it.
   bool get shareListening => _prefs.getBool('shareListening') ?? false;
+
+  /// "Ask Yomi", the DeepSeek music assistant. Off until someone turns it on.
+  bool get isAssistantOn => _prefs.getBool('assistantOn') ?? false;
+  Future<void> setAssistantOn(bool value) =>
+      _set(() => _prefs.setBool('assistantOn', value));
   Future<void> setShareListening(bool value) =>
       _set(() => _prefs.setBool('shareListening', value));
 

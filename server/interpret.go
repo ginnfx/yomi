@@ -46,16 +46,19 @@ type Interpreter struct {
 	calls map[string][]time.Time
 	now   func() time.Time
 	names *answerCache[[]MixName]
+
+	discoveries *answerCache[[]SuggestedSong]
 }
 
 func newInterpreter(llm *LLMClient, tags *TagStore) *Interpreter {
 	return &Interpreter{
-		llm:   llm,
-		tags:  tags,
-		cache: map[string]SearchFilters{},
-		calls: map[string][]time.Time{},
-		now:   time.Now,
-		names: newAnswerCache[[]MixName](),
+		llm:         llm,
+		tags:        tags,
+		cache:       map[string]SearchFilters{},
+		calls:       map[string][]time.Time{},
+		now:         time.Now,
+		names:       newAnswerCache[[]MixName](),
+		discoveries: newAnswerCache[[]SuggestedSong](),
 	}
 }
 

@@ -39,6 +39,7 @@ type Server struct {
 	PlaylistOwner  func(ctx context.Context, query url.Values, id string) (string, error)
 	Reports        *ReportStore
 	SongPath       func(ctx context.Context, query url.Values, id string) (string, error)
+	chatLimits     *chatLimiter
 	slots          chan struct{}
 	limits         *loginLimiter
 	scans          *scanDebouncer
@@ -47,14 +48,15 @@ type Server struct {
 
 func newServer(cfg Config, auth Authenticator, scan func(context.Context, url.Values), index *HashIndex) *Server {
 	return &Server{
-		Config: cfg,
-		Auth:   auth,
-		Store:  Store{Root: cfg.MusicDir},
-		Scan:   scan,
-		Index:  index,
-		slots:  make(chan struct{}, maxConcurrentUploads),
-		limits: newLoginLimiter(),
-		scans:  newScanDebouncer(cfg.ScanDebounce, scan),
+		Config:     cfg,
+		Auth:       auth,
+		Store:      Store{Root: cfg.MusicDir},
+		Scan:       scan,
+		Index:      index,
+		slots:      make(chan struct{}, maxConcurrentUploads),
+		limits:     newLoginLimiter(),
+		chatLimits: newChatLimiter(time.Now),
+		scans:      newScanDebouncer(cfg.ScanDebounce, scan),
 	}
 }
 
@@ -104,6 +106,8 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("PUT /v1/playlists/{id}/cover", s.handleSavePlaylistCover)
 	mux.HandleFunc("DELETE /v1/playlists/{id}/cover", s.handleDeletePlaylistCover)
 	mux.HandleFunc("POST /v1/ai/names", s.handleMixNames)
+	mux.HandleFunc("POST /v1/ai/chat", s.handleChat)
+	mux.HandleFunc("POST /v1/ai/discover", s.handleDiscover)
 	mux.HandleFunc("POST /v1/reports", s.handleAddReport)
 	mux.HandleFunc("GET /v1/reports", s.handleListReports)
 	mux.HandleFunc("PATCH /v1/reports/{id}", s.handleCloseReport)

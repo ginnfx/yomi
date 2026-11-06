@@ -8,11 +8,13 @@ import '../models.dart';
 import '../search_index.dart';
 import '../subsonic_client.dart';
 import 'playlist_ideas.dart';
+import 'assistant.dart';
 
 export 'playlist_ideas.dart';
 
 const Duration _tagsTimeout = Duration(seconds: 30);
 const Duration _interpretTimeout = Duration(seconds: 35);
+const Duration _chatTimeout = Duration(seconds: 45);
 
 /// What a phrase like "sad songs for a rainy night" means, applied to the local library.
 @immutable
@@ -182,14 +184,23 @@ class AiApi {
     );
   }
 
-  Future<Map<String, dynamic>> _post(String path, Object body) async {
+  Future<Map<String, dynamic>> _post(
+    String path,
+    Object body, {
+    Duration timeout = _interpretTimeout,
+  }) async {
     final response = await _http
         .post(
           _uri(path),
           headers: const {'Content-Type': 'application/json'},
           body: jsonEncode(body),
         )
-        .timeout(_interpretTimeout);
+        .timeout(timeout);
+    if (response.statusCode == 429) {
+      throw http.ClientException(
+        "That's a lot of questions for now. Try again in a while.",
+      );
+    }
     if (response.statusCode != 200) {
       throw http.ClientException('$path answered ${response.statusCode}');
     }
@@ -206,6 +217,36 @@ class AiApi {
           in ((json['names'] as List<dynamic>?) ?? const [])
               .cast<Map<String, dynamic>>())
         MixName.fromJson(item),
+    ];
+  }
+
+  /// Asks the assistant. Only the conversation and a taste summary are sent.
+  Future<ChatAnswer> chat(
+    List<ChatTurn> turns, {
+    required List<String> topArtists,
+    required List<String> moods,
+  }) async {
+    final json = await _post('/v1/ai/chat', {
+      'messages': [for (final turn in turns) turn.toJson()],
+      'taste': {'topArtists': topArtists, 'moods': moods},
+    }, timeout: _chatTimeout);
+    return ChatAnswer.fromJson(json);
+  }
+
+  /// Songs someone with this taste may not have yet.
+  Future<List<SuggestedSong>> discover({
+    required List<String> topArtists,
+    required List<String> moods,
+  }) async {
+    final json = await _post('/v1/ai/discover', {
+      'topArtists': topArtists,
+      'moods': moods,
+    }, timeout: _chatTimeout);
+    return [
+      for (final item
+          in (json['songs'] as List<dynamic>? ?? const [])
+              .whereType<Map<String, dynamic>>())
+        SuggestedSong.fromJson(item),
     ];
   }
 }

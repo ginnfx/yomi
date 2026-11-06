@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../../state/player_controller.dart';
 import '../../state/session.dart';
 import '../settings/appearance_section.dart';
+import '../settings/assistant_section.dart';
 import '../settings/connection_section.dart';
 import '../settings/invite_section.dart';
 import '../settings/listening_sync_section.dart';
@@ -45,6 +46,11 @@ class SettingsPage extends StatelessWidget {
               icon: Icons.palette_rounded,
               title: 'Appearance',
               page: const AppearanceSection(),
+            ),
+            _SettingsRow(
+              icon: Icons.auto_awesome_rounded,
+              title: 'Assistant',
+              page: const AssistantSection(),
             ),
             _SettingsRow(
               icon: Icons.sd_storage_rounded,
