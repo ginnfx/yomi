@@ -10,6 +10,9 @@ const (
 	maxFailedLogins = 5
 	failureWindow   = 10 * time.Minute
 	lockoutDuration = 5 * time.Minute
+
+	// maxLimiterEntries bounds memory, since user names come from the caller.
+	maxLimiterEntries = 10000
 )
 
 type attempt struct {
@@ -21,9 +24,10 @@ type attempt struct {
 // loginLimiter blocks a user name after repeated wrong passwords. It keys on the user name
 // rather than the address because requests arriving through Tailscale all appear local.
 type loginLimiter struct {
-	mu      sync.Mutex
-	now     func() time.Time
-	entries map[string]attempt
+	mu        sync.Mutex
+	now       func() time.Time
+	entries   map[string]attempt
+	lastPrune time.Time
 }
 
 func newLoginLimiter() *loginLimiter {
@@ -44,7 +48,10 @@ func (l *loginLimiter) Fail(user string) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	key, now := limiterKey(user), l.now()
-	entry := l.entries[key]
+	entry, known := l.entries[key]
+	if !known {
+		l.makeRoomLocked(now)
+	}
 	if now.Sub(entry.windowStart) > failureWindow {
 		entry = attempt{windowStart: now}
 	}
@@ -55,4 +62,26 @@ func (l *loginLimiter) Fail(user string) {
 		entry.windowStart = now
 	}
 	l.entries[key] = entry
+}
+
+// makeRoomLocked drops entries that no longer matter and, if the table is still full,
+// evicts unlocked ones so a flood of made-up names can't grow it or lock out real users.
+func (l *loginLimiter) makeRoomLocked(now time.Time) {
+	if len(l.entries) < maxLimiterEntries && now.Sub(l.lastPrune) <= failureWindow {
+		return
+	}
+	l.lastPrune = now
+	for key, entry := range l.entries {
+		if !now.Before(entry.lockedUntil) && now.Sub(entry.windowStart) > failureWindow {
+			delete(l.entries, key)
+		}
+	}
+	for key, entry := range l.entries {
+		if len(l.entries) < maxLimiterEntries {
+			return
+		}
+		if !now.Before(entry.lockedUntil) {
+			delete(l.entries, key)
+		}
+	}
 }

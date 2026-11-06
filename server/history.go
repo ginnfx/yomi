@@ -25,7 +25,7 @@ const (
 	historyDefaultPage = 1000
 	historyMaxBody     = 1 << 20
 	importedMaxBody    = 16 << 20
-	historyMaxLine     = 8 << 10
+	historyMaxLine     = 64 << 10
 	historyOldestYear  = 2000
 	historyFutureSlack = 48 * time.Hour
 	historyMinFree     = 20 << 20
@@ -96,17 +96,15 @@ func (h *HistoryStore) knownIDs(user string) (map[string]bool, error) {
 		return nil, err
 	}
 	defer file.Close()
-	scanner := bufio.NewScanner(file)
-	scanner.Buffer(make([]byte, 0, historyMaxLine), historyMaxLine)
-	for scanner.Scan() {
+	err = forEachLine(file, historyMaxLine, func(data []byte) {
 		var line struct {
 			ID string `json:"id"`
 		}
-		if json.Unmarshal(scanner.Bytes(), &line) == nil && line.ID != "" {
+		if json.Unmarshal(data, &line) == nil && line.ID != "" {
 			known[line.ID] = true
 		}
-	}
-	return known, scanner.Err()
+	})
+	return known, err
 }
 
 // Add saves new plays and returns how many there were. Sending the same one twice is safe.

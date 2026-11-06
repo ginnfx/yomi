@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"crypto/hmac"
@@ -24,17 +23,18 @@ import (
 )
 
 const (
-	maxMessageChars   = 4000
-	maxMessageBody    = 32 << 10
-	maxThreadPage     = 200
-	maxNameChars      = 40
-	maxBioChars       = 160
-	maxAvatarBytes    = 1 << 20
-	maxDeviceTokens   = 8
-	maxTokenBytes     = 4096
-	messagesPerMinute = 30
-	maxLineBytes      = 64 << 10
-	relayTimeout      = 15 * time.Second
+	maxMessageChars     = 4000
+	maxMessageBody      = 32 << 10
+	maxThreadPage       = 200
+	maxNameChars        = 40
+	maxBioChars         = 160
+	maxAvatarBytes      = 1 << 20
+	maxDeviceTokens     = 8
+	maxTokenBytes       = 4096
+	messagesPerMinute   = 30
+	maxLineBytes        = 64 << 10
+	maxReferenceIDBytes = 400
+	relayTimeout        = 15 * time.Second
 )
 
 // Message is one text, optionally sharing a song.
@@ -146,17 +146,14 @@ func (m *MessageStore) loadMessages() error {
 		return err
 	}
 	defer file.Close()
-	scanner := bufio.NewScanner(file)
-	scanner.Buffer(make([]byte, 0, maxLineBytes), maxLineBytes)
-	for scanner.Scan() {
+	return forEachLine(file, maxLineBytes, func(data []byte) {
 		var message Message
-		if err := json.Unmarshal(scanner.Bytes(), &message); err != nil {
+		if err := json.Unmarshal(data, &message); err != nil {
 			log.Printf("messages: skipping damaged line")
-			continue
+			return
 		}
 		m.messages = append(m.messages, message)
-	}
-	return scanner.Err()
+	})
 }
 
 func (m *MessageStore) loadState() error {
@@ -532,6 +529,11 @@ func (s *Server) handleSend(w http.ResponseWriter, r *http.Request) {
 	if (text == "" && request.SongID == "" && request.AlbumID == "" && request.PlaylistID == "") || utf8.RuneCountInString(text) > maxMessageChars ||
 		utf8.RuneCountInString(request.SongTitle) > maxNameChars*5 {
 		writeError(w, http.StatusBadRequest, "a message needs text or a song, up to 4000 characters")
+		return
+	}
+	if len(request.SongID) > maxReferenceIDBytes || len(request.AlbumID) > maxReferenceIDBytes ||
+		len(request.PlaylistID) > maxReferenceIDBytes {
+		writeError(w, http.StatusBadRequest, "that song, album or playlist ID is too long")
 		return
 	}
 	message, err := s.Messages.Send(Message{

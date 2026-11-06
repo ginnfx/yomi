@@ -367,3 +367,30 @@ func TestFailedPushDoesNotFailTheMessage(t *testing.T) {
 		t.Fatalf("thread = %+v", thread)
 	}
 }
+
+func TestSendRejectsOverlongReferenceIDs(t *testing.T) {
+	env := newSocialEnv(t, Config{})
+	for _, field := range []string{"songId", "albumId", "playlistId"} {
+		body := map[string]string{"to": "sam", "text": "hi", field: strings.Repeat("a", maxReferenceIDBytes+1)}
+		if code, _ := env.call(t, http.MethodPost, "/v1/messages", "keli", body); code != http.StatusBadRequest {
+			t.Fatalf("%s: %d", field, code)
+		}
+	}
+}
+
+func TestLoadingMessagesSkipsAnOversizeLine(t *testing.T) {
+	dir := t.TempDir()
+	good := `{"id":1,"from":"keli","to":"sam","text":"hi","sentMs":1}` + "\n"
+	content := good + strings.Repeat("y", 2*maxLineBytes) + "\n" +
+		strings.Replace(good, `"id":1`, `"id":2`, 1)
+	if err := os.WriteFile(dir+"/messages.jsonl", []byte(content), 0o666); err != nil {
+		t.Fatal(err)
+	}
+	store, err := openMessageStore(dir, time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(store.messages) != 2 {
+		t.Fatalf("messages: %d", len(store.messages))
+	}
+}

@@ -156,14 +156,12 @@ func (s *Server) coverTarget(w http.ResponseWriter, r *http.Request, isChange bo
 	if !isChange {
 		return id, true
 	}
-	// A playlist imported from Spotify belongs to whoever imported it.
-	if s.History != nil {
-		if safe, err := sanitizeUser(user); err == nil && s.History.HasImport(safe, id) {
-			return id, true
-		}
-	}
 	owner, err := s.PlaylistOwner(r.Context(), r.URL.Query(), id)
 	switch {
+	case errors.Is(err, errNoSuchPlaylist) && s.importedBy(user, id):
+		// Not a Navidrome playlist, so only an import can carry this ID. A real playlist's
+		// owner always wins, because import IDs are chosen by the caller.
+		return id, true
 	case errors.Is(err, errNoSuchPlaylist):
 		writeError(w, http.StatusNotFound, "no such playlist")
 		return "", false
@@ -257,4 +255,13 @@ func (s *Server) handlePlaylistCovers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"covers": versions})
+}
+
+// importedBy reports whether the user imported a playlist under this ID.
+func (s *Server) importedBy(user, id string) bool {
+	if s.History == nil {
+		return false
+	}
+	safe, err := sanitizeUser(user)
+	return err == nil && s.History.HasImport(safe, id)
 }

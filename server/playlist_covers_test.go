@@ -144,3 +144,17 @@ func TestImportedPlaylistsTakePicturesFromTheirOwnerOnly(t *testing.T) {
 		t.Fatalf("someone else: %d", status)
 	}
 }
+
+func TestImportingAVictimsPlaylistIDDoesNotGrantItsCover(t *testing.T) {
+	ts := coverServer(t)
+	// alice imports under the ID of bob's real playlist.
+	if status, body := coverCall(t, ts, http.MethodPut, "/v1/imports/theirs", "alice", []byte(`{"id":"theirs"}`)); status != http.StatusOK && status != http.StatusNoContent && status != http.StatusCreated {
+		t.Fatalf("import: %d %s", status, body)
+	}
+	if status, _ := coverCall(t, ts, http.MethodPut, "/v1/playlists/theirs/cover", "alice", pngBytes(t)); status != http.StatusForbidden {
+		t.Fatalf("shadowed put: %d", status)
+	}
+	if status, _ := coverCall(t, ts, http.MethodDelete, "/v1/playlists/theirs/cover", "alice", nil); status != http.StatusForbidden {
+		t.Fatalf("shadowed delete: %d", status)
+	}
+}

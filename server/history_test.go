@@ -250,3 +250,25 @@ func TestHistoryWritesAreRefusedOnAReplica(t *testing.T) {
 		t.Fatalf("reading from a replica: status %d", status)
 	}
 }
+
+func TestHistoryToleratesEscapedAndOversizeLines(t *testing.T) {
+	store := openTestHistory(t)
+	nasty := strings.Repeat("\x01", historyMaxField)
+	event := HistoryEvent{ID: nasty, SongID: nasty, Artist: nasty, Title: nasty, Album: nasty, Genre: nasty,
+		AtMs: time.Now().UnixMilli(), Kind: "completed"}
+	if _, err := store.Add("alice", []HistoryEvent{event}); err != nil {
+		t.Fatal(err)
+	}
+	file, err := os.OpenFile(store.logFile("alice"), os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	file.WriteString(strings.Repeat("x", 300<<10) + "\n")
+	file.Close()
+	if n, err := store.Add("alice", []HistoryEvent{historyEvent("2")}); err != nil || n != 1 {
+		t.Fatalf("n=%d err=%v", n, err)
+	}
+	if n, err := store.Add("alice", []HistoryEvent{event}); err != nil || n != 0 {
+		t.Fatalf("duplicate not recognised: n=%d err=%v", n, err)
+	}
+}

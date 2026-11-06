@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"net/http"
 	"testing"
 	"time"
@@ -59,5 +60,25 @@ func TestUploadLocksOutAfterRepeatedWrongPasswords(t *testing.T) {
 	other := postFile(t, ts.URL, "u=friend&p=good", "song.mp3", mp3Bytes)
 	if other.StatusCode != http.StatusOK {
 		t.Fatalf("other users must be unaffected, got %d", other.StatusCode)
+	}
+}
+
+func TestLimiterPrunesExpiredEntriesAndCapsSize(t *testing.T) {
+	now := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	l := newLoginLimiter()
+	l.now = func() time.Time { return now }
+	for i := 0; i < 50; i++ {
+		l.Fail(fmt.Sprintf("old%d", i))
+	}
+	now = now.Add(failureWindow + time.Second)
+	l.Fail("fresh")
+	if len(l.entries) != 1 {
+		t.Fatalf("expired entries kept: %d", len(l.entries))
+	}
+	for i := 0; i < maxLimiterEntries*2; i++ {
+		l.Fail(fmt.Sprintf("flood%d", i))
+	}
+	if len(l.entries) > maxLimiterEntries {
+		t.Fatalf("entries not capped: %d", len(l.entries))
 	}
 }
