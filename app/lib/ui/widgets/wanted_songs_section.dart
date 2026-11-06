@@ -64,8 +64,8 @@ class _WantedSongsSectionState extends State<WantedSongsSection> {
 
   @override
   Widget build(BuildContext context) {
-    final wanted = context.watch<ReportsController>().wanted;
-    if (wanted.isEmpty) return const SizedBox.shrink();
+    final reports = context.watch<ReportsController>();
+    final wanted = reports.wanted;
     final shown = _showAll ? wanted : wanted.take(_shownAtFirst).toList();
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -80,22 +80,16 @@ class _WantedSongsSectionState extends State<WantedSongsSection> {
                   style: yomiText(16, weight: FontWeight.w800),
                 ),
               ),
-              IconButton(
-                tooltip: 'Export list',
-                icon: const Icon(Icons.ios_share_rounded),
-                onPressed: () => _export(wanted),
-              ),
+              if (wanted.isNotEmpty)
+                IconButton(
+                  tooltip: 'Export list',
+                  icon: const Icon(Icons.ios_share_rounded),
+                  onPressed: () => _export(wanted),
+                ),
             ],
           ),
         ),
-        Padding(
-          padding: const EdgeInsets.fromLTRB(kPagePadding, 0, kPagePadding, 4),
-          child: Text(
-            '${wanted.length} songs people have asked for that aren\'t in the '
-            'library yet. Upload one and it drops off this list.',
-            style: yomiText(13, color: YomiColors.textSecondary),
-          ),
-        ),
+        _status(reports, wanted.length),
         for (final song in shown)
           ListTile(
             contentPadding: const EdgeInsets.symmetric(
@@ -128,6 +122,60 @@ class _WantedSongsSectionState extends State<WantedSongsSection> {
             ),
           ),
       ],
+    );
+  }
+
+  /// The line under the title: what the list is, or why there isn't one.
+  Widget _status(ReportsController reports, int count) {
+    final style = yomiText(13, color: YomiColors.textSecondary);
+    const padding = EdgeInsets.fromLTRB(kPagePadding, 0, kPagePadding, 4);
+    if (!reports.isAvailable) {
+      return Padding(
+        padding: padding,
+        child: Text(
+          "The shared list isn't available on this connection.",
+          style: style,
+        ),
+      );
+    }
+    if (reports.wantedError != null && !reports.isWantedLoaded) {
+      return Padding(
+        padding: padding,
+        child: Row(
+          children: [
+            Expanded(
+              child: Text(
+                "Couldn't load the list. ${reports.wantedError}",
+                style: style,
+              ),
+            ),
+            TextButton(
+              onPressed: reports.refreshWanted,
+              child: const Text('Try again'),
+            ),
+          ],
+        ),
+      );
+    }
+    if (!reports.isWantedLoaded) {
+      return Padding(
+        padding: padding,
+        child: Text('Loading…', style: style),
+      );
+    }
+    if (count == 0) {
+      return Padding(
+        padding: padding,
+        child: Text('Nobody has asked for a song yet.', style: style),
+      );
+    }
+    return Padding(
+      padding: padding,
+      child: Text(
+        "$count songs people have asked for that aren't in the library yet. "
+        'Upload one and it drops off this list.',
+        style: style,
+      ),
     );
   }
 }

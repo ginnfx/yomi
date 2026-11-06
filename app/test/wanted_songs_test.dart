@@ -23,16 +23,24 @@ Map<String, dynamic> _song(String title, int count) => {
   'createdMs': 1,
 };
 
-ReportsApi _api(List<Map<String, dynamic>> songs, {List<Uri>? seen}) =>
-    ReportsApi(
-      serverUrl: 'http://s',
-      auth: SubsonicClient(baseUrl: 'http://s', username: 'u', password: 'p'),
-      port: 4534,
-      httpClient: MockClient((request) async {
-        seen?.add(request.url);
-        return http.Response(jsonEncode({'songs': songs}), 200);
-      }),
+ReportsApi _api(
+  List<Map<String, dynamic>> songs, {
+  List<Uri>? seen,
+  int status = 200,
+}) => ReportsApi(
+  serverUrl: 'http://s',
+  auth: SubsonicClient(baseUrl: 'http://s', username: 'u', password: 'p'),
+  port: 4534,
+  httpClient: MockClient((request) async {
+    seen?.add(request.url);
+    return http.Response(
+      status == 200
+          ? jsonEncode({'songs': songs})
+          : jsonEncode({'message': 'reports are off'}),
+      status,
     );
+  }),
+);
 
 Future<ReportsController> _controller(ReportsApi? api) async {
   SharedPreferences.setMockInitialValues({});
@@ -150,18 +158,6 @@ void main() {
       expect(find.text('Song 7'), findsOneWidget);
     });
 
-    testWidgets('stays out of the way when nobody wants anything', (
-      tester,
-    ) async {
-      final controller = await _controller(_api(const []));
-
-      await pumpSection(tester, controller);
-      await tester.pump();
-      await tester.pump();
-
-      expect(find.text('Wanted by everyone'), findsNothing);
-    });
-
     testWidgets('exports the list in the format picked', (tester) async {
       final controller = await _controller(_api([_song('Blue Hour', 3)]));
       ExportedFile? shared;
@@ -213,6 +209,45 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(copied, 'Mira - Blue Hour\n');
+    });
+
+    testWidgets('says so, with a way to retry, when the list cannot load', (
+      tester,
+    ) async {
+      final controller = await _controller(_api(const [], status: 503));
+
+      await pumpSection(tester, controller);
+      await tester.pump();
+      await tester.pump();
+
+      expect(find.text('Wanted by everyone'), findsOneWidget);
+      expect(find.textContaining("Couldn't load"), findsOneWidget);
+      expect(find.textContaining('reports are off'), findsOneWidget);
+      expect(find.text('Try again'), findsOneWidget);
+    });
+
+    testWidgets('says nobody has asked yet instead of vanishing', (
+      tester,
+    ) async {
+      final controller = await _controller(_api(const []));
+
+      await pumpSection(tester, controller);
+      await tester.pump();
+      await tester.pump();
+
+      expect(find.text('Wanted by everyone'), findsOneWidget);
+      expect(find.textContaining('Nobody has asked'), findsOneWidget);
+    });
+
+    testWidgets('tells you when this server cannot share the list', (
+      tester,
+    ) async {
+      final controller = await _controller(null);
+
+      await pumpSection(tester, controller);
+      await tester.pump();
+
+      expect(find.textContaining("isn't available"), findsOneWidget);
     });
   });
 }

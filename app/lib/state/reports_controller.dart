@@ -27,6 +27,8 @@ class ReportsController extends ChangeNotifier {
   int _generation = 0;
   List<WantedSong> _wanted = const [];
   bool _isWantedLoaded = false;
+  bool _isWantedLoading = false;
+  String? _wantedError;
 
   List<SongReport> get reports => _reports;
   List<SongReport> get open => [
@@ -39,6 +41,10 @@ class ReportsController extends ChangeNotifier {
 
   /// Whether [wanted] came from the server, as opposed to not having been asked yet.
   bool get isWantedLoaded => _isWantedLoaded;
+  bool get isWantedLoading => _isWantedLoading;
+
+  /// Why the last try at [wanted] failed, or null if it didn't.
+  String? get wantedError => _wantedError;
   bool get isAdmin => _isAdmin;
   bool get isLoading => _isLoading;
   bool get isAvailable => _api != null;
@@ -52,24 +58,33 @@ class ReportsController extends ChangeNotifier {
     _error = null;
     _wanted = const [];
     _isWantedLoaded = false;
+    _isWantedLoading = false;
+    _wantedError = null;
     notifyListeners();
   }
 
   Future<void> refreshWanted() async {
     final api = _api;
-    if (api == null) return;
+    if (api == null || _isWantedLoading) return;
     final generation = _generation;
+    _isWantedLoading = true;
+    _wantedError = null;
+    notifyListeners();
     try {
       final songs = await api.wanted();
       if (generation != _generation) return;
       _wanted = songs;
       _isWantedLoaded = true;
     } on Exception catch (error) {
-      // A missing list isn't worth an error message; the section stays hidden.
+      if (generation != _generation) return;
       debugPrint('Could not load the wanted list: $error');
-      return;
+      _wantedError = _reasonOf(error);
+    } finally {
+      if (generation == _generation) {
+        _isWantedLoading = false;
+        notifyListeners();
+      }
     }
-    notifyListeners();
   }
 
   Future<void> refresh() async {
@@ -209,4 +224,11 @@ String _describe(Exception error) {
   }
   if (error is TimeoutException) return 'The server took too long to answer.';
   return "The server couldn't take it right now.";
+}
+
+/// A short, honest reason a request failed, for places that need to show it.
+String _reasonOf(Exception error) {
+  if (error is http.ClientException) return error.message;
+  if (error is TimeoutException) return 'The server took too long to answer.';
+  return error.toString().replaceFirst('Exception: ', '');
 }
