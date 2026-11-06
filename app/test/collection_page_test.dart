@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';
@@ -56,6 +58,7 @@ void main() {
     expect(find.text('Remove from this playlist'), findsNothing);
   });
 
+  // These reference images were rendered on macOS, like the other screen goldens.
   testWidgets('screenshot', (tester) async {
     await pumpScreen(tester, _album(), size: _phone);
 
@@ -63,7 +66,7 @@ void main() {
       find.byType(CollectionPage),
       matchesGoldenFile('goldens/collection_album.png'),
     );
-  });
+  }, skip: !Platform.isMacOS);
 
   testWidgets('screenshot of the song menu', (tester) async {
     await pumpScreen(tester, _album(), size: _phone);
@@ -74,7 +77,7 @@ void main() {
       find.byType(MaterialApp),
       matchesGoldenFile('goldens/song_menu.png'),
     );
-  });
+  }, skip: !Platform.isMacOS);
 
   testWidgets('Share opens a card to share and the phone\'s own apps', (
     tester,
@@ -99,9 +102,11 @@ void main() {
     expect(find.text('Copy'), findsOneWidget);
     expect(find.text('Picture'), findsOneWidget);
     expect(find.text('More'), findsOneWidget);
-    await expectLater(
-      find.byType(MaterialApp),
-      matchesGoldenFile('goldens/share_sheet.png'),
-    );
+    if (Platform.isMacOS) {
+      await expectLater(
+        find.byType(MaterialApp),
+        matchesGoldenFile('goldens/share_sheet.png'),
+      );
+    }
   });
 }
