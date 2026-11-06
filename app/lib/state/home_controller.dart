@@ -454,7 +454,23 @@ class HomeController extends ChangeNotifier {
     }
   }
 
-  Future<void> _saveCache(_HomeContent content) async {
+  Future<void> _pendingSave = Future<void>.value();
+
+  /// Completes once every save started so far has finished.
+  Future<void> get saved => _pendingSave;
+
+  /// Saves run one at a time: two at once would write the same temporary file.
+  Future<void> _saveCache(_HomeContent content) {
+    final next = _pendingSave.then((_) => _writeCache(content));
+    // One failed save mustn't stop the ones after it.
+    _pendingSave = next.then<void>(
+      (_) {},
+      onError: (Object error) => debugPrint('Could not save Home: $error'),
+    );
+    return next;
+  }
+
+  Future<void> _writeCache(_HomeContent content) async {
     final temp = File('${cacheFile.path}.tmp');
     try {
       await cacheFile.parent.create(recursive: true);
