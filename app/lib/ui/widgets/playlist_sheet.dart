@@ -115,9 +115,7 @@ class _PlaylistPicker extends StatelessWidget {
                         title: Text(playlist.name),
                         subtitle: Text(
                           '${playlist.songCount} songs',
-                          style: const TextStyle(
-                            color: YomiColors.textSecondary,
-                          ),
+                          style: TextStyle(color: YomiColors.textSecondary),
                         ),
                         onTap: () => _run(
                           context,

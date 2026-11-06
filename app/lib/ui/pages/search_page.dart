@@ -363,7 +363,7 @@ class _SearchPageState extends State<SearchPage> {
               style: yomiText(16, weight: FontWeight.w600),
               decoration: InputDecoration(
                 hintText: 'Songs, artists and albums',
-                prefixIcon: const Icon(
+                prefixIcon: Icon(
                   Icons.search_rounded,
                   color: YomiColors.textSecondary,
                 ),
@@ -467,7 +467,7 @@ class _SearchPageState extends State<SearchPage> {
               padding: const EdgeInsets.all(48),
               child: Column(
                 children: [
-                  const Icon(
+                  Icon(
                     Icons.search_off_rounded,
                     size: 44,
                     color: YomiColors.textSecondary,

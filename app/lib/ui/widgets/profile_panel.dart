@@ -117,7 +117,7 @@ class _ProfilePanel extends StatelessWidget {
                 ],
               ),
             ),
-            const Divider(height: 1, color: YomiColors.hairline),
+            Divider(height: 1, color: YomiColors.hairline),
             ListTile(
               leading: const Icon(Icons.person_outline_rounded),
               title: Text(

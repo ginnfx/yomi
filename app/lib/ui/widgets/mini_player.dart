@@ -59,6 +59,8 @@ class MiniPlayer extends StatelessWidget {
             borderRadius: BorderRadius.circular(YomiRadius.card),
             color: snapshot.data == null
                 ? YomiColors.surfaceHigh
+                : YomiColors.isLight
+                ? Color.lerp(snapshot.data, YomiColors.surface, 0.72)
                 : Color.lerp(snapshot.data, Colors.black, 0.35),
             child: SizedBox(
               height: kMiniPlayerHeight,
@@ -99,7 +101,7 @@ class MiniPlayer extends StatelessWidget {
                                 style: yomiText(
                                   12,
                                   weight: FontWeight.w500,
-                                  color: Colors.white70,
+                                  color: YomiColors.faint(0.70),
                                 ),
                               ),
                             ],
@@ -167,7 +169,7 @@ class _ProgressLine extends StatelessWidget {
         return LinearProgressIndicator(
           value: fraction,
           minHeight: 2,
-          backgroundColor: Colors.white12,
+          backgroundColor: YomiColors.faint(0.12),
           color: YomiColors.textPrimary,
         );
       },

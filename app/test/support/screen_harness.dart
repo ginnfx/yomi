@@ -149,7 +149,10 @@ Future<void> pumpScreen(
   Lyrics? lyrics,
   Map<String, Object> prefs = const {},
   Directory? profileDir,
+  Brightness brightness = Brightness.dark,
 }) async {
+  YomiColors.useBrightness(brightness);
+  addTearDown(() => YomiColors.useBrightness(Brightness.dark));
   SharedPreferences.setMockInitialValues(prefs);
   final sharedPrefs = await SharedPreferences.getInstance();
   tester.view
@@ -176,10 +179,11 @@ Future<void> pumpScreen(
       ],
       child: MaterialApp(
         debugShowCheckedModeBanner: false,
-        theme: buildYomiTheme(accentPalettes.first),
+        theme: buildYomiTheme(accentPalettes.first, brightness: brightness),
         builder: (context, inner) => YomiTheme(
           palette: accentPalettes.first,
           isTrueBlack: false,
+          brightness: brightness,
           child: inner!,
         ),
         home: child,

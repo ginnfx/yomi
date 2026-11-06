@@ -237,7 +237,7 @@ class _ShellPageState extends State<ShellPage>
                       ),
                     ),
                   ),
-                  const VerticalDivider(width: 1, color: YomiColors.hairline),
+                  VerticalDivider(width: 1, color: YomiColors.hairline),
                   Expanded(
                     child: Column(
                       children: [

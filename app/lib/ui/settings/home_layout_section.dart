@@ -141,7 +141,7 @@ class HomeLayoutSection extends StatelessWidget {
                     ),
                     ReorderableDragStartListener(
                       index: i,
-                      child: const Padding(
+                      child: Padding(
                         padding: EdgeInsets.all(8),
                         child: Icon(
                           Icons.drag_handle_rounded,

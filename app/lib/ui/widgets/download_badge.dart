@@ -33,7 +33,7 @@ class DownloadBadge extends StatelessWidget {
             value: progress <= 0 ? null : progress,
             strokeWidth: 2,
             color: context.accent,
-            backgroundColor: Colors.white12,
+            backgroundColor: YomiColors.faint(0.12),
           ),
         );
       case DownloadStatus.queued:

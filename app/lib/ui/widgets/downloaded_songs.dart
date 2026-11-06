@@ -41,7 +41,7 @@ class DownloadedSongs extends StatelessWidget {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Icon(
+              Icon(
                 Icons.arrow_circle_down_rounded,
                 size: 52,
                 color: YomiColors.textSecondary,
@@ -83,7 +83,7 @@ class DownloadedSongs extends StatelessWidget {
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(28),
                   ),
-                  side: const BorderSide(color: Colors.white24),
+                  side: BorderSide(color: YomiColors.faint(0.24)),
                 ),
                 onPressed: () async {
                   await player.playQueue(songs);

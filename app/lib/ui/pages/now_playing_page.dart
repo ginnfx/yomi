@@ -476,7 +476,7 @@ class _TitleRow extends StatelessWidget {
                 style: yomiText(
                   isCompact ? 13.5 : 16,
                   weight: FontWeight.w500,
-                  color: Colors.white70,
+                  color: YomiColors.faint(0.70),
                 ),
               ),
             ],
@@ -541,7 +541,7 @@ class _SeekBarState extends State<_SeekBar> {
                   data: SliderTheme.of(context).copyWith(
                     trackHeight: 3,
                     activeTrackColor: YomiColors.textPrimary,
-                    inactiveTrackColor: Colors.white24,
+                    inactiveTrackColor: YomiColors.faint(0.24),
                     thumbColor: YomiColors.textPrimary,
                     overlayShape: SliderComponentShape.noOverlay,
                     thumbShape: const RoundSliderThumbShape(
@@ -572,7 +572,7 @@ class _SeekBarState extends State<_SeekBar> {
                         style: yomiText(
                           12,
                           weight: FontWeight.w600,
-                          color: Colors.white60,
+                          color: YomiColors.faint(0.60),
                         ),
                       ),
                       Text(
@@ -580,7 +580,7 @@ class _SeekBarState extends State<_SeekBar> {
                         style: yomiText(
                           12,
                           weight: FontWeight.w600,
-                          color: Colors.white60,
+                          color: YomiColors.faint(0.60),
                         ),
                       ),
                     ],
@@ -611,7 +611,7 @@ class _Controls extends StatelessWidget {
         IconButton(
           icon: Icon(
             Icons.shuffle_rounded,
-            color: player.isShuffled ? context.accent : Colors.white54,
+            color: player.isShuffled ? context.accent : YomiColors.faint(0.54),
           ),
           onPressed: () {
             HapticFeedback.selectionClick();
@@ -634,23 +634,23 @@ class _Controls extends StatelessWidget {
           child: Container(
             width: 64,
             height: 64,
-            decoration: const BoxDecoration(
+            decoration: BoxDecoration(
               color: YomiColors.textPrimary,
               shape: BoxShape.circle,
             ),
             child: player.isBuffering
-                ? const Padding(
-                    padding: EdgeInsets.all(20),
+                ? Padding(
+                    padding: const EdgeInsets.all(20),
                     child: CircularProgressIndicator(
                       strokeWidth: 3,
-                      color: Colors.black,
+                      color: YomiColors.background,
                     ),
                   )
                 : Icon(
                     player.isPlaying
                         ? Icons.pause_rounded
                         : Icons.play_arrow_rounded,
-                    color: Colors.black,
+                    color: YomiColors.background,
                     size: 38,
                   ),
           ),
@@ -669,7 +669,7 @@ class _Controls extends StatelessWidget {
           icon: Icon(
             repeatIcon,
             color: player.loopMode == LoopMode.off
-                ? Colors.white54
+                ? YomiColors.faint(0.54)
                 : context.accent,
           ),
           onPressed: () {

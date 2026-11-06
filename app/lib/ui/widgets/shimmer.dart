@@ -38,9 +38,9 @@ class _ShimmerState extends State<Shimmer> with SingleTickerProviderStateMixin {
           return LinearGradient(
             begin: Alignment(-1.5 + 3 * t, -0.3),
             end: Alignment(-0.5 + 3 * t, 0.3),
-            colors: const [
+            colors: [
               YomiColors.surfaceHigh,
-              Color(0xFF2E2E3E),
+              Color.lerp(YomiColors.surfaceHigh, YomiColors.textPrimary, 0.06)!,
               YomiColors.surfaceHigh,
             ],
             stops: const [0.25, 0.5, 0.75],

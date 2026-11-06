@@ -115,4 +115,18 @@ void main() {
       matchesGoldenFile('goldens/home_phone.png'),
     );
   }, skip: !Platform.isMacOS);
+
+  testWidgets('screenshot in the light theme', (tester) async {
+    await pumpScreen(
+      tester,
+      home(),
+      size: phoneSize,
+      prefs: hideQuick,
+      brightness: Brightness.light,
+    );
+    await expectLater(
+      find.byType(MaterialApp),
+      matchesGoldenFile('goldens/home_phone_light.png'),
+    );
+  }, skip: !Platform.isMacOS);
 }

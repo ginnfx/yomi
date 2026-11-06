@@ -155,7 +155,7 @@ class SongTile extends StatelessWidget {
                       child: EqualizerBars(isPlaying: isPlaying),
                     ),
                   IconButton(
-                    icon: const Icon(
+                    icon: Icon(
                       Icons.more_horiz_rounded,
                       color: YomiColors.textSecondary,
                     ),
@@ -290,7 +290,7 @@ Future<void> showSongMenu(
               ),
             ),
           ),
-          const Divider(height: 1, color: Colors.white10),
+          Divider(height: 1, color: YomiColors.faint(0.10)),
           for (final action in actions)
             ListTile(
               leading: Icon(action.icon),

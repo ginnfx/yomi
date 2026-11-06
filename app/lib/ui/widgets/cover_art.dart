@@ -59,7 +59,9 @@ class CoverArt extends StatelessWidget {
           boxShadow: elevated
               ? [
                   BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.45),
+                    color: Colors.black.withValues(
+                      alpha: YomiColors.isLight ? 0.18 : 0.45,
+                    ),
                     blurRadius: 24,
                     offset: const Offset(0, 10),
                   ),

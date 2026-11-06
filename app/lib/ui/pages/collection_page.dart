@@ -514,7 +514,7 @@ class _RoundAction extends StatelessWidget {
     required this.icon,
     required this.onTap,
     required this.tooltip,
-    this.color = YomiColors.textPrimary,
+    this.color,
     this.isBusy = false,
     this.progress = 0,
   });
@@ -522,7 +522,7 @@ class _RoundAction extends StatelessWidget {
   final IconData icon;
   final VoidCallback? onTap;
   final String tooltip;
-  final Color color;
+  final Color? color;
   final bool isBusy;
   final double progress;
 
@@ -537,7 +537,7 @@ class _RoundAction extends StatelessWidget {
           height: 50,
           decoration: BoxDecoration(
             shape: BoxShape.circle,
-            color: Colors.white.withValues(alpha: 0.10),
+            color: YomiColors.faint(0.10),
           ),
           child: Stack(
             alignment: Alignment.center,
@@ -552,7 +552,7 @@ class _RoundAction extends StatelessWidget {
                     color: context.accent,
                   ),
                 ),
-              Icon(icon, color: color, size: 24),
+              Icon(icon, color: color ?? YomiColors.textPrimary, size: 24),
             ],
           ),
         ),

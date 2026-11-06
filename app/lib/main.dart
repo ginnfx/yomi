@@ -57,6 +57,7 @@ import 'state/update_controller.dart';
 import 'state/upload_queue.dart';
 import 'ui/widgets/album_card.dart' show kCardWidth;
 import 'ui/pages/login_page.dart';
+import 'ui/appearance_scope.dart';
 import 'ui/pages/shell_page.dart';
 import 'ui/theme.dart';
 import 'ui/widgets/desktop_controls.dart';
@@ -697,11 +698,11 @@ class YomiApp extends StatelessWidget {
           navigatorKey: _navigatorKey,
           title: 'Yomi',
           debugShowCheckedModeBanner: false,
-          theme: buildYomiTheme(look.palette, trueBlack: look.isTrueBlack),
+          theme: buildYomiTheme(look.palette, brightness: Brightness.light),
+          darkTheme: buildYomiTheme(look.palette, trueBlack: look.isTrueBlack),
+          themeMode: look.themeMode,
           // Wrapping the Navigator means every page, including pushed ones, reads the live accent.
-          builder: (context, child) => YomiTheme(
-            palette: look.palette,
-            isTrueBlack: look.isTrueBlack,
+          builder: (context, child) => AppearanceScope(
             child: Platform.isMacOS
                 ? DesktopControls(navigatorKey: _navigatorKey, child: child!)
                 : child!,

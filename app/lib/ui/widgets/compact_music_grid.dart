@@ -61,9 +61,7 @@ class _ShortcutState extends State<_Shortcut> {
       onEnter: (_) => setState(() => _hovered = true),
       onExit: (_) => setState(() => _hovered = false),
       child: Material(
-        color: _hovered
-            ? Colors.white.withValues(alpha: 0.09)
-            : Colors.white.withValues(alpha: 0.035),
+        color: _hovered ? YomiColors.faint(0.09) : YomiColors.faint(0.035),
         borderRadius: BorderRadius.circular(12),
         clipBehavior: Clip.antiAlias,
         child: InkWell(

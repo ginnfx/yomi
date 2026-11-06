@@ -423,7 +423,7 @@ class _SongsTabState extends State<_SongsTab> {
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(28),
             ),
-            side: const BorderSide(color: Colors.white24),
+            side: BorderSide(color: YomiColors.faint(0.24)),
           ),
           onPressed: songs.isEmpty ? null : () => _shuffle(player, songs),
           icon: const Icon(Icons.shuffle_rounded),

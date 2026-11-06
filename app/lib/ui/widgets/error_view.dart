@@ -40,7 +40,7 @@ class ErrorView extends StatelessWidget {
             height: 64,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
-              color: Colors.white.withValues(alpha: 0.07),
+              color: YomiColors.faint(0.07),
             ),
             child: Icon(
               friendly.action == ErrorAction.none

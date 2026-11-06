@@ -291,7 +291,7 @@ class _HourChart extends StatelessWidget {
                 ],
               ),
             ),
-            const Divider(height: 1, color: Colors.white24),
+            Divider(height: 1, color: YomiColors.faint(0.24)),
             const SizedBox(height: 4),
             Row(
               children: [

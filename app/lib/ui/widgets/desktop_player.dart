@@ -30,7 +30,7 @@ class _DesktopPlayerState extends State<DesktopPlayer> {
     return Material(
       color: YomiColors.surface,
       child: Container(
-        decoration: const BoxDecoration(
+        decoration: BoxDecoration(
           border: Border(top: BorderSide(color: YomiColors.hairline)),
         ),
         padding: const EdgeInsets.fromLTRB(24, 10, 24, 10),
@@ -55,7 +55,7 @@ class _DesktopPlayerState extends State<DesktopPlayer> {
                           ),
                         )
                       else
-                        const Icon(
+                        Icon(
                           Icons.music_note_rounded,
                           color: YomiColors.textSecondary,
                           size: 32,
@@ -88,7 +88,7 @@ class _DesktopPlayerState extends State<DesktopPlayer> {
                         ),
                       ),
                       if (canPlay && player.isCurrentCached)
-                        const Tooltip(
+                        Tooltip(
                           message: 'Available offline on this Mac',
                           child: Padding(
                             padding: EdgeInsets.symmetric(horizontal: 8),
@@ -111,7 +111,7 @@ class _DesktopPlayerState extends State<DesktopPlayer> {
                       iconSize: 19,
                       color: player.isShuffled
                           ? context.accent
-                          : Colors.white54,
+                          : YomiColors.faint(0.54),
                       onPressed: canPlay ? player.toggleShuffle : null,
                       icon: const Icon(Icons.shuffle_rounded),
                     ),
@@ -165,7 +165,7 @@ class _DesktopPlayerState extends State<DesktopPlayer> {
                       tooltip: 'Repeat',
                       iconSize: 19,
                       color: player.loopMode == LoopMode.off
-                          ? Colors.white54
+                          ? YomiColors.faint(0.54)
                           : context.accent,
                       onPressed: canPlay ? player.cycleRepeat : null,
                       icon: Icon(
@@ -189,7 +189,7 @@ class _DesktopPlayerState extends State<DesktopPlayer> {
                         icon: const Icon(Icons.queue_music_rounded, size: 20),
                       ),
                       const SizedBox(width: 8),
-                      const Icon(
+                      Icon(
                         Icons.volume_up_outlined,
                         size: 18,
                         color: YomiColors.textSecondary,

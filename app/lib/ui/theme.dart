@@ -1,17 +1,69 @@
 import 'package:flutter/cupertino.dart' show CupertinoPageTransitionsBuilder;
 import 'package:flutter/material.dart';
 
+/// One set of neutral colours, for a dark or a light look.
+@immutable
+class YomiNeutrals {
+  const YomiNeutrals({
+    required this.background,
+    required this.surface,
+    required this.surfaceHigh,
+    required this.hairline,
+    required this.textPrimary,
+    required this.textSecondary,
+  });
+
+  final Color background;
+  final Color surface;
+  final Color surfaceHigh;
+  final Color hairline;
+  final Color textPrimary;
+  final Color textSecondary;
+
+  static const dark = YomiNeutrals(
+    background: Color(0xFF101012),
+    surface: Color(0xFF1A1A1D),
+    surfaceHigh: Color(0xFF28282C),
+    hairline: Color(0x1AFFFFFF),
+    textPrimary: Color(0xFFFFFFFF),
+    textSecondary: Color(0xFFA6A6AC),
+  );
+
+  static const light = YomiNeutrals(
+    background: Color(0xFFF5F5F7),
+    surface: Color(0xFFFFFFFF),
+    surfaceHigh: Color(0xFFE8E8ED),
+    hairline: Color(0x1A000000),
+    textPrimary: Color(0xFF111114),
+    textSecondary: Color(0xFF5E5E66),
+  );
+
+  static YomiNeutrals of(Brightness brightness) =>
+      brightness == Brightness.light ? light : dark;
+}
+
 /// Yomi's look: flat neutral surfaces, strong type and the album art doing the
-/// colour work. Neutrals live here; the accent comes from the chosen
-/// [AccentPalette] via `context.accent`.
+/// colour work. Neutrals follow the light or dark theme; the accent comes from the
+/// chosen [AccentPalette] via `context.accent`.
 abstract final class YomiColors {
-  static const background = Color(0xFF101012);
+  static YomiNeutrals _neutrals = YomiNeutrals.dark;
+
+  /// Set by the app root whenever the theme's brightness changes.
+  static void useBrightness(Brightness brightness) =>
+      _neutrals = YomiNeutrals.of(brightness);
+
+  static bool get isLight => identical(_neutrals, YomiNeutrals.light);
+
+  static Color get background => _neutrals.background;
   static const trueBlack = Color(0xFF000000);
-  static const surface = Color(0xFF1A1A1D);
-  static const surfaceHigh = Color(0xFF28282C);
-  static const hairline = Color(0x1AFFFFFF);
-  static const textPrimary = Color(0xFFFFFFFF);
-  static const textSecondary = Color(0xFFA6A6AC);
+  static Color get surface => _neutrals.surface;
+  static Color get surfaceHigh => _neutrals.surfaceHigh;
+  static Color get hairline => _neutrals.hairline;
+  static Color get textPrimary => _neutrals.textPrimary;
+  static Color get textSecondary => _neutrals.textSecondary;
+
+  /// The text colour at a lower strength, for icons and lines on page surfaces.
+  static Color faint(double alpha) => textPrimary.withValues(alpha: alpha);
   static const success = Color(0xFF3FD694);
   static const danger = Color(0xFFFF6B6B);
 }
@@ -38,6 +90,7 @@ abstract final class YomiRadius {
 abstract final class YomiMotion {
   static const quick = Duration(milliseconds: 140);
   static const standard = Duration(milliseconds: 240);
+  static const slow = Duration(milliseconds: 420);
   static const Curve curve = Curves.easeOutCubic;
 }
 
@@ -54,12 +107,35 @@ class AccentPalette {
     this.secondary,
   );
 
+  /// A full palette grown from one colour: a darker shade and a neighbouring hue.
+  factory AccentPalette.fromColor(
+    Color color, {
+    String id = kCustomPaletteId,
+    String name = 'Custom',
+  }) {
+    final hsl = HSLColor.fromColor(color);
+    final deep = hsl
+        .withLightness((hsl.lightness * 0.45).clamp(0.12, 0.35))
+        .toColor();
+    final secondary = hsl.withHue((hsl.hue + 40) % 360).toColor();
+    return AccentPalette(id, name, color, deep, secondary);
+  }
+
   final String id;
   final String name;
   final Color accent;
   final Color deep;
   final Color secondary;
+
+  @override
+  bool operator ==(Object other) =>
+      other is AccentPalette && other.id == id && other.accent == accent;
+
+  @override
+  int get hashCode => Object.hash(id, accent);
 }
+
+const String kCustomPaletteId = 'custom';
 
 const List<AccentPalette> accentPalettes = [
   AccentPalette(
@@ -110,18 +186,30 @@ class YomiTheme extends InheritedWidget {
     super.key,
     required this.palette,
     required this.isTrueBlack,
+    this.brightness = Brightness.dark,
+    this.reduceMotion = false,
     required super.child,
   });
 
   final AccentPalette palette;
   final bool isTrueBlack;
+  final Brightness brightness;
+
+  /// Animations should finish at once: the user or the system asked for less motion.
+  final bool reduceMotion;
 
   static YomiTheme of(BuildContext context) =>
       context.dependOnInheritedWidgetOfExactType<YomiTheme>()!;
 
+  static YomiTheme? maybeOf(BuildContext context) =>
+      context.dependOnInheritedWidgetOfExactType<YomiTheme>();
+
   @override
   bool updateShouldNotify(YomiTheme old) =>
-      palette != old.palette || isTrueBlack != old.isTrueBlack;
+      palette != old.palette ||
+      isTrueBlack != old.isTrueBlack ||
+      brightness != old.brightness ||
+      reduceMotion != old.reduceMotion;
 }
 
 extension YomiContext on BuildContext {
@@ -136,9 +224,16 @@ extension YomiContext on BuildContext {
     YomiTheme.of(this).palette.accent,
     0.55,
   )!;
-  Color get pageColor => YomiTheme.of(this).isTrueBlack
-      ? YomiColors.trueBlack
-      : YomiColors.background;
+  Color get pageColor {
+    final theme = YomiTheme.of(this);
+    return theme.isTrueBlack && theme.brightness == Brightness.dark
+        ? YomiColors.trueBlack
+        : YomiColors.background;
+  }
+
+  /// [duration], or no time at all when less motion was asked for.
+  Duration motion(Duration duration) =>
+      YomiTheme.maybeOf(this)?.reduceMotion ?? false ? Duration.zero : duration;
 }
 
 const double kPagePadding = 20;
@@ -148,30 +243,38 @@ const String kFontFamily = 'Jakarta';
 TextStyle yomiText(
   double size, {
   FontWeight weight = FontWeight.w600,
-  Color color = YomiColors.textPrimary,
+  Color? color,
   double? height,
   double? letterSpacing,
 }) => TextStyle(
   fontFamily: kFontFamily,
   fontSize: size,
   fontWeight: weight,
-  color: color,
+  color: color ?? YomiColors.textPrimary,
   height: height,
   letterSpacing: letterSpacing,
 );
 
-ThemeData buildYomiTheme(AccentPalette palette, {bool trueBlack = false}) {
-  final page = trueBlack ? YomiColors.trueBlack : YomiColors.background;
+ThemeData buildYomiTheme(
+  AccentPalette palette, {
+  bool trueBlack = false,
+  Brightness brightness = Brightness.dark,
+}) {
+  final colors = YomiNeutrals.of(brightness);
+  final isDark = brightness == Brightness.dark;
+  final page = trueBlack && isDark ? YomiColors.trueBlack : colors.background;
   final scheme = ColorScheme.fromSeed(
     seedColor: palette.accent,
-    brightness: Brightness.dark,
+    brightness: brightness,
     surface: page,
   ).copyWith(primary: palette.accent, onPrimary: Colors.black);
-  final base = Typography.whiteMountainView.apply(
-    fontFamily: kFontFamily,
-    bodyColor: YomiColors.textPrimary,
-    displayColor: YomiColors.textPrimary,
-  );
+  final base =
+      (isDark ? Typography.whiteMountainView : Typography.blackMountainView)
+          .apply(
+            fontFamily: kFontFamily,
+            bodyColor: colors.textPrimary,
+            displayColor: colors.textPrimary,
+          );
   return ThemeData(
     useMaterial3: true,
     fontFamily: kFontFamily,
@@ -180,24 +283,25 @@ ThemeData buildYomiTheme(AccentPalette palette, {bool trueBlack = false}) {
     scaffoldBackgroundColor: page,
     canvasColor: page,
     splashFactory: InkRipple.splashFactory,
-    appBarTheme: const AppBarTheme(
+    appBarTheme: AppBarTheme(
+      foregroundColor: colors.textPrimary,
       backgroundColor: Colors.transparent,
       surfaceTintColor: Colors.transparent,
       elevation: 0,
     ),
-    bottomSheetTheme: const BottomSheetThemeData(
-      backgroundColor: YomiColors.surface,
+    bottomSheetTheme: BottomSheetThemeData(
+      backgroundColor: colors.surface,
       surfaceTintColor: Colors.transparent,
       showDragHandle: true,
-      dragHandleColor: Color(0x33FFFFFF),
-      shape: RoundedRectangleBorder(
+      dragHandleColor: colors.textPrimary.withValues(alpha: 0.2),
+      shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(
           top: Radius.circular(YomiRadius.sheet),
         ),
       ),
     ),
     dialogTheme: DialogThemeData(
-      backgroundColor: YomiColors.surface,
+      backgroundColor: colors.surface,
       surfaceTintColor: Colors.transparent,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(YomiRadius.sheet),
@@ -211,7 +315,7 @@ ThemeData buildYomiTheme(AccentPalette palette, {bool trueBlack = false}) {
     ),
     inputDecorationTheme: InputDecorationTheme(
       filled: true,
-      fillColor: YomiColors.surfaceHigh,
+      fillColor: colors.surfaceHigh,
       contentPadding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
       border: OutlineInputBorder(
         borderRadius: BorderRadius.circular(18),
@@ -221,20 +325,24 @@ ThemeData buildYomiTheme(AccentPalette palette, {bool trueBlack = false}) {
         borderRadius: BorderRadius.circular(18),
         borderSide: BorderSide(color: palette.accent, width: 1.5),
       ),
-      hintStyle: const TextStyle(color: YomiColors.textSecondary),
+      hintStyle: TextStyle(color: colors.textSecondary),
     ),
     snackBarTheme: SnackBarThemeData(
       behavior: SnackBarBehavior.floating,
-      backgroundColor: YomiColors.surfaceHigh,
-      contentTextStyle: yomiText(14, weight: FontWeight.w600),
+      backgroundColor: colors.surfaceHigh,
+      contentTextStyle: yomiText(
+        14,
+        weight: FontWeight.w600,
+        color: colors.textPrimary,
+      ),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
     ),
     sliderTheme: SliderThemeData(
       trackHeight: 5,
       thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 7),
-      activeTrackColor: YomiColors.textPrimary,
-      inactiveTrackColor: Colors.white24,
-      thumbColor: YomiColors.textPrimary,
+      activeTrackColor: colors.textPrimary,
+      inactiveTrackColor: colors.textPrimary.withValues(alpha: 0.24),
+      thumbColor: colors.textPrimary,
       overlayShape: SliderComponentShape.noOverlay,
     ),
     pageTransitionsTheme: const PageTransitionsTheme(
