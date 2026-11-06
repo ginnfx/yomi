@@ -20,9 +20,9 @@ import 'messages_page.dart';
 import 'playlist_preview_page.dart';
 
 /// Opens someone's profile. Your own shows what friends see.
-Future<void> openProfile(BuildContext context, String user) => Navigator.of(
-  context,
-).push(MaterialPageRoute<void>(builder: (_) => FriendProfilePage(user: user)));
+Future<void> openProfile(BuildContext context, String user) =>
+    Navigator.of(context)
+        .push(yomiRoute<void>(builder: (_) => FriendProfilePage(user: user)));
 
 /// How many shared artists name a Blend.
 const int _blendNameArtists = 3;
@@ -86,11 +86,9 @@ class FriendProfilePage extends StatelessWidget {
             const SizedBox(height: 16),
             Center(
               child: FilledButton.tonalIcon(
-                onPressed: () => Navigator.of(context).push(
-                  MaterialPageRoute<void>(
-                    builder: (_) => ThreadPage(user: user),
-                  ),
-                ),
+                onPressed: () => Navigator.of(
+                  context,
+                ).push(yomiRoute<void>(builder: (_) => ThreadPage(user: user))),
                 icon: const Icon(Icons.chat_bubble_outline_rounded),
                 label: const Text('Message'),
               ),
@@ -162,7 +160,7 @@ class FriendProfilePage extends StatelessWidget {
         if (song.artist == artist) song,
     ];
     Navigator.of(context).push(
-      MaterialPageRoute<void>(
+      yomiRoute<void>(
         builder: (_) => CollectionPage(
           title: artist,
           subtitle: '${songs.length} songs',

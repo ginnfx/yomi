@@ -24,6 +24,29 @@ class MiniPlayer extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final song = context.watch<PlayerController>().current;
+    // Slides up from under the nav bar when something starts, and back down when it stops.
+    return AnimatedSwitcher(
+      duration: context.motion(YomiMotion.standard),
+      switchInCurve: YomiMotion.curve,
+      switchOutCurve: YomiMotion.curve,
+      transitionBuilder: (child, animation) => SizeTransition(
+        sizeFactor: animation,
+        alignment: Alignment.bottomCenter,
+        child: FadeTransition(opacity: animation, child: child),
+      ),
+      child: song == null
+          ? const SizedBox(key: ValueKey('none'), width: double.infinity)
+          : const _MiniPlayerBar(key: ValueKey('bar')),
+    );
+  }
+}
+
+class _MiniPlayerBar extends StatelessWidget {
+  const _MiniPlayerBar({super.key});
+
+  @override
+  Widget build(BuildContext context) {
     final player = context.watch<PlayerController>();
     final song = player.current;
     if (song == null) return const SizedBox.shrink();
@@ -54,14 +77,16 @@ class MiniPlayer extends StatelessWidget {
               player.previous();
             }
           },
-          child: Material(
-            clipBehavior: Clip.antiAlias,
-            borderRadius: BorderRadius.circular(YomiRadius.card),
-            color: snapshot.data == null
-                ? YomiColors.surfaceHigh
-                : YomiColors.isLight
-                ? Color.lerp(snapshot.data, YomiColors.surface, 0.72)
-                : Color.lerp(snapshot.data, Colors.black, 0.35),
+          child: TweenAnimationBuilder<Color?>(
+            tween: ColorTween(end: _barColor(snapshot.data)),
+            duration: context.motion(YomiMotion.slow),
+            curve: YomiMotion.curve,
+            builder: (context, color, child) => Material(
+              clipBehavior: Clip.antiAlias,
+              borderRadius: BorderRadius.circular(YomiRadius.card),
+              color: color,
+              child: child,
+            ),
             child: SizedBox(
               height: kMiniPlayerHeight,
               child: Stack(
@@ -175,4 +200,12 @@ class _ProgressLine extends StatelessWidget {
       },
     );
   }
+}
+
+/// The bar's colour: the cover's own colour, toned to sit on the page.
+Color _barColor(Color? cover) {
+  if (cover == null) return YomiColors.surfaceHigh;
+  return YomiColors.isLight
+      ? Color.lerp(cover, YomiColors.surface, 0.72)!
+      : Color.lerp(cover, Colors.black, 0.35)!;
 }

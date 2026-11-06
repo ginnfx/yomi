@@ -17,7 +17,7 @@ Future<void> openPlaylistPreview(
   required String description,
   required List<Song> songs,
 }) => Navigator.of(context).push(
-  MaterialPageRoute<void>(
+  yomiRoute<void>(
     builder: (_) =>
         PlaylistPreviewPage(name: name, description: description, songs: songs),
   ),

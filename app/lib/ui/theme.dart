@@ -204,6 +204,10 @@ class YomiTheme extends InheritedWidget {
   static YomiTheme? maybeOf(BuildContext context) =>
       context.dependOnInheritedWidgetOfExactType<YomiTheme>();
 
+  /// Reads the theme without rebuilding when it changes; for routes and callbacks.
+  static YomiTheme? peek(BuildContext context) =>
+      context.getInheritedWidgetOfExactType<YomiTheme>();
+
   @override
   bool updateShouldNotify(YomiTheme old) =>
       palette != old.palette ||
@@ -349,6 +353,8 @@ ThemeData buildYomiTheme(
       builders: {
         TargetPlatform.android: FadeForwardsPageTransitionsBuilder(),
         TargetPlatform.iOS: CupertinoPageTransitionsBuilder(),
+        TargetPlatform.macOS: FadeForwardsPageTransitionsBuilder(),
+        TargetPlatform.linux: FadeForwardsPageTransitionsBuilder(),
       },
     ),
   );
@@ -387,4 +393,27 @@ class PageBackground extends StatelessWidget {
       child: child,
     );
   }
+}
+
+/// A page route with the platform's transition, or none when less motion was asked for.
+PageRoute<T> yomiRoute<T>({
+  required WidgetBuilder builder,
+  bool fullscreenDialog = false,
+}) => _YomiPageRoute<T>(builder: builder, fullscreenDialog: fullscreenDialog);
+
+class _YomiPageRoute<T> extends MaterialPageRoute<T> {
+  _YomiPageRoute({required super.builder, super.fullscreenDialog});
+
+  bool get _isReduced {
+    final context = navigator?.context;
+    return context != null && (YomiTheme.peek(context)?.reduceMotion ?? false);
+  }
+
+  @override
+  Duration get transitionDuration =>
+      _isReduced ? Duration.zero : super.transitionDuration;
+
+  @override
+  Duration get reverseTransitionDuration =>
+      _isReduced ? Duration.zero : super.reverseTransitionDuration;
 }

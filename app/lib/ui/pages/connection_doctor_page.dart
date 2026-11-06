@@ -6,9 +6,8 @@ import '../../state/session.dart';
 import '../theme.dart';
 
 void openConnectionDoctor(BuildContext context) {
-  Navigator.of(
-    context,
-  ).push(MaterialPageRoute<void>(builder: (_) => const ConnectionDoctorPage()));
+  Navigator.of(context)
+      .push(yomiRoute<void>(builder: (_) => const ConnectionDoctorPage()));
 }
 
 /// Tries every known server address and shows which ones work, so a dead address

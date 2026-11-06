@@ -161,7 +161,7 @@ class _ProfilePanel extends StatelessWidget {
                 final navigator = Navigator.of(context);
                 navigator.pop();
                 navigator.push(
-                  MaterialPageRoute<void>(builder: (_) => const StatsPage()),
+                  yomiRoute<void>(builder: (_) => const StatsPage()),
                 );
               },
             ),

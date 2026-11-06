@@ -24,7 +24,7 @@ Future<List<int>?> reorderSongs(
   required String title,
   required List<ReorderItem> items,
 }) => Navigator.of(context).push<List<int>>(
-  MaterialPageRoute(
+  yomiRoute(
     builder: (_) => _ReorderPage(title: title, items: items),
   ),
 );

@@ -9,7 +9,7 @@ import '../theme.dart';
 void openDashboard(BuildContext context) {
   final session = context.read<SessionController>();
   Navigator.of(context, rootNavigator: true).push(
-    MaterialPageRoute<void>(
+    yomiRoute<void>(
       builder: (_) => ChangeNotifierProvider<DashboardController>(
         create: (_) {
           final statusClient = ServerStatusClient(

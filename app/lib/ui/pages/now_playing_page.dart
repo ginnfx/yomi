@@ -28,8 +28,8 @@ void openNowPlaying(BuildContext context) {
   Navigator.of(context, rootNavigator: true).push(
     PageRouteBuilder<void>(
       fullscreenDialog: true,
-      transitionDuration: const Duration(milliseconds: 300),
-      reverseTransitionDuration: YomiMotion.standard,
+      transitionDuration: context.motion(const Duration(milliseconds: 300)),
+      reverseTransitionDuration: context.motion(YomiMotion.standard),
       pageBuilder: (_, _, _) => const NowPlayingPage(),
       transitionsBuilder: (_, animation, _, child) => SlideTransition(
         position: Tween(

@@ -82,7 +82,7 @@ class _ImportReviewPageState extends State<ImportReviewPage> {
         ),
     ]);
     navigator.pushReplacement(
-      MaterialPageRoute<void>(
+      yomiRoute<void>(
         builder: (_) => ImportedPlaylistPage(playlistId: playlist.id),
       ),
     );

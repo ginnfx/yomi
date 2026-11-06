@@ -565,7 +565,7 @@ class _RoundAction extends StatelessWidget {
 void openArtist(BuildContext context, Artist artist) {
   final client = context.read<SessionController>().client;
   Navigator.of(context).push(
-    MaterialPageRoute<void>(
+    yomiRoute<void>(
       builder: (_) => CollectionPage(
         title: artist.name,
         subtitle: '',
@@ -578,7 +578,7 @@ void openArtist(BuildContext context, Artist artist) {
 void openPlaylist(BuildContext context, Playlist playlist) {
   final client = context.read<SessionController>().client;
   Navigator.of(context).push(
-    MaterialPageRoute<void>(
+    yomiRoute<void>(
       builder: (_) => CollectionPage(
         title: playlist.name,
         subtitle: '${playlist.songCount} songs',

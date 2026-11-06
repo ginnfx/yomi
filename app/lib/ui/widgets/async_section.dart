@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../theme.dart';
 import 'error_view.dart';
 import 'shimmer.dart';
 
@@ -95,15 +96,34 @@ class _AsyncSectionState<T> extends State<AsyncSection<T>> {
 
   @override
   Widget build(BuildContext context) {
+    final error = _error;
+    final Widget child;
     if (_hasData) {
-      return AnimatedSwitcher(
-        duration: const Duration(milliseconds: 250),
+      child = KeyedSubtree(
+        key: const ValueKey('data'),
         child: widget.builder(context, _data as T),
       );
+    } else if (error != null) {
+      child = KeyedSubtree(
+        key: const ValueKey('error'),
+        child: ErrorView(error: error, onRetry: _retry),
+      );
+    } else {
+      child = KeyedSubtree(
+        key: const ValueKey('skeleton'),
+        child: widget.skeleton,
+      );
     }
-    final error = _error;
-    return error == null
-        ? widget.skeleton
-        : ErrorView(error: error, onRetry: _retry);
+    return AnimatedSwitcher(
+      duration: context.motion(YomiMotion.standard),
+      switchInCurve: YomiMotion.curve,
+      layoutBuilder: _topAligned,
+      child: child,
+    );
   }
 }
+
+/// Keeps the outgoing state above the incoming one, aligned to the top, so lists
+/// don't jump to the middle while they swap.
+Widget _topAligned(Widget? current, List<Widget> previous) =>
+    Stack(alignment: Alignment.topCenter, children: [...previous, ?current]);

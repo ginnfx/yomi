@@ -9,7 +9,14 @@ class ContinueListening extends StatelessWidget {
   const ContinueListening({super.key});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => AnimatedSize(
+    duration: context.motion(YomiMotion.standard),
+    curve: YomiMotion.curve,
+    alignment: Alignment.topCenter,
+    child: _content(context),
+  );
+
+  Widget _content(BuildContext context) {
     final sync = context.watch<PlaybackSyncController>();
     final remote = sync.remote;
     if (!sync.enabled || remote == null) return const SizedBox.shrink();

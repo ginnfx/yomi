@@ -283,7 +283,7 @@ class _SearchPageState extends State<SearchPage> {
   void _openAll(String title, List<Song> songs) {
     _rememberSearch();
     Navigator.of(context).push(
-      MaterialPageRoute<void>(
+      yomiRoute<void>(
         builder: (_) => CollectionPage(
           title: title,
           subtitle: '${songs.length} songs',
@@ -379,15 +379,19 @@ class _SearchPageState extends State<SearchPage> {
               ),
             ),
           ),
-          if (_isLoading)
-            Padding(
-              padding: const EdgeInsets.only(top: 12),
-              child: LinearProgressIndicator(
-                minHeight: 2,
-                color: context.accent,
-                backgroundColor: Colors.transparent,
-              ),
-            ),
+          AnimatedSwitcher(
+            duration: context.motion(YomiMotion.quick),
+            child: _isLoading
+                ? Padding(
+                    padding: const EdgeInsets.only(top: 12),
+                    child: LinearProgressIndicator(
+                      minHeight: 2,
+                      color: context.accent,
+                      backgroundColor: Colors.transparent,
+                    ),
+                  )
+                : const SizedBox(width: double.infinity, height: 14),
+          ),
           if (_error != null)
             ErrorView(error: _error!, onRetry: () => _search(_controller.text))
           else if (!_hasSearched) ...[

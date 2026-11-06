@@ -96,9 +96,8 @@ class _HomePageState extends State<HomePage> {
           ..._shelfBuilders(home),
           () => Center(
             child: TextButton.icon(
-              onPressed: () => Navigator.of(context).push(
-                MaterialPageRoute<void>(builder: (_) => const _EditHomePage()),
-              ),
+              onPressed: () => Navigator.of(context)
+                  .push(yomiRoute<void>(builder: (_) => const _EditHomePage())),
               icon: const Icon(Icons.tune_rounded, size: 18),
               label: const Text('Edit Home'),
             ),

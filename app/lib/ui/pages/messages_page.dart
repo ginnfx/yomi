@@ -17,7 +17,7 @@ void openMessages(BuildContext context) {
   Navigator.of(
     context,
     rootNavigator: true,
-  ).push(MaterialPageRoute<void>(builder: (_) => const MessagesPage()));
+  ).push(yomiRoute<void>(builder: (_) => const MessagesPage()));
 }
 
 const String _privacyNote =
@@ -175,7 +175,7 @@ class _FriendsRow extends StatelessWidget {
 
 void _openThread(BuildContext context, String user) {
   Navigator.of(context)
-      .push(MaterialPageRoute<void>(builder: (_) => ThreadPage(user: user)));
+      .push(yomiRoute<void>(builder: (_) => ThreadPage(user: user)));
 }
 
 class _Unavailable extends StatelessWidget {
@@ -441,21 +441,26 @@ class _ThreadPageState extends State<ThreadPage> {
                   ),
                 ),
               ),
-            if (replying != null)
-              ListTile(
-                dense: true,
-                leading: const Icon(Icons.reply_rounded),
-                title: Text(
-                  _preview(replying),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                trailing: IconButton(
-                  tooltip: 'Cancel reply',
-                  icon: const Icon(Icons.close_rounded),
-                  onPressed: () => setState(() => _replyingTo = null),
-                ),
-              ),
+            AnimatedSize(
+              duration: context.motion(YomiMotion.standard),
+              curve: YomiMotion.curve,
+              child: replying == null
+                  ? const SizedBox(width: double.infinity)
+                  : ListTile(
+                      dense: true,
+                      leading: const Icon(Icons.reply_rounded),
+                      title: Text(
+                        _preview(replying),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      trailing: IconButton(
+                        tooltip: 'Cancel reply',
+                        icon: const Icon(Icons.close_rounded),
+                        onPressed: () => setState(() => _replyingTo = null),
+                      ),
+                    ),
+            ),
             Padding(
               padding: const EdgeInsets.fromLTRB(
                 YomiSpace.s,
@@ -530,7 +535,7 @@ class _Bubble extends StatelessWidget {
         await player.playQueue([await client.song(id)]);
       } else if (message.albumId case final id?) {
         await navigator.push(
-          MaterialPageRoute<void>(
+          yomiRoute<void>(
             builder: (_) => CollectionPage(
               title: title,
               subtitle: '',
@@ -541,7 +546,7 @@ class _Bubble extends StatelessWidget {
         );
       } else if (message.playlistId case final id?) {
         await navigator.push(
-          MaterialPageRoute<void>(
+          yomiRoute<void>(
             builder: (_) => CollectionPage(
               title: title,
               subtitle: '',

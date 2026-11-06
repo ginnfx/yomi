@@ -57,7 +57,14 @@ class _MadeForYouState extends State<MadeForYou> {
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => AnimatedSize(
+    duration: context.motion(YomiMotion.standard),
+    curve: YomiMotion.curve,
+    alignment: Alignment.topCenter,
+    child: _content(context),
+  );
+
+  Widget _content(BuildContext context) {
     _rebuildIfNeeded();
     if (_mixes.isEmpty) return const SizedBox.shrink();
     return Column(

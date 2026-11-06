@@ -46,7 +46,7 @@ class _SpotifyImportPageState extends State<SpotifyImportPage> {
       final linked = await fetchSpotifyPlaylist(_link.text);
       if (!mounted) return;
       await navigator.push(
-        MaterialPageRoute<void>(
+        yomiRoute<void>(
           builder: (_) => ImportReviewPage(
             playlist: linked.playlist,
             mayBeIncomplete: linked.mayBeIncomplete,
@@ -62,9 +62,7 @@ class _SpotifyImportPageState extends State<SpotifyImportPage> {
 
   void _review(ExportPlaylist playlist) {
     Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (_) => ImportReviewPage(playlist: playlist),
-      ),
+      yomiRoute<void>(builder: (_) => ImportReviewPage(playlist: playlist)),
     );
   }
 

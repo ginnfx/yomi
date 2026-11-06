@@ -15,7 +15,7 @@ const double _shareImageScale = 3;
 void openWrapped(BuildContext context, int year) {
   final stats = statsFor(context, StatsRange.year(year));
   Navigator.of(context).push(
-    MaterialPageRoute<void>(
+    yomiRoute<void>(
       builder: (_) => WrappedPage(year: year, stats: stats),
     ),
   );

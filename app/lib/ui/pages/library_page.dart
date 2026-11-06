@@ -22,6 +22,7 @@ import '../widgets/async_section.dart';
 import '../widgets/cover_art.dart';
 import '../widgets/downloaded_songs.dart';
 import '../widgets/error_view.dart';
+import '../widgets/fade_on_change.dart';
 import '../stats/spotify_import_page.dart';
 import '../widgets/genre_filter_bar.dart';
 import '../widgets/made_for_you.dart';
@@ -91,9 +92,8 @@ class _LibraryPageState extends State<LibraryPage> {
         unawaited(_newPlaylist());
       case _NewKind.spotify:
         unawaited(
-          Navigator.of(context).push(
-            MaterialPageRoute<void>(builder: (_) => const SpotifyImportPage()),
-          ),
+          Navigator.of(context)
+              .push(yomiRoute<void>(builder: (_) => const SpotifyImportPage())),
         );
     }
   }
@@ -249,14 +249,17 @@ class _LibraryPageState extends State<LibraryPage> {
           Expanded(
             // Each tab stays alive once opened, keeping its list and scroll position.
             child: _query.isEmpty
-                ? IndexedStack(
-                    index: _tab.index,
-                    children: [
-                      for (final tab in _Tab.values)
-                        _visited.contains(tab)
-                            ? _body(tab, client)
-                            : const SizedBox.shrink(),
-                    ],
+                ? FadeOnChange(
+                    trigger: _tab,
+                    child: IndexedStack(
+                      index: _tab.index,
+                      children: [
+                        for (final tab in _Tab.values)
+                          _visited.contains(tab)
+                              ? _body(tab, client)
+                              : const SizedBox.shrink(),
+                      ],
+                    ),
                   )
                 : KeyedSubtree(
                     key: ValueKey('$_tab-$_query'),
@@ -605,7 +608,7 @@ class _PlaylistsTabState extends State<_PlaylistsTab> {
                 ),
                 subtitle: Text('Playlist · ${playlist.entries.length} songs'),
                 onTap: () => Navigator.of(context).push(
-                  MaterialPageRoute<void>(
+                  yomiRoute<void>(
                     builder: (_) =>
                         ImportedPlaylistPage(playlistId: playlist.id),
                   ),
@@ -638,7 +641,7 @@ class _PlaylistsTabState extends State<_PlaylistsTab> {
                   style: yomiText(16, weight: FontWeight.w700),
                 ),
                 onTap: () => Navigator.of(context).push(
-                  MaterialPageRoute<void>(
+                  yomiRoute<void>(
                     builder: (_) => CollectionPage(
                       title: 'Liked songs',
                       subtitle: '',

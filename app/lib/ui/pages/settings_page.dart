@@ -16,7 +16,7 @@ import '../theme.dart';
 
 void openSettings(BuildContext context) {
   Navigator.of(context)
-      .push(MaterialPageRoute<void>(builder: (_) => const SettingsPage()));
+      .push(yomiRoute<void>(builder: (_) => const SettingsPage()));
 }
 
 /// Every option in one place. Each group is its own small widget in lib/ui/settings.
@@ -59,9 +59,7 @@ class SettingsPage extends StatelessWidget {
               ),
               trailing: const Icon(Icons.chevron_right_rounded),
               onTap: () => Navigator.of(context).push(
-                MaterialPageRoute<void>(
-                  builder: (_) => const SpotifyImportPage(),
-                ),
+                yomiRoute<void>(builder: (_) => const SpotifyImportPage()),
               ),
             ),
             _SettingsRow(
@@ -145,7 +143,7 @@ class _SettingsRow extends StatelessWidget {
             ),
       trailing: const Icon(Icons.chevron_right_rounded),
       onTap: () => Navigator.of(context).push(
-        MaterialPageRoute<void>(
+        yomiRoute<void>(
           builder: (_) => PageBackground(
             child: Scaffold(
               backgroundColor: Colors.transparent,

@@ -21,7 +21,7 @@ class LocalResults extends StatelessWidget {
     final songs = context.read<CatalogController>().songs;
     onOpened();
     Navigator.of(context).push(
-      MaterialPageRoute<void>(
+      yomiRoute<void>(
         builder: (_) => CollectionPage(
           title: artist.name,
           subtitle: '${artist.songCount} songs',
@@ -39,7 +39,7 @@ class LocalResults extends StatelessWidget {
     final client = context.read<SessionController>().client;
     onOpened();
     Navigator.of(context).push(
-      MaterialPageRoute<void>(
+      yomiRoute<void>(
         builder: (_) => CollectionPage(
           title: album.name,
           subtitle: album.artist,
