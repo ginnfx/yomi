@@ -11,6 +11,7 @@ abstract interface class TunnelBridge {
   /// Opens a loopback port reaching [remote] ("host:port") and returns the port.
   Future<int> forward(String remote);
   Future<String> state();
+  Future<void> networkChanged();
   Future<void> stop();
 }
 
@@ -42,6 +43,10 @@ class MethodChannelTunnelBridge implements TunnelBridge {
   @override
   Future<String> state() async =>
       await _channel.invokeMethod<String>('state') ?? 'NoState';
+
+  @override
+  Future<void> networkChanged() =>
+      _channel.invokeMethod<void>('networkChanged');
 
   @override
   Future<void> stop() => _channel.invokeMethod<void>('stop');

@@ -75,6 +75,11 @@ Future<bool> _pingProbe(String url, String user, String password) async {
   }
 }
 
+const _tunnelTimeout = Duration(seconds: 20);
+
+Future<ProbeResult> _probeTunnel(String url, String user, String password) =>
+    probeUrl(url, user, password, timeout: _tunnelTimeout);
+
 /// Holds the signed-in account and the clients built from it. With a home and an away
 /// address saved, it checks which one works and switches by itself when the network changes.
 class SessionController extends ChangeNotifier with WidgetsBindingObserver {
@@ -85,6 +90,9 @@ class SessionController extends ChangeNotifier with WidgetsBindingObserver {
     UrlProbe? urlProbe,
     LanFinder? lanFinder,
     this.tunnelConnect,
+    this.tunnelReconnect,
+    this.tunnelNetworkChanged,
+    UrlProbe? tunnelProbe,
     this.uploadPortFor,
     RoleProbe? roleProbe,
     this.catalogCacheFor,
@@ -102,6 +110,7 @@ class SessionController extends ChangeNotifier with WidgetsBindingObserver {
        _connectivity = connectivity,
        _probe = probe ?? _pingProbe,
        _urlProbe = urlProbe ?? probeUrl,
+       _tunnelProbe = tunnelProbe ?? urlProbe ?? _probeTunnel,
        _lanFinder = lanFinder ?? findServerOnLan {
     _connectivity?.addListener(_onNetworkChanged);
   }
@@ -123,10 +132,13 @@ class SessionController extends ChangeNotifier with WidgetsBindingObserver {
   final ConnectivityController? _connectivity;
   final HomeProbe _probe;
   final UrlProbe _urlProbe;
+  final UrlProbe _tunnelProbe;
   final LanFinder _lanFinder;
 
   /// Starts the embedded tunnel and returns its address, if this device has joined.
   final Future<String?> Function()? tunnelConnect;
+  final Future<String?> Function()? tunnelReconnect;
+  final Future<void> Function()? tunnelNetworkChanged;
 
   /// The upload service's port for an address; it differs when going through the tunnel.
   final int Function(String url)? uploadPortFor;
@@ -325,7 +337,7 @@ class SessionController extends ChangeNotifier with WidgetsBindingObserver {
           username: user.trim(),
           password: password,
           httpClient: _httpClient,
-        ).ping();
+        ).ping(timeout: _tunnelTimeout);
       }
     }
     _awayUrl = away;
@@ -400,12 +412,17 @@ class SessionController extends ChangeNotifier with WidgetsBindingObserver {
     notifyListeners();
     var reachable = false;
     try {
-      await client.ping(timeout: _reachTimeout);
+      await client.ping(timeout: _isOnTunnel ? _tunnelTimeout : _reachTimeout);
       reachable = true;
     } on Exception {
-      reachable = await _failOver(client.baseUrl);
+      try {
+        reachable = await _failOver(client.baseUrl);
+      } on Exception catch (error) {
+        debugPrint('Server recovery failed: $error');
+      }
+    } finally {
+      _isChecking = false;
     }
-    _isChecking = false;
     _reachRetry?.cancel();
     if (!reachable) {
       _reachRetry = Timer(_reachRetryEvery, checkServer);
@@ -437,10 +454,16 @@ class SessionController extends ChangeNotifier with WidgetsBindingObserver {
   /// Last resort after every direct address failed, so a device that can reach the
   /// server by LAN or the Tailscale app never pays for a second network stack.
   Future<bool> _connectThroughTunnel() async {
-    final url = await tunnelConnect?.call();
+    var url = await tunnelConnect?.call();
     if (url == null) return false;
-    final result = await _urlProbe(url, _user, _password);
-    if (!result.isOk) return false;
+    var result = await _tunnelProbe(url, _user, _password);
+    if (!result.isOk) {
+      // Running only describes the backend, not whether its peer path works.
+      url = await tunnelReconnect?.call();
+      if (url == null) return false;
+      result = await _tunnelProbe(url, _user, _password);
+      if (!result.isOk) return false;
+    }
     _isOnBackup = false;
     _isOnTunnel = true;
     _build(url);
@@ -550,6 +573,7 @@ class SessionController extends ChangeNotifier with WidgetsBindingObserver {
   void _onNetworkChanged() {
     _debounce?.cancel();
     _debounce = Timer(_routeDebounce, () async {
+      await tunnelNetworkChanged?.call();
       await refreshRoute();
       await _routineCheck();
     });
@@ -562,7 +586,7 @@ class SessionController extends ChangeNotifier with WidgetsBindingObserver {
     if (client == null) return;
     for (var attempt = 0; attempt < _routineAttempts; attempt++) {
       try {
-        await client.ping(timeout: _wakeTimeout);
+        await client.ping(timeout: _isOnTunnel ? _tunnelTimeout : _wakeTimeout);
         if (!_isServerReachable) {
           _reachRetry?.cancel();
           _isServerReachable = true;

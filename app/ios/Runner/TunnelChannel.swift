@@ -37,6 +37,8 @@ final class TunnelChannel {
       var port = 0
       BridgeForward(arguments["remote"] as? String, &port, &error)
       value = port
+    case "networkChanged":
+      BridgeNetworkChanged()
     case "state":
       value = BridgeState()
     case "stop":

@@ -3,7 +3,7 @@ set -eu
 APP_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 RELEASE_DIR="$APP_DIR/../release"
 BRIDGE_DIR="$APP_DIR/../tailscale_bridge"
-[ -d "$BRIDGE_DIR/build/TailscaleBridge.xcframework" ] || "$BRIDGE_DIR/build.sh" apple
+"$BRIDGE_DIR/build.sh" apple
 cd "$APP_DIR"
 flutter pub get
 flutter build macos --release "$@"
