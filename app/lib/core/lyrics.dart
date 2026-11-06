@@ -190,9 +190,20 @@ class LyricsService {
   final http.Client _http;
   final LyricsStore? store;
   final Map<String, Future<Lyrics?>> _cache = {};
+  final Map<String, Lyrics> _found = {};
 
   Future<Lyrics?> forSong(SubsonicClient client, Song song) =>
-      _cache.putIfAbsent(song.id, () => _resolve(client, song));
+      _cache.putIfAbsent(song.id, () => _resolveAndRemember(client, song));
+
+  /// Lyrics already found this session, without waiting: the player opens straight
+  /// into its lyrics layout instead of switching to it a moment later.
+  Lyrics? peek(String songId) => _found[songId];
+
+  Future<Lyrics?> _resolveAndRemember(SubsonicClient client, Song song) async {
+    final lyrics = await _resolve(client, song);
+    if (lyrics != null) _found[song.id] = lyrics;
+    return lyrics;
+  }
 
   Future<Lyrics?> _resolve(SubsonicClient client, Song song) async {
     final saved = await store?.read(song.id);

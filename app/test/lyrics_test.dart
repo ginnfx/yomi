@@ -171,6 +171,32 @@ void main() {
       expect(found!.lines.single.text, 'fresh');
     });
 
+    test(
+      'remembers finished lyrics so the player can show them at once',
+      () async {
+        // Arrange
+        final transport = MockClient(
+          (_) async => subsonicLyrics(const [
+            {
+              'synced': true,
+              'line': [
+                {'start': 1000, 'value': 'known line'},
+              ],
+            },
+          ]),
+        );
+        final service = LyricsService(httpClient: transport);
+        final before = service.peek(song.id);
+
+        // Act
+        await service.forSong(clientReturning(transport), song);
+
+        // Assert
+        expect(before, isNull);
+        expect(service.peek(song.id)!.lines.single.text, 'known line');
+      },
+    );
+
     test('server lyrics honour the offset field', () async {
       final transport = MockClient(
         (_) async => subsonicLyrics(const [

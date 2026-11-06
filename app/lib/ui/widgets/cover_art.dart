@@ -74,7 +74,15 @@ class CoverArt extends StatelessWidget {
         ),
       ),
     );
-    if (heroTag != null) result = Hero(tag: heroTag!, child: result);
+    if (heroTag != null) {
+      // Also flies under a finger, so dragging the player closed carries the cover
+      // back to the mini bar.
+      result = Hero(
+        tag: heroTag!,
+        transitionOnUserGestures: true,
+        child: result,
+      );
+    }
     return result;
   }
 }

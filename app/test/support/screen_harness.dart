@@ -72,6 +72,9 @@ class FakeLyricsService implements LyricsService {
   Future<Lyrics?> forSong(SubsonicClient client, Song song) async => lyrics;
 
   @override
+  Lyrics? peek(String songId) => lyrics;
+
+  @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
 

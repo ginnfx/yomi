@@ -20,26 +20,25 @@ import '../widgets/lyrics_view.dart';
 import '../widgets/queue_sheet.dart';
 import '../widgets/song_menu.dart';
 import '../widgets/tinted_background.dart';
+import 'now_playing_route.dart';
 
 const double _maxCover = 460;
 const double _compactCover = 56;
 const double _dismissVelocity = 450;
 const double _dismissDistanceShare = 0.25;
+const Duration _openDuration = Duration(milliseconds: 420);
+const Duration _closeDuration = Duration(milliseconds: 340);
 
-void openNowPlaying(BuildContext context) {
+/// Opens the player. From the mini bar, pass its [from] rectangle and [colour] so the
+/// player grows out of it; from anywhere else it slides up.
+void openNowPlaying(BuildContext context, {Rect? from, Color? colour}) {
   Navigator.of(context, rootNavigator: true).push(
-    PageRouteBuilder<void>(
-      fullscreenDialog: true,
-      transitionDuration: context.motion(const Duration(milliseconds: 300)),
-      reverseTransitionDuration: context.motion(YomiMotion.standard),
-      pageBuilder: (_, _, _) => const NowPlayingPage(),
-      transitionsBuilder: (_, animation, _, child) => SlideTransition(
-        position: Tween(
-          begin: const Offset(0, 1),
-          end: Offset.zero,
-        ).chain(CurveTween(curve: YomiMotion.curve)).animate(animation),
-        child: child,
-      ),
+    NowPlayingRoute(
+      builder: (_) => const NowPlayingPage(),
+      origin: from,
+      originColor: colour,
+      openDuration: context.motion(_openDuration),
+      closeDuration: context.motion(_closeDuration),
     ),
   );
 }
@@ -80,12 +79,39 @@ class _NowPlayingPageState extends State<NowPlayingPage>
     return _lyrics!;
   }
 
+  /// The route when it can run the close under the finger, shrinking into the bar.
+  NowPlayingRoute? get _dragRoute {
+    final route = ModalRoute.of(context);
+    return route is NowPlayingRoute && route.canDragToClose ? route : null;
+  }
+
   void _onDragUpdate(DragUpdateDetails details) {
+    final route = _dragRoute;
+    if (route != null) {
+      route.dragBy(
+        dragFraction(
+          dy: details.delta.dy,
+          origin: route.origin!,
+          screen: MediaQuery.sizeOf(context),
+        ),
+      );
+      return;
+    }
     _settle.stop();
     setState(() => _dragOffset = math.max(0, _dragOffset + details.delta.dy));
   }
 
   void _onDragEnd(DragEndDetails details) {
+    final route = _dragRoute;
+    if (route != null) {
+      final progress = route.animation?.value ?? 1;
+      route.endDrag(
+        close:
+            (details.primaryVelocity ?? 0) > _dismissVelocity ||
+            progress < 1 - _dismissDistanceShare,
+      );
+      return;
+    }
     final height = MediaQuery.sizeOf(context).height;
     final shouldClose =
         (details.primaryVelocity ?? 0) > _dismissVelocity ||
@@ -131,11 +157,14 @@ class _NowPlayingPageState extends State<NowPlayingPage>
               child: FutureBuilder<Lyrics?>(
                 future: _lyricsFor(song),
                 builder: (context, snapshot) {
-                  // Waiting on a new song's lyrics still reports the previous song's.
+                  // Lyrics found earlier show from the first frame, so the layout
+                  // doesn't switch while the player is opening. Waiting on a new
+                  // song's lyrics still reports the previous song's, so only a
+                  // finished lookup counts.
                   final lyrics =
                       snapshot.connectionState == ConnectionState.done
                       ? snapshot.data
-                      : null;
+                      : context.read<LyricsService>().peek(song.id);
                   final hasLyrics = lyrics != null && lyrics.lines.isNotEmpty;
                   return context.isWideLayout
                       ? _WideLayout(
