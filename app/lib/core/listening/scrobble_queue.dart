@@ -29,6 +29,9 @@ class ScrobbleQueue {
   List<PendingScrobble> _pending = const [];
   bool _isFlushing = false;
 
+  /// Bumped by [clear], so a flush that was mid-send knows its queue is gone.
+  int _epoch = 0;
+
   List<PendingScrobble> get pending => _pending;
 
   Future<void> load() async {
@@ -52,6 +55,7 @@ class ScrobbleQueue {
 
   /// Forgets everything, so one person's plays can't be sent under the next one's login.
   Future<void> clear() async {
+    _epoch++;
     _pending = const [];
     try {
       if (await file.exists()) await file.delete();
@@ -76,12 +80,14 @@ class ScrobbleQueue {
   Future<void> flush(SubsonicClient client) async {
     if (_isFlushing) return;
     _isFlushing = true;
+    final epoch = _epoch;
     try {
       while (_pending.isNotEmpty) {
         final next = _pending.first;
         try {
           await client.scrobble(next.songId, time: next.playedAt);
         } on SubsonicException catch (error) {
+          if (epoch != _epoch) return;
           final isTemporary =
               error.kind == ErrorKind.unreachable ||
               error.kind == ErrorKind.server ||
@@ -90,21 +96,27 @@ class ScrobbleQueue {
           if (isTemporary) return;
           debugPrint('Server refused a queued play: $error');
         }
+        if (epoch != _epoch) return;
         _pending = List.unmodifiable(_pending.skip(1));
-        await _save();
+        await _save(epoch);
       }
     } finally {
       _isFlushing = false;
     }
   }
 
-  Future<void> _save() async {
+  Future<void> _save([int? epoch]) async {
+    if (epoch != null && epoch != _epoch) return;
     final temp = File('${file.path}.tmp');
     try {
       await file.parent.create(recursive: true);
       await temp.writeAsString(
         jsonEncode([for (final item in _pending) item.toJson()]),
       );
+      if (epoch != null && epoch != _epoch) {
+        if (await temp.exists()) await temp.delete();
+        return;
+      }
       await temp.rename(file.path);
     } on FileSystemException catch (error) {
       debugPrint('Could not save scrobble queue: $error');

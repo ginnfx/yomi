@@ -23,17 +23,22 @@ class DownloadStore {
     try {
       final decoded = jsonDecode(await _indexFile.readAsString());
       if (decoded is! Map<String, dynamic>) return;
-      for (final value in decoded.values.whereType<Map<String, dynamic>>()) {
-        final entry = _Entry.fromJson(value);
-        final fixed = await _resolveFile(entry);
-        if (fixed == null) {
-          changed = true; // the audio file is gone
-          continue;
+      for (final value in decoded.values) {
+        try {
+          if (value is! Map<String, dynamic>) throw const FormatException();
+          final entry = _Entry.fromJson(value);
+          final fixed = await _resolveFile(entry);
+          if (fixed == null) {
+            changed = true; // the audio file is gone
+            continue;
+          }
+          if (fixed.fileName != entry.fileName) changed = true;
+          _entries[fixed.song.id] = fixed;
+        } on Object {
+          changed = true; // a damaged entry is dropped, the rest stay
         }
-        if (fixed.fileName != entry.fileName) changed = true;
-        _entries[fixed.song.id] = fixed;
       }
-    } on FormatException {
+    } on Object {
       // A damaged index only means downloads must be repeated; never crash the app.
     }
     if (changed) await _save();

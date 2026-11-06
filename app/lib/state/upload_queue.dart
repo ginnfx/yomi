@@ -147,6 +147,7 @@ class UploadQueue extends ChangeNotifier {
   final LibrarySnapshot _claimed = LibrarySnapshot(const []);
   bool _hasSeededClaims = false;
   bool _isRunning = false;
+  bool _isInspecting = false;
   bool _isDisposed = false;
   UploadPause? _pause;
   Timer? _resumeTimer;
@@ -301,10 +302,15 @@ class UploadQueue extends ChangeNotifier {
     _changed();
     try {
       await _prepareSnapshot();
-      await Future.wait([
-        _inspectLoop(),
-        for (var i = 0; i < kConcurrentUploads; i++) _uploadWorker(),
-      ]);
+      // Files added mid-run may land after inspection finished, so go again until
+      // nothing is left that can be done.
+      do {
+        await Future.wait([
+          _inspectPass(),
+          for (var i = 0; i < kConcurrentUploads; i++) _uploadWorker(),
+        ]);
+      } while (_canContinue &&
+          (count(UploadState.queued) > 0 || _nextReady() != null));
     } finally {
       _isRunning = false;
       await _save();
@@ -324,6 +330,15 @@ class UploadQueue extends ChangeNotifier {
   }
 
   bool get _canContinue => !_isDisposed && _pause == null && _transport != null;
+
+  Future<void> _inspectPass() async {
+    _isInspecting = true;
+    try {
+      await _inspectLoop();
+    } finally {
+      _isInspecting = false;
+    }
+  }
 
   Future<void> _inspectLoop() async {
     final seen = {
@@ -445,7 +460,7 @@ class UploadQueue extends ChangeNotifier {
       }
       final next = _nextReady();
       if (next == null) {
-        if (count(UploadState.queued) == 0) return;
+        if (!_isInspecting || count(UploadState.queued) == 0) return;
         await Future<void>.delayed(const Duration(milliseconds: 50));
         continue;
       }

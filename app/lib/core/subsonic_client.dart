@@ -121,6 +121,8 @@ class SubsonicClient {
           !_waitableEndpoints.contains(endpoint)) {
         rethrow;
       }
+      // Loading first keeps the saved changes from being overwritten by a late read.
+      await outbox.load();
       await outbox.add(OutboxItem(endpoint, params));
       return const {};
     }
@@ -200,19 +202,31 @@ class SubsonicClient {
   /// dropped rather than blocking everything after it.
   Future<void> flushOutbox() async {
     final outbox = _outbox;
-    if (outbox == null) return;
-    await outbox.load();
-    while (outbox.items.isNotEmpty) {
-      final item = outbox.items.first;
-      try {
-        await _send(item);
-      } on SubsonicException catch (error) {
-        if (error.kind == ErrorKind.unreachable) return;
-        debugPrint('Dropping a saved change the server refused: $error');
+    if (outbox == null || _isFlushingOutbox) return;
+    _isFlushingOutbox = true;
+    try {
+      await outbox.load();
+      while (outbox.items.isNotEmpty) {
+        try {
+          await _send(outbox.items.first);
+        } on SubsonicException catch (error) {
+          // Anything that may pass later stays queued, in order.
+          final isTemporary =
+              error.kind == ErrorKind.unreachable ||
+              error.kind == ErrorKind.server ||
+              error.kind == ErrorKind.readOnly ||
+              error.isBadCredentials;
+          if (isTemporary) return;
+          debugPrint('Dropping a saved change the server refused: $error');
+        }
+        await outbox.removeFirst();
       }
-      await outbox.removeFirst();
+    } finally {
+      _isFlushingOutbox = false;
     }
   }
+
+  bool _isFlushingOutbox = false;
 
   Future<void> _send(OutboxItem item) async {
     if (item.endpoint == _removeSongAction) {

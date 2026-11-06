@@ -64,7 +64,8 @@ enum YoutubeAudioDownload {
       guard !data.isEmpty else { break }
       try handle.write(contentsOf: data)
       written += data.count
-      total = size ?? written
+      // An unknown size ("bytes a-b/*") only ends on a short chunk; never assume it ended.
+      total = size ?? (data.count < chunkBytes ? written : nil)
       guard written <= maxBytes, (total ?? 0) <= maxBytes else { throw YtDlpError.tooLarge }
       onProgress(Double(written) / Double(max(total ?? written, 1)) * 100)
     }
@@ -82,7 +83,13 @@ enum YoutubeAudioDownload {
         let http = response as? HTTPURLResponse
         switch http?.statusCode {
         case 206:
-          return (data, totalSize(http?.value(forHTTPHeaderField: "Content-Range")))
+          let range = http?.value(forHTTPHeaderField: "Content-Range")
+          // A body shorter than the range it claims was cut off; retry rather than keep it.
+          guard let expected = rangeLength(range), expected == data.count else {
+            lastError = YtDlpError.downloadFailed("incomplete download")
+            continue
+          }
+          return (data, totalSize(range))
         case 200 where start == 0:
           // The server ignored the range and sent the whole file.
           return (data, data.count)
@@ -94,6 +101,16 @@ enum YoutubeAudioDownload {
       }
     }
     throw lastError
+  }
+
+  /// The byte count a Content-Range such as "bytes 0-1023/4096" promises (1024).
+  static func rangeLength(_ contentRange: String?) -> Int? {
+    guard let span = contentRange?.split(separator: " ").last?.split(separator: "/").first else {
+      return nil
+    }
+    let ends = span.split(separator: "-").compactMap { Int($0) }
+    guard ends.count == 2, ends[1] >= ends[0] else { return nil }
+    return ends[1] - ends[0] + 1
   }
 
   /// The size after the slash in "bytes 0-1023/4096".

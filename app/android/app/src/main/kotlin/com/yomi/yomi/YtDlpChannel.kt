@@ -50,7 +50,7 @@ class YtDlpChannel(messenger: BinaryMessenger, private val context: Context) {
             YoutubeDL.getInstance().init(context.applicationContext)
             isReady = true
             true
-        } catch (error: YoutubeDLException) {
+        } catch (error: Throwable) {
             Log.e(TAG, "init failed", error)
             initError = error.message ?: "yt-dlp could not start"
             false
@@ -82,6 +82,10 @@ class YtDlpChannel(messenger: BinaryMessenger, private val context: Context) {
                 main.post { result.error("failed", "Stopped", null) }
             } catch (error: YoutubeDL.CanceledException) {
                 main.post { result.error("failed", "Canceled", null) }
+            } catch (error: Throwable) {
+                // Anything else must still answer Dart, or the caller waits forever.
+                Log.e(TAG, "yt-dlp crashed", error)
+                main.post { result.error("failed", error.message ?: "yt-dlp crashed", null) }
             }
         }
     }
@@ -95,7 +99,7 @@ class YtDlpChannel(messenger: BinaryMessenger, private val context: Context) {
             try {
                 val status = YoutubeDL.getInstance().updateYoutubeDL(context.applicationContext)
                 main.post { result.success(status?.name) }
-            } catch (error: YoutubeDLException) {
+            } catch (error: Throwable) {
                 Log.w(TAG, "update failed", error)
                 main.post { result.success(null) }
             }

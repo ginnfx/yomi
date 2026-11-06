@@ -7,6 +7,7 @@ import '../subsonic_client.dart';
 const int uploadPort = 4534;
 const Duration _connectTimeout = Duration(seconds: 15);
 const Duration _stallTimeout = Duration(seconds: 60);
+const Duration _earlyAnswerWait = Duration(seconds: 3);
 const Duration _responseTimeout = Duration(minutes: 5);
 const Duration _defaultRetryAfter = Duration(seconds: 5);
 
@@ -132,11 +133,19 @@ class BulkUploadApi implements UploadTransport {
       );
       request.contentLength = length;
       var sent = 0;
-      await for (final chunk in file.openRead()) {
-        request.add(chunk);
-        await request.flush().timeout(_stallTimeout);
-        sent += chunk.length;
-        onProgress(length == 0 ? 1 : sent / length);
+      try {
+        await for (final chunk in file.openRead()) {
+          request.add(chunk);
+          await request.flush().timeout(_stallTimeout);
+          sent += chunk.length;
+          onProgress(length == 0 ? 1 : sent / length);
+        }
+      } on SocketException {
+        await _throwFileSpecificFailure(request, client);
+        rethrow;
+      } on HttpException {
+        await _throwFileSpecificFailure(request, client);
+        rethrow;
       }
       final response = await request.close().timeout(_responseTimeout);
       final body = await response.transform(utf8.decoder).join();
@@ -161,6 +170,46 @@ class BulkUploadApi implements UploadTransport {
     }
   }
 
+  /// The server may refuse a file (too big, storage full) before reading the body and
+  /// hang up, sometimes taking its answer with it. If it still answers a small request,
+  /// the connection isn't what failed: this file is, and retrying it would loop forever.
+  Future<void> _throwFileSpecificFailure(
+    HttpClientRequest request,
+    HttpClient client,
+  ) async {
+    await _throwEarlyAnswer(request);
+    if (await _serverAnswers(client)) {
+      throw const UploadRejected(
+        'The server turned this file away (too large, or no room left).',
+      );
+    }
+  }
+
+  Future<bool> _serverAnswers(HttpClient client) async {
+    try {
+      final probe = await client.postUrl(_uri('/v1/check'));
+      probe.headers.contentType = ContentType.json;
+      probe.write(jsonEncode({'hashes': <String>[]}));
+      final response = await probe.close().timeout(_earlyAnswerWait);
+      await response.drain<void>();
+      return true;
+    } on Object {
+      return false;
+    }
+  }
+
+  static Future<void> _throwEarlyAnswer(HttpClientRequest request) async {
+    final HttpClientResponse response;
+    final String body;
+    try {
+      response = await request.done.timeout(_earlyAnswerWait);
+      body = await response.transform(utf8.decoder).join();
+    } on Object {
+      return; // no usable answer: it really was a dropped connection
+    }
+    _throwForStatus(response, body);
+  }
+
   static void _throwForStatus(HttpClientResponse response, String body) {
     switch (response.statusCode) {
       case HttpStatus.ok || HttpStatus.created:
@@ -178,6 +227,8 @@ class BulkUploadApi implements UploadTransport {
         throw const UploadAuthFailed();
       case HttpStatus.forbidden:
         throw const UploadReadOnly();
+      case HttpStatus.requestEntityTooLarge:
+        throw UploadRejected(_messageFrom(body, response.statusCode));
       case HttpStatus.insufficientStorage:
         throw const UploadStorageFull();
       case HttpStatus.unprocessableEntity:
