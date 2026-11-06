@@ -248,3 +248,31 @@ class _AddSongsSheetState extends State<AddSongsSheet> {
     );
   }
 }
+
+/// The "+ Add" pill under a playlist's buttons, which opens the song picker.
+class AddChip extends StatelessWidget {
+  const AddChip({super.key, required this.onTap});
+
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) => Material(
+    color: Colors.white.withValues(alpha: 0.12),
+    shape: const StadiumBorder(),
+    child: InkWell(
+      customBorder: const StadiumBorder(),
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.add_rounded, size: 22),
+            const SizedBox(width: 8),
+            Text('Add', style: yomiText(15, weight: FontWeight.w700)),
+          ],
+        ),
+      ),
+    ),
+  );
+}

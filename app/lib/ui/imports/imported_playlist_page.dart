@@ -9,6 +9,7 @@ import '../../state/player_controller.dart';
 import '../../state/playlist_covers_controller.dart';
 import '../pages/reorder_page.dart';
 import '../theme.dart';
+import '../widgets/add_songs_sheet.dart';
 import '../widgets/youtube_play_button.dart';
 import '../widgets/playlist_cover.dart';
 import '../widgets/playlist_recommendations.dart';
@@ -228,6 +229,25 @@ class ImportedPlaylistPage extends StatelessWidget {
                     label: const Text('Shuffle'),
                   ),
                 ],
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(
+                kPagePadding,
+                0,
+                kPagePadding,
+                kPagePadding,
+              ),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: AddChip(
+                  onTap: () => showAddSongsSheet(
+                    context,
+                    playlistName: playlist.name,
+                    playlistSongs: queue,
+                    onAdd: (song) => _add(context, playlist, song),
+                  ),
+                ),
               ),
             ),
             for (final (i, entry) in playlist.entries.indexed)

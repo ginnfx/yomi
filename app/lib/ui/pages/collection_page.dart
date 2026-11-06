@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -57,6 +58,7 @@ class CollectionPage extends StatefulWidget {
     this.kind = CollectionKind.list,
     this.tint,
     this.cover,
+    this.onAddSong,
   });
 
   /// The header's colour when there's no cover to take it from, as for Liked songs.
@@ -75,6 +77,10 @@ class CollectionPage extends StatefulWidget {
 
   /// What's already saved on this device, shown straight away while [loadSongs] runs.
   final List<Song>? savedSongs;
+
+  /// Adds a song to a list that isn't a playlist, such as liking one for Liked songs.
+  /// Playlists add through the server's playlist call instead.
+  final Future<void> Function(Song song)? onAddSong;
 
   /// Set for editable playlists: enables swipe-to-remove, rename and delete.
   final Playlist? playlist;
@@ -361,30 +367,52 @@ class _CollectionPageState extends State<CollectionPage> {
               headerTintStrength,
             )!;
             return Scaffold(
-              body: CustomScrollView(
-                controller: _scroll,
-                slivers: [
-                  _bar(color),
-                  SliverToBoxAdapter(
-                    child: _header(color, songs, coverArtId, pictureUrl),
-                  ),
-                  ..._states(snapshot, known, songs),
-                  _songList(songs),
-                  if (widget.playlist != null)
-                    SliverToBoxAdapter(
-                      child: PlaylistRecommendations(
-                        key: ValueKey('recommended-${widget.playlist!.id}'),
-                        songs: songs,
-                        onAdd: (song) async {
-                          await context
-                              .read<SessionController>()
-                              .client
-                              .addToPlaylist(widget.playlist!.id, [song.id]);
-                          _reload();
-                        },
+              // Pulling past the top would otherwise show black above the header, so
+              // the header's own colour sits behind the list to fill that gap.
+              body: Stack(
+                children: [
+                  Positioned(
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    child: ListenableBuilder(
+                      listenable: _scroll,
+                      builder: (context, _) => SizedBox(
+                        height: _scroll.hasClients
+                            ? max(0, -_scroll.offset)
+                            : 0,
+                        child: ColoredBox(color: color),
                       ),
                     ),
-                  const SliverToBoxAdapter(child: SizedBox(height: 32)),
+                  ),
+                  CustomScrollView(
+                    controller: _scroll,
+                    slivers: [
+                      _bar(color),
+                      SliverToBoxAdapter(
+                        child: _header(color, songs, coverArtId, pictureUrl),
+                      ),
+                      ..._states(snapshot, known, songs),
+                      _songList(songs),
+                      if (widget.playlist != null)
+                        SliverToBoxAdapter(
+                          child: PlaylistRecommendations(
+                            key: ValueKey('recommended-${widget.playlist!.id}'),
+                            songs: songs,
+                            onAdd: (song) async {
+                              await context
+                                  .read<SessionController>()
+                                  .client
+                                  .addToPlaylist(widget.playlist!.id, [
+                                    song.id,
+                                  ]);
+                              _reload();
+                            },
+                          ),
+                        ),
+                      const SliverToBoxAdapter(child: SizedBox(height: 32)),
+                    ],
+                  ),
                 ],
               ),
             );
@@ -522,10 +550,10 @@ class _CollectionPageState extends State<CollectionPage> {
               ),
             ],
           ),
-          if (playlist != null)
+          if (playlist != null || widget.onAddSong != null)
             Padding(
               padding: const EdgeInsets.only(top: YomiSpace.s),
-              child: _AddChip(onTap: () => _openAddSongs(songs)),
+              child: AddChip(onTap: () => _openAddSongs(songs)),
             ),
         ],
       ),
@@ -533,13 +561,15 @@ class _CollectionPageState extends State<CollectionPage> {
   }
 
   Future<void> _openAddSongs(List<Song> songs) async {
-    final playlist = widget.playlist!;
+    final playlist = widget.playlist;
     final client = context.read<SessionController>().client;
     await showAddSongsSheet(
       context,
-      playlistName: playlist.name,
+      playlistName: playlist?.name ?? widget.title,
       playlistSongs: songs,
-      onAdd: (song) => client.addToPlaylist(playlist.id, [song.id]),
+      onAdd:
+          widget.onAddSong ??
+          (song) => client.addToPlaylist(playlist!.id, [song.id]),
     );
     if (mounted) _reload();
   }
@@ -784,34 +814,6 @@ void openPlaylist(BuildContext context, Playlist playlist) {
         playlist: playlist,
         loadSongs: () => client.playlistSongs(playlist.id),
         savedSongs: client.cachedPlaylistSongs(playlist.id),
-      ),
-    ),
-  );
-}
-
-/// The "+ Add" pill under a playlist's buttons, which opens the song picker.
-class _AddChip extends StatelessWidget {
-  const _AddChip({required this.onTap});
-
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) => Material(
-    color: Colors.white.withValues(alpha: 0.12),
-    shape: const StadiumBorder(),
-    child: InkWell(
-      customBorder: const StadiumBorder(),
-      onTap: onTap,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Icon(Icons.add_rounded, size: 22),
-            const SizedBox(width: 8),
-            Text('Add', style: yomiText(15, weight: FontWeight.w700)),
-          ],
-        ),
       ),
     ),
   );

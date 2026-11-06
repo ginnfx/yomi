@@ -10,6 +10,7 @@ import '../../state/player_controller.dart';
 import '../../state/session.dart';
 import '../pages/now_playing_page.dart';
 import '../theme.dart';
+import 'quick_song_actions.dart';
 import 'cover_art.dart';
 import 'nav_bar.dart';
 
@@ -146,6 +147,8 @@ class _MiniPlayerBar extends StatelessWidget {
                                 ],
                               ),
                             ),
+                            if (!song.isFromYoutube)
+                              LikeButton(song: song, size: 22),
                             if (MediaQuery.sizeOf(context).width >= 900)
                               IconButton(
                                 tooltip: 'Previous song',

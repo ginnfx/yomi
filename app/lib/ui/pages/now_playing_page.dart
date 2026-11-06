@@ -13,6 +13,7 @@ import '../../state/player_controller.dart';
 import '../../state/session.dart';
 import '../../state/settings.dart';
 import '../theme.dart';
+import '../widgets/quick_song_actions.dart';
 import '../widgets/youtube_play_button.dart';
 import '../widgets/cover_art.dart';
 import '../widgets/download_badge.dart';
@@ -521,7 +522,13 @@ class _TitleRow extends StatelessWidget {
             ],
           ),
         ),
-        const SizedBox(width: 12),
+        const SizedBox(width: 4),
+        // YouTube songs live only on this device, so there's nothing on the server to
+        // like or put in a playlist.
+        if (!song.isFromYoutube) ...[
+          LikeButton(song: song),
+          AddToPlaylistButton(song: song),
+        ],
         // A YouTube song is already a file here, and the server can't send it.
         if (!song.isFromYoutube)
           IconButton(

@@ -115,6 +115,7 @@ class _LibraryPageState extends State<LibraryPage> {
               tint: context.accentDeep,
               cover: (size) => LikedSongsCover(size: size),
               loadSongs: client.starredSongs,
+              onAddSong: (song) => client.star(song.id),
             ),
           ),
         );

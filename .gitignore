@@ -8,3 +8,4 @@ server/dist/
 .serena/
 tailscale_bridge/build/
 server/upload
+app/test/failures/
