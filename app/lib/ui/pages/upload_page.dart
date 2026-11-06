@@ -8,6 +8,7 @@ import 'package:provider/provider.dart';
 import '../../state/upload_queue.dart';
 import '../theme.dart';
 import '../widgets/missing_songs_section.dart';
+import '../widgets/wanted_songs_section.dart';
 
 String _pauseMessage(UploadPause pause) => switch (pause) {
   UploadPause.waitingForServer =>
@@ -83,6 +84,7 @@ class UploadPage extends StatelessWidget {
             ),
           ),
           const SliverToBoxAdapter(child: MissingSongsSection()),
+          const SliverToBoxAdapter(child: WantedSongsSection()),
           if (likely.isNotEmpty)
             SliverList.builder(
               itemCount: likely.length,

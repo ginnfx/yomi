@@ -136,6 +136,34 @@ class SongReport {
 /// The reports this account may see, and whether it may close them.
 typedef ReportsPage = ({List<SongReport> reports, bool isAdmin});
 
+/// A song people have asked for that the library doesn't have, shown to everyone. It says
+/// how many people want it, never who.
+@immutable
+class WantedSong {
+  const WantedSong({
+    required this.artist,
+    required this.title,
+    required this.count,
+  });
+
+  /// Null when the server sent something that isn't a song, so one odd entry can't hide
+  /// the rest.
+  static WantedSong? tryParse(Map<String, dynamic> json) {
+    final artist = json['artist'];
+    final title = json['title'];
+    if (artist is! String || title is! String) return null;
+    return WantedSong(
+      artist: artist,
+      title: title,
+      count: (json['count'] as num?)?.toInt() ?? 1,
+    );
+  }
+
+  final String artist;
+  final String title;
+  final int count;
+}
+
 /// Talks to the upload service's report routes.
 class ReportsApi {
   ReportsApi({
@@ -171,6 +199,20 @@ class ReportsApi {
       ]),
       isAdmin: json['isAdmin'] == true,
     );
+  }
+
+  /// The songs everyone has asked for, most wanted first.
+  Future<List<WantedSong>> wanted() async {
+    final response = await _http
+        .get(_uri('/v1/reports/wanted'))
+        .timeout(_reportsTimeout);
+    final json = _decode(response, 'The wanted list');
+    return List.unmodifiable([
+      for (final item
+          in (json['songs'] as List<dynamic>? ?? const [])
+              .whereType<Map<String, dynamic>>())
+        ?WantedSong.tryParse(item),
+    ]);
   }
 
   Future<void> add(ReportInput input) =>

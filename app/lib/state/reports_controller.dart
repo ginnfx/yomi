@@ -25,12 +25,20 @@ class ReportsController extends ChangeNotifier {
   bool _isLoading = false;
   String? _error;
   int _generation = 0;
+  List<WantedSong> _wanted = const [];
+  bool _isWantedLoaded = false;
 
   List<SongReport> get reports => _reports;
   List<SongReport> get open => [
     for (final report in _reports)
       if (report.isOpen) report,
   ];
+
+  /// What everyone has asked for, most wanted first.
+  List<WantedSong> get wanted => _wanted;
+
+  /// Whether [wanted] came from the server, as opposed to not having been asked yet.
+  bool get isWantedLoaded => _isWantedLoaded;
   bool get isAdmin => _isAdmin;
   bool get isLoading => _isLoading;
   bool get isAvailable => _api != null;
@@ -42,6 +50,25 @@ class ReportsController extends ChangeNotifier {
     _reports = const [];
     _isAdmin = false;
     _error = null;
+    _wanted = const [];
+    _isWantedLoaded = false;
+    notifyListeners();
+  }
+
+  Future<void> refreshWanted() async {
+    final api = _api;
+    if (api == null) return;
+    final generation = _generation;
+    try {
+      final songs = await api.wanted();
+      if (generation != _generation) return;
+      _wanted = songs;
+      _isWantedLoaded = true;
+    } on Exception catch (error) {
+      // A missing list isn't worth an error message; the section stays hidden.
+      debugPrint('Could not load the wanted list: $error');
+      return;
+    }
     notifyListeners();
   }
 

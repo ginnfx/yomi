@@ -115,6 +115,7 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("POST /v1/ai/discover", s.handleDiscover)
 	mux.HandleFunc("POST /v1/reports", s.handleAddReport)
 	mux.HandleFunc("GET /v1/reports", s.handleListReports)
+	mux.HandleFunc("GET /v1/reports/wanted", s.handleWanted)
 	mux.HandleFunc("PATCH /v1/reports/{id}", s.handleCloseReport)
 	mux.HandleFunc("POST /v1/reports/{id}/added", s.handleReportAdded)
 	mux.HandleFunc("POST /v1/reports/{id}/replace", s.handleReplaceReport)
