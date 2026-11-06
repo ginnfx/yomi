@@ -13,6 +13,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'core/mixes.dart';
 import 'core/ai/ai_api.dart';
 import 'core/apk_installer.dart';
+import 'core/app_info.dart';
 import 'core/app_update.dart';
 import 'core/audio/yomi_audio_handler.dart';
 import 'core/catalog_cache.dart';
@@ -64,6 +65,11 @@ final _navigatorKey = GlobalKey<NavigatorState>();
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  // Before any server request, so each one says which version is asking.
+  appInfo = AppInfo(
+    version: (await PackageInfo.fromPlatform()).version,
+    platform: Platform.operatingSystem,
+  );
 
   final settings = await SettingsController.load();
   final appearance = await AppearanceController.load();

@@ -7,6 +7,7 @@ import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
+import 'app_info.dart';
 import 'catalog_cache.dart';
 import 'lyrics.dart';
 import 'models.dart';
@@ -14,7 +15,6 @@ import 'offline/outbox.dart';
 import 'saved_play_queue.dart';
 
 const String _apiVersion = '1.16.1';
-const String _clientName = 'Yomi';
 const int _saltLength = 10;
 const Duration _requestTimeout = Duration(seconds: 20);
 const Duration _scanTimeout = Duration(seconds: 8);
@@ -155,7 +155,7 @@ class SubsonicClient {
       't': token,
       's': salt,
       'v': _apiVersion,
-      'c': _clientName,
+      'c': appInfo.clientName,
       'f': 'json',
     };
   }

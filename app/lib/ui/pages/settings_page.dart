@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../../core/app_info.dart';
 import '../../state/player_controller.dart';
 import '../../state/session.dart';
 import '../settings/appearance_section.dart';
@@ -104,6 +105,20 @@ class SettingsPage extends StatelessWidget {
                 ),
               ],
             ),
+            if (appInfo.isKnown)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 24),
+                child: Center(
+                  child: Text(
+                    appInfo.label,
+                    style: yomiText(
+                      12.5,
+                      weight: FontWeight.w500,
+                      color: YomiColors.textSecondary,
+                    ),
+                  ),
+                ),
+              ),
           ],
         ),
       ),

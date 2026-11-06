@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
+import 'package:yomi/core/app_info.dart';
 import 'package:yomi/core/subsonic_client.dart';
 
 SubsonicClient clientReplying(
@@ -37,6 +38,17 @@ void main() {
     expect(params['t'], '26719a1196d2a940705a59634eb18eab');
     expect(params['s'], 'c19b2d');
     expect(params.containsKey('p'), isFalse);
+  });
+
+  test('tells the server which app version and platform is asking', () {
+    addTearDown(() => appInfo = const AppInfo());
+    appInfo = const AppInfo(version: '9.8.7', platform: 'android');
+
+    expect(clientReplying(ok({})).authParams()['c'], 'Yomi 9.8.7 android');
+  });
+
+  test('says just "Yomi" before the version is known', () {
+    expect(clientReplying(ok({})).authParams()['c'], 'Yomi');
   });
 
   test(
