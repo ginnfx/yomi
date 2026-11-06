@@ -1,7 +1,6 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/format.dart';
@@ -16,6 +15,7 @@ import '../theme.dart';
 import '../widgets/action_sheet.dart';
 import '../widgets/add_songs_sheet.dart';
 import '../widgets/cover_art.dart';
+import '../widgets/download_toggle.dart';
 import '../widgets/cover_color.dart';
 import '../widgets/error_view.dart';
 import '../widgets/playlist_cover.dart';
@@ -245,27 +245,8 @@ class _CollectionPageState extends State<CollectionPage> {
     }
   }
 
-  Future<void> _toggleDownload(List<Song> songs, bool isFullySaved) async {
-    HapticFeedback.selectionClick();
-    final downloads = context.read<DownloadManager>();
-    final messenger = ScaffoldMessenger.of(context);
-    if (isFullySaved) {
-      for (final song in songs) {
-        await downloads.remove(song);
-      }
-      messenger.showSnackBar(
-        const SnackBar(content: Text('Removed from this device')),
-      );
-      return;
-    }
-    final missing = songs.length - downloads.downloadedCountOf(songs);
-    downloads.enqueue(songs);
-    messenger.showSnackBar(
-      SnackBar(
-        content: Text(downloads.pausedReason ?? 'Downloading $missing songs…'),
-      ),
-    );
-  }
+  Future<void> _toggleDownload(List<Song> songs, bool isFullySaved) =>
+      toggleSongsDownload(context, songs, isFullySaved: isFullySaved);
 
   Future<void> _play(PlayerController player, List<Song> songs) async {
     final current = player.current;

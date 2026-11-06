@@ -4,12 +4,15 @@ import 'package:provider/provider.dart';
 import '../../core/models.dart';
 import '../../core/spotify/imported_playlist.dart';
 import '../../state/catalog_controller.dart';
+import '../../state/download_manager.dart';
 import '../../state/imports_controller.dart';
 import '../../state/player_controller.dart';
 import '../../state/playlist_covers_controller.dart';
 import '../pages/reorder_page.dart';
 import '../theme.dart';
+import '../pages/collection_header.dart';
 import '../widgets/add_songs_sheet.dart';
+import '../widgets/download_toggle.dart';
 import '../widgets/youtube_play_button.dart';
 import '../widgets/playlist_cover.dart';
 import '../widgets/playlist_recommendations.dart';
@@ -109,6 +112,9 @@ class ImportedPlaylistPage extends StatelessWidget {
     };
     final queue = songs.values.toList(growable: false);
     final player = context.read<PlayerController>();
+    final downloads = context.watch<DownloadManager>();
+    final savedCount = downloads.downloadedCountOf(queue);
+    final isFullySaved = queue.isNotEmpty && savedCount == queue.length;
     final hasPicture = context.watch<PlaylistCoversController>().hasCover(
       playlist.id,
     );
@@ -215,6 +221,24 @@ class ImportedPlaylistPage extends StatelessWidget {
                           },
                     icon: const Icon(Icons.shuffle_rounded),
                     label: const Text('Shuffle'),
+                  ),
+                  const Spacer(),
+                  HeaderIconButton(
+                    icon: isFullySaved
+                        ? Icons.arrow_circle_down_rounded
+                        : Icons.arrow_circle_down_outlined,
+                    color: isFullySaved ? context.accent : null,
+                    tooltip: isFullySaved ? 'Remove download' : 'Download',
+                    progress: isAnyDownloading(downloads, queue)
+                        ? savedCount / queue.length
+                        : null,
+                    onTap: queue.isEmpty
+                        ? null
+                        : () => toggleSongsDownload(
+                            context,
+                            queue,
+                            isFullySaved: isFullySaved,
+                          ),
                   ),
                 ],
               ),
