@@ -17,7 +17,6 @@ import '../widgets/action_sheet.dart';
 import '../widgets/cover_art.dart';
 import '../widgets/cover_color.dart';
 import '../widgets/error_view.dart';
-import '../widgets/mini_player.dart';
 import '../widgets/playlist_cover.dart';
 import '../widgets/playlist_recommendations.dart';
 import '../widgets/playlist_sheet.dart';
@@ -361,7 +360,6 @@ class _CollectionPageState extends State<CollectionPage> {
               headerTintStrength,
             )!;
             return Scaffold(
-              bottomNavigationBar: const SafeArea(child: MiniPlayer()),
               body: CustomScrollView(
                 controller: _scroll,
                 slivers: [

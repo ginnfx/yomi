@@ -164,25 +164,13 @@ class _SpotifyImportPageState extends State<SpotifyImportPage> {
           padding: const EdgeInsets.all(kPagePadding),
           children: [
             Text(
-              'Spotify can send you a copy of your data. Ask for it under '
-              'Account > Privacy settings, then choose the files or the zip here. '
-              'You can choose them again at any time: nothing counts twice.',
+              'Choose your Spotify data export, or paste a public playlist link.',
               style: yomiText(
                 14,
                 weight: FontWeight.w500,
                 color: YomiColors.textSecondary,
                 height: 1.4,
               ),
-            ),
-            const SizedBox(height: 12),
-            Text(
-              '• Extended streaming history adds your past years to Stats and '
-              'Wrapped, and improves suggestions.\n'
-              '• Account data adds your playlists and liked songs.\n'
-              '• A playlist CSV works too.\n'
-              'Only song names, artists and times are kept. Nothing else in the '
-              'files is saved.',
-              style: yomiText(14, weight: FontWeight.w500, height: 1.5),
             ),
             const SizedBox(height: 20),
             FilledButton.icon(
@@ -191,11 +179,6 @@ class _SpotifyImportPageState extends State<SpotifyImportPage> {
               label: Text(_isWorking ? 'Reading…' : 'Choose files'),
             ),
             const SizedBox(height: 24),
-            Text(
-              'Or paste a link to a public playlist',
-              style: yomiText(15, weight: FontWeight.w700),
-            ),
-            const SizedBox(height: 8),
             TextField(
               controller: _link,
               decoration: const InputDecoration(

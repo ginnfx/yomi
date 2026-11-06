@@ -49,6 +49,7 @@ class YoutubeController extends ChangeNotifier {
 
   final Map<String, YoutubeState> _states = {};
   final Map<String, File> _files = {};
+  final Map<String, ({Song song, File file})> _played = {};
   final Set<String> _saved = {};
   Future<void>? _updating;
 
@@ -79,6 +80,13 @@ class YoutubeController extends ChangeNotifier {
   }) async {
     final key = _key(artist, title);
     if (_states[key]?.isBusy ?? false) return false;
+    // Played before: the file is still here, so skip the search and download.
+    final earlier = _played[key];
+    if (earlier != null && earlier.file.existsSync()) {
+      _set(key, const YoutubeState(YoutubeStep.ready));
+      await startPlaying(earlier.song, earlier.file);
+      return true;
+    }
     _set(key, const YoutubeState(YoutubeStep.searching));
     try {
       await _ensureFresh();
@@ -112,6 +120,7 @@ class YoutubeController extends ChangeNotifier {
         durationSeconds: video.durationSeconds ?? durationSeconds ?? 0,
       );
       _files[song.id] = file;
+      _played[key] = (song: song, file: file);
       _set(key, const YoutubeState(YoutubeStep.ready));
       await startPlaying(song, file);
       return true;

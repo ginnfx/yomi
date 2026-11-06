@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -187,6 +188,7 @@ void main() {
     late Directory dir;
     late List<Map<String, Object?>> server;
     var isDown = false;
+    Completer<void>? gate;
 
     setUp(() async {
       dir = await Directory.systemTemp.createTemp('imports');
@@ -201,6 +203,7 @@ void main() {
       port: 4534,
       httpClient: MockClient((request) async {
         if (isDown) throw http.ClientException('down');
+        await gate?.future;
         if (request.method == 'GET') {
           return http.Response.bytes(
             utf8.encode(jsonEncode({'imports': server})),
@@ -226,8 +229,25 @@ void main() {
       await imports.attach(api());
       await imports.add('One', entries);
       await imports.add('Two', entries);
+      await pumpEventQueue();
       expect(imports.playlists.map((p) => p.name), ['Two', 'One']);
       expect(server, hasLength(2));
+    });
+
+    test('saving returns without waiting for a slow server', () async {
+      final imports = controller();
+      await imports.attach(api());
+      gate = Completer<void>();
+
+      final saved = await imports.add('One', entries).timeout(
+        const Duration(seconds: 2),
+      );
+
+      expect(imports.playlists.single.id, saved.id);
+      expect(server, isEmpty);
+      gate!.complete();
+      await pumpEventQueue();
+      expect(server, hasLength(1));
     });
 
     test('saved while offline, sent once back', () async {

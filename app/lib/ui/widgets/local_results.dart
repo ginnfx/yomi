@@ -29,7 +29,9 @@ class LocalResults extends StatelessWidget {
           kind: CollectionKind.artist,
           loadSongs: () async => [
             for (final song in songs)
-              if (song.artist == artist.name) song,
+              if (splitArtistCredit(song.artist)
+                  .any((name) => artistKey(name) == artistKey(artist.name)))
+                song,
           ],
         ),
       ),

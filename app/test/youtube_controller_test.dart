@@ -100,6 +100,22 @@ void main() {
     },
   );
 
+  test('playing the same song again skips searching and downloading', () async {
+    // Arrange
+    final youtube = controller();
+    await youtube.play(artist: 'Mira', title: 'Blue Hour');
+    final callsAfterFirst = ytDlp.calls.length;
+
+    // Act
+    final isPlaying = await youtube.play(artist: 'mira', title: 'Blue Hour');
+
+    // Assert
+    expect(isPlaying, isTrue);
+    expect(ytDlp.calls.length, callsAfterFirst);
+    expect(played.length, 2);
+    expect(played.last.$1.id, 'yt:real0000001');
+  });
+
   test('gets the newest yt-dlp once before the first search', () async {
     // Arrange
     final youtube = controller();

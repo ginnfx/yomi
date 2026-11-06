@@ -101,7 +101,8 @@ class ImportsController extends ChangeNotifier {
       entries: List.unmodifiable(entries),
     );
     _playlists = List.unmodifiable([playlist, ..._playlists]);
-    await _store(playlist);
+    // Shown at once from the local copy; the server upload carries on behind it.
+    await _store(playlist, waitForServer: false);
     return playlist;
   }
 
@@ -125,10 +126,18 @@ class ImportsController extends ChangeNotifier {
     }
   }
 
-  Future<void> _store(ImportedPlaylist playlist) async {
+  Future<void> _store(
+    ImportedPlaylist playlist, {
+    bool waitForServer = true,
+  }) async {
     _unsent = {..._unsent, playlist.id};
     await _save();
     notifyListeners();
+    final upload = _upload(playlist);
+    if (waitForServer) await upload;
+  }
+
+  Future<void> _upload(ImportedPlaylist playlist) async {
     final api = _api;
     if (api == null) return;
     try {

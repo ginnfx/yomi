@@ -49,6 +49,7 @@ const int _minWordsForDescription = 3;
 const int _fewResults = 3;
 const Duration _describeDebounce = Duration(milliseconds: 700);
 const int _maxDescribedSongs = 100;
+const Duration _interpretTimeout = Duration(seconds: 8);
 
 class _SearchPageState extends State<SearchPage> {
   final _controller = TextEditingController();
@@ -155,10 +156,12 @@ class _SearchPageState extends State<SearchPage> {
 
   Future<void> _interpret(CatalogController catalog, String text) async {
     final generation = _generation;
-    setState(() => _isLoading = true);
-    final filters = await context.read<AiController>().interpret(text.trim());
+    // No loader here: the library results are already final, and the AI only adds to them.
+    final filters = await context
+        .read<AiController>()
+        .interpret(text.trim())
+        .timeout(_interpretTimeout, onTimeout: () => null);
     if (!mounted || generation != _generation) return;
-    setState(() => _isLoading = false);
     if (filters != null) _applyFilters(catalog, filters);
   }
 

@@ -69,8 +69,32 @@ class _ImportReviewPageState extends State<ImportReviewPage> {
   Future<void> _save() async {
     final imports = context.read<ImportsController>();
     final navigator = Navigator.of(context);
+    final messenger = ScaffoldMessenger.of(context);
     setState(() => _isSaving = true);
-    final playlist = await imports.add(widget.playlist.name, [
+    final ImportedPlaylist playlist;
+    try {
+      playlist = await _add(imports);
+    } on Object catch (error) {
+      debugPrint('Could not save the imported playlist: $error');
+      if (!mounted) return;
+      setState(() => _isSaving = false);
+      messenger.showSnackBar(
+        const SnackBar(content: Text("Couldn't save the playlist. Try again.")),
+      );
+      return;
+    }
+    messenger.showSnackBar(
+      SnackBar(content: Text('Saved "${widget.playlist.name}"')),
+    );
+    navigator.pushReplacement(
+      yomiRoute<void>(
+        builder: (_) => ImportedPlaylistPage(playlistId: playlist.id),
+      ),
+    );
+  }
+
+  Future<ImportedPlaylist> _add(ImportsController imports) {
+    return imports.add(widget.playlist.name, [
       for (var i = 0; i < _tracks.length; i++)
         ImportEntry(
           title: _tracks[i].track.title,
@@ -81,11 +105,6 @@ class _ImportReviewPageState extends State<ImportReviewPage> {
           isUserChoice: _choices.containsKey(i),
         ),
     ]);
-    navigator.pushReplacement(
-      yomiRoute<void>(
-        builder: (_) => ImportedPlaylistPage(playlistId: playlist.id),
-      ),
-    );
   }
 
   @override
@@ -114,9 +133,20 @@ class _ImportReviewPageState extends State<ImportReviewPage> {
             padding: const EdgeInsets.all(kPagePadding),
             child: FilledButton(
               onPressed: _isSaving ? null : _save,
-              child: Text(
-                'Save playlist ($matched of ${_tracks.length} found)',
-              ),
+              child: _isSaving
+                  ? const Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        ),
+                        SizedBox(width: 12),
+                        Text('Saving playlist…'),
+                      ],
+                    )
+                  : Text('Save playlist ($matched of ${_tracks.length} found)'),
             ),
           ),
         ),

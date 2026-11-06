@@ -7,6 +7,7 @@ import 'models.dart';
 
 const int _maxSongs = 200;
 const int _maxGroup = 10;
+const int _maxArtists = 5;
 
 /// How well a typed word matched a word in the library, best first.
 const double _exactScore = 1;
@@ -187,29 +188,43 @@ class SearchIndex {
     return ranked.isEmpty ? null : SongMatch(_songs[ranked.first]);
   }
 
-  /// Artists with a song whose artist name matched what was typed.
+  /// Individual artists whose own name matched what was typed. Credits like
+  /// "A, B & C" are split, so a featured artist is one result, not one per credit.
   List<ArtistResult> _artistsFrom(Map<int, _Score> scores, String normalized) {
-    final found = <String, List<int>>{};
+    final typed = normalized.split(' ');
+    final found = <String, _ArtistGroup>{};
     for (final entry in scores.entries) {
-      if (entry.value.artist > 0) {
-        (found[_songs[entry.key].artist] ??= []).add(entry.key);
+      if (entry.value.artist <= 0) continue;
+      final song = _songs[entry.key];
+      for (final name in splitArtistCredit(song.artist)) {
+        if (!_nameMatches(name, typed)) continue;
+        final group = found[artistKey(name)] ??= _ArtistGroup(name);
+        group.songs.add(entry.key);
       }
     }
-    final names = found.keys.toList()
+    final groups = found.values.toList()
       ..sort((a, b) {
-        final aExact = normalizeForSearch(a) == normalized;
-        final bExact = normalizeForSearch(b) == normalized;
+        final aExact = artistKey(a.name) == artistKey(normalized);
+        final bExact = artistKey(b.name) == artistKey(normalized);
         if (aExact != bExact) return aExact ? -1 : 1;
-        return found[b]!.length.compareTo(found[a]!.length);
+        return b.songs.length.compareTo(a.songs.length);
       });
     return [
-      for (final name in names.take(_maxGroup))
+      for (final group in groups.take(_maxArtists))
         ArtistResult(
-          name: name,
-          songCount: found[name]!.length,
-          coverArtId: _songs[found[name]!.first].coverArtId,
+          name: group.name,
+          songCount: group.songs.length,
+          coverArtId: _songs[group.songs.first].coverArtId,
         ),
     ];
+  }
+
+  /// Whether every typed word is found in a single artist's name.
+  static bool _nameMatches(String name, List<String> typed) {
+    final words = _wordsOf(artistKey(name));
+    return typed.every(
+      (word) => words.any((candidate) => _matchQuality(word, candidate) > 0),
+    );
   }
 
   /// Albums with a song whose album name matched what was typed.
@@ -295,6 +310,36 @@ class SearchIndex {
     }
     return previous[b.length];
   }
+}
+
+class _ArtistGroup {
+  _ArtistGroup(this.name);
+
+  final String name;
+  final List<int> songs = [];
+}
+
+final RegExp _creditSeparator = RegExp(
+  r'\s*(?:,|;|&|＆|、|/|\bfeat\.?|\bft\.?|\bfeaturing\b|\bwith\b|\band\b|\bx\b)\s*',
+  caseSensitive: false,
+);
+
+/// The individual artists named in a credit such as "A, B & C".
+List<String> splitArtistCredit(String credit) {
+  final seen = <String>{};
+  return [
+    for (final part in credit.split(_creditSeparator))
+      if (part.trim().isNotEmpty && seen.add(artistKey(part))) part.trim(),
+  ];
+}
+
+/// Same artist however it is cased, accented or written in full-width letters.
+String artistKey(String name) {
+  final folded = String.fromCharCodes([
+    for (final unit in name.runes)
+      unit >= 0xFF01 && unit <= 0xFF5E ? unit - 0xFEE0 : unit,
+  ]);
+  return normalizeForSearch(folded);
 }
 
 enum _Field { title, artist, album }

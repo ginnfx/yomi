@@ -123,6 +123,22 @@ void main() {
       expect(results.artists.first.songCount, 3);
     });
 
+    test('splits credits into single artists, merged and capped', () {
+      final library = [
+        _song('1', 'a', 'アトラスサウンドチーム & ATLUS GAME MUSIC'),
+        _song('2', 'b', 'Lyn, ATLUS GAME MUSIC'),
+        _song('3', 'c', 'ＡＴＬＵＳ Game Music'),
+        for (var i = 0; i < 8; i++) _song('x$i', 't$i', 'Atlus Band $i, Foo'),
+      ];
+      final artists = SearchIndex(library).search('atlus').artists;
+      final names = artists.map((a) => a.name).toList();
+      expect(names.first, 'ATLUS GAME MUSIC');
+      expect(artists.first.songCount, 3);
+      expect(artists.length, lessThanOrEqualTo(5));
+      expect(names, isNot(contains('Lyn')));
+      expect(names, isNot(contains('Foo')));
+    });
+
     test('finds albums once each, with their artist', () {
       final results = index.search('discovery');
       expect(results.albums.single.name, 'Discovery');

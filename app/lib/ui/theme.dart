@@ -1,6 +1,8 @@
 import 'package:flutter/cupertino.dart' show CupertinoPageTransitionsBuilder;
 import 'package:flutter/material.dart';
 
+import 'widgets/route_mini_player.dart';
+
 /// One set of neutral colours, for a dark or a light look.
 @immutable
 class YomiNeutrals {
@@ -403,6 +405,12 @@ PageRoute<T> yomiRoute<T>({
 
 class _YomiPageRoute<T> extends MaterialPageRoute<T> {
   _YomiPageRoute({required super.builder, super.fullscreenDialog});
+
+  @override
+  Widget buildContent(BuildContext context) {
+    final page = super.buildContent(context);
+    return fullscreenDialog ? page : RouteMiniPlayer(child: page);
+  }
 
   bool get _isReduced {
     final context = navigator?.context;

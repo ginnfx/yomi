@@ -21,7 +21,6 @@ import '../theme.dart';
 import '../widgets/async_section.dart';
 import '../widgets/downloaded_songs.dart';
 import '../widgets/error_view.dart';
-import '../widgets/mini_player.dart';
 import '../widgets/playlist_sheet.dart';
 import '../widgets/profile_panel.dart';
 import '../widgets/shimmer.dart';
@@ -477,7 +476,6 @@ class _DownloadedSongsPage extends StatelessWidget {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('Downloaded songs')),
-      bottomNavigationBar: const SafeArea(child: MiniPlayer()),
       body: const DownloadedSongs(),
     );
   }
