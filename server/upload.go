@@ -35,6 +35,7 @@ type Server struct {
 	LLM         *LLMClient
 	interpreter *Interpreter
 
+	Pool           *Pool
 	PlaylistCovers *PlaylistCoverStore
 	PlaylistOwner  func(ctx context.Context, query url.Values, id string) (string, error)
 	Reports        *ReportStore
@@ -101,6 +102,10 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("GET /v1/tags", s.handleTags)
 	mux.HandleFunc("POST /v1/tags/songs", s.handleQueueTags)
 	mux.HandleFunc("POST /v1/search/interpret", s.handleInterpret)
+	mux.HandleFunc("GET /v1/pool/cover/{id}", s.handlePoolCover)
+	mux.HandleFunc("GET /v1/pool/blob/{hash}", s.handlePoolBlob)
+	mux.HandleFunc("GET /v1/pool/song/{id}", s.handlePoolSong)
+	mux.HandleFunc("GET /v1/pool/audio/{key}/{n}", s.handlePoolChunk)
 	mux.HandleFunc("GET /v1/playlist-covers", s.handlePlaylistCovers)
 	mux.HandleFunc("GET /v1/playlists/{id}/cover", s.handlePlaylistCover)
 	mux.HandleFunc("PUT /v1/playlists/{id}/cover", s.handleSavePlaylistCover)

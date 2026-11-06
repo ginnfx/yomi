@@ -37,6 +37,14 @@ func main() {
 		server.Reports = reports
 		server.SongPath = navidromeSongPath(cfg.NavidromeURL, cfg.MusicDir, index, &http.Client{Timeout: songLookupTimeout})
 	}
+	if cfg.PoolOn {
+		if pool, err := openPool(cfg); err != nil {
+			// Music still plays straight from Navidrome without the shared cache.
+			log.Printf("shared cache disabled: %v", err)
+		} else {
+			server.Pool = pool
+		}
+	}
 	server.Backups = newBackupSource(cfg)
 	messages, err := openMessageStore(cfg.MessagesDir, time.Now)
 	if err != nil {

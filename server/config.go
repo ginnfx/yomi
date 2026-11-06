@@ -48,6 +48,9 @@ type Config struct {
 	LLMKey          string
 	LLMModel        string
 	TagsDir         string
+	PoolDir         string
+	PoolOn          bool
+	PoolBytes       int64
 	HistoryDir      string
 	MaxFileBytes    int64
 	ScanDebounce    time.Duration
@@ -79,6 +82,9 @@ func loadConfig() Config {
 		LLMKey:          os.Getenv("YOMI_LLM_KEY"),
 		LLMModel:        os.Getenv("YOMI_LLM_MODEL"),
 		TagsDir:         envOr("YOMI_TAGS_DIR", defaultTagsDir),
+		PoolDir:         envOr("YOMI_POOL_DIR", defaultPoolDir),
+		PoolOn:          envOr("YOMI_POOL", "on") != "off",
+		PoolBytes:       int64(envInt("YOMI_POOL_MB", defaultPoolMB)) << 20,
 		HistoryDir:      envOr("YOMI_HISTORY_DIR", defaultHistoryDir),
 		MaxFileBytes:    int64(envInt("YOMI_MAX_FILE_MB", defaultMaxFileMB)) << 20,
 		ScanDebounce:    defaultScanDebounce,
