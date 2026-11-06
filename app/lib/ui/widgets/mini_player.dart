@@ -8,10 +8,15 @@ import '../../state/session.dart';
 import '../pages/now_playing_page.dart';
 import '../theme.dart';
 import 'cover_art.dart';
+import 'nav_bar.dart';
 
 const double kMiniPlayerHeight = 56;
 const double kMiniPlayerGap = YomiSpace.xs;
 const double _swipeVelocity = 250;
+
+/// Room tab pages leave at the bottom so the mini player and nav bar never cover content.
+const double kShellBottomClearance =
+    kMiniPlayerHeight + kMiniPlayerGap + kNavBarHeight + YomiSpace.l;
 
 /// Now-playing bar above the navigation. Tap or swipe up to expand, swipe sideways to skip.
 class MiniPlayer extends StatelessWidget {

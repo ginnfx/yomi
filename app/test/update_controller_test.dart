@@ -217,6 +217,79 @@ void main() {
     });
   });
 
+  group('check now', () {
+    test('asks GitHub even right after an automatic check', () async {
+      // Arrange
+      final h = Harness(latest: release('1.0.1'));
+      final c = await h.build();
+      await c.check();
+
+      // Act
+      final result = await c.checkNow();
+
+      // Assert
+      expect(h.apiCalls, 2);
+      expect(result, UpdateCheckResult.upToDate);
+    });
+
+    test('offers a version that was dismissed earlier', () async {
+      // Arrange
+      final h = Harness(latest: release('1.0.2'));
+      final c = await h.build();
+      await c.check();
+      await c.dismiss();
+
+      // Act
+      final result = await c.checkNow();
+
+      // Assert
+      expect(result, UpdateCheckResult.available);
+      expect(c.phase, UpdatePhase.available);
+    });
+
+    test('reports a failed check instead of staying quiet', () async {
+      // Arrange
+      final h = Harness(latest: release('1.0.2'))..isApiDown = true;
+      final c = await h.build();
+
+      // Act
+      final result = await c.checkNow();
+
+      // Assert
+      expect(result, UpdateCheckResult.failed);
+      expect(c.phase, UpdatePhase.idle);
+    });
+
+    test('never contacts GitHub when updates are disabled', () async {
+      // Arrange
+      final h = Harness(latest: release('1.0.2'), mode: UpdateMode.disabled);
+      final c = await h.build();
+
+      // Act
+      final result = await c.checkNow();
+
+      // Assert
+      expect(result, UpdateCheckResult.unsupported);
+      expect(h.apiCalls, 0);
+    });
+
+    test('a check during a download leaves it alone', () async {
+      // Arrange
+      final h = Harness(latest: release('1.0.2'));
+      final c = await h.build();
+      await c.check();
+      final download = c.startUpdate();
+
+      // Act
+      final result = await c.checkNow();
+      await download;
+
+      // Assert
+      expect(result, UpdateCheckResult.available);
+      expect(h.installed, hasLength(1));
+    });
+  });
+
   group('dismiss', () {
     test('hides that version across relaunches', () async {
       final h = Harness(latest: release('1.0.2'));

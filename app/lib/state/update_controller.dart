@@ -18,6 +18,9 @@ enum UpdateMode { androidInstall, openReleasePage, disabled }
 
 enum UpdatePhase { idle, available, downloading, readyToInstall, failed }
 
+/// What a check the user asked for found.
+enum UpdateCheckResult { available, upToDate, failed, unsupported }
+
 class UpdateController extends ChangeNotifier {
   UpdateController({
     required this.currentVersion,
@@ -66,6 +69,29 @@ class UpdateController extends ChangeNotifier {
     } finally {
       _isChecking = false;
     }
+  }
+
+  /// The user asked: contacts GitHub now and offers even a dismissed version.
+  Future<UpdateCheckResult> checkNow() async {
+    if (mode == UpdateMode.disabled) return UpdateCheckResult.unsupported;
+    if (_isBusy) return UpdateCheckResult.available;
+    final ReleaseInfo latest;
+    try {
+      latest = await client.fetchLatest();
+    } on Exception catch (error) {
+      debugPrint('Update check failed: $error');
+      return UpdateCheckResult.failed;
+    }
+    await prefs.setString(_latestKey, jsonEncode(latest.toJson()));
+    await prefs.setInt(_lastCheckKey, now().millisecondsSinceEpoch);
+    if (prefs.getString(_dismissedKey) == latest.version.toString()) {
+      await prefs.remove(_dismissedKey);
+    }
+    if (_isBusy) return UpdateCheckResult.available;
+    _offer(latest);
+    return _phase == UpdatePhase.available
+        ? UpdateCheckResult.available
+        : UpdateCheckResult.upToDate;
   }
 
   Future<void> startUpdate() async {

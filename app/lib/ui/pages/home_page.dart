@@ -326,6 +326,9 @@ class _EditHomePage extends StatelessWidget {
         title: Text('Edit Home', style: yomiText(20, weight: FontWeight.w800)),
       ),
       body: SingleChildScrollView(
+        padding: EdgeInsets.only(
+          bottom: YomiSpace.l + MediaQuery.paddingOf(context).bottom,
+        ),
         child: Column(
           children: [
             const HomeLayoutSection(),

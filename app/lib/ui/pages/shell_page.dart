@@ -22,8 +22,41 @@ import 'search_page.dart';
 import 'settings_page.dart';
 import 'upload_page.dart';
 
-const double _bottomClearance =
-    kMiniPlayerHeight + kMiniPlayerGap + kNavBarHeight + YomiSpace.l;
+/// Banners on top, then the tab pages, padded so the player and nav bar below never cover them.
+class ShellTabArea extends StatelessWidget {
+  const ShellTabArea({super.key, required this.header, required this.child});
+
+  final Widget header;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final media = MediaQuery.of(context);
+    return MediaQuery(
+      data: media.copyWith(
+        padding: media.padding.copyWith(
+          bottom: kShellBottomClearance + media.padding.bottom,
+        ),
+      ),
+      child: Column(
+        children: [
+          SafeArea(bottom: false, child: header),
+          // The banner's SafeArea already reserved the top inset; pages must not add it again.
+          // Builder: removePadding must read the padded MediaQuery above, not the shell's.
+          Expanded(
+            child: Builder(
+              builder: (padded) => MediaQuery.removePadding(
+                context: padded,
+                removeTop: true,
+                child: child,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
 
 /// Tabs with the player and navigation pinned below on phones, or a sidebar on wide screens.
 class ShellPage extends StatefulWidget {
@@ -86,7 +119,6 @@ class _ShellPageState extends State<ShellPage>
   @override
   Widget build(BuildContext context) {
     final media = MediaQuery.of(context);
-    final bottomSafe = media.padding.bottom;
     if (context.isWideLayout) return _desktop(context, media);
     return PageBackground(
       child: Scaffold(
@@ -95,36 +127,17 @@ class _ShellPageState extends State<ShellPage>
         body: Stack(
           children: [
             Positioned.fill(
-              child: MediaQuery(
-                data: media.copyWith(
-                  padding: media.padding.copyWith(
-                    bottom: _bottomClearance + bottomSafe,
-                  ),
+              child: ShellTabArea(
+                header: const Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [StatusBanner(), UpdateBanner()],
                 ),
-                child: Column(
-                  children: [
-                    SafeArea(
-                      bottom: false,
-                      child: const Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [StatusBanner(), UpdateBanner()],
-                      ),
-                    ),
-                    // The banner's SafeArea already reserved the top inset; pages must not add it again.
-                    Expanded(
-                      child: MediaQuery.removePadding(
-                        context: context,
-                        removeTop: true,
-                        child: FadeTransition(
-                          opacity: CurvedAnimation(
-                            parent: _fade,
-                            curve: Curves.easeOut,
-                          ),
-                          child: IndexedStack(index: _index, children: _pages),
-                        ),
-                      ),
-                    ),
-                  ],
+                child: FadeTransition(
+                  opacity: CurvedAnimation(
+                    parent: _fade,
+                    curve: Curves.easeOut,
+                  ),
+                  child: IndexedStack(index: _index, children: _pages),
                 ),
               ),
             ),

@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
-import '../../core/app_info.dart';
 import '../../state/player_controller.dart';
 import '../../state/session.dart';
 import '../settings/appearance_section.dart';
@@ -11,6 +10,7 @@ import '../settings/listening_sync_section.dart';
 import '../settings/profile_section.dart';
 import '../settings/settings_widgets.dart';
 import '../settings/storage_section.dart';
+import '../settings/version_footer.dart';
 import '../stats/spotify_import_page.dart';
 import '../theme.dart';
 
@@ -105,20 +105,7 @@ class SettingsPage extends StatelessWidget {
                 ),
               ],
             ),
-            if (appInfo.isKnown)
-              Padding(
-                padding: const EdgeInsets.symmetric(vertical: 24),
-                child: Center(
-                  child: Text(
-                    appInfo.label,
-                    style: yomiText(
-                      12.5,
-                      weight: FontWeight.w500,
-                      color: YomiColors.textSecondary,
-                    ),
-                  ),
-                ),
-              ),
+            const VersionFooter(),
           ],
         ),
       ),

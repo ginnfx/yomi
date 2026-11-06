@@ -61,7 +61,9 @@ class FriendProfilePage extends StatelessWidget {
     return Scaffold(
       appBar: AppBar(title: Text(isMe ? 'How friends see you' : profile.name)),
       body: ListView(
-        padding: const EdgeInsets.all(kPagePadding),
+        padding: const EdgeInsets.all(
+          kPagePadding,
+        ).copyWith(bottom: kPagePadding + MediaQuery.paddingOf(context).bottom),
         children: [
           Center(child: PersonAvatar(profile: profile, radius: 48)),
           const SizedBox(height: 12),

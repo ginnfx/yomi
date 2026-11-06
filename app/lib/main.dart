@@ -66,10 +66,7 @@ final _navigatorKey = GlobalKey<NavigatorState>();
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   // Before any server request, so each one says which version is asking.
-  appInfo = AppInfo(
-    version: (await PackageInfo.fromPlatform()).version,
-    platform: Platform.operatingSystem,
-  );
+  appInfo = await _loadAppInfo();
 
   final settings = await SettingsController.load();
   final appearance = await AppearanceController.load();
@@ -572,6 +569,22 @@ Future<void> _followCatalog(
 ) async {
   await catalog.attach(client, accountId);
   if (client != null) await catalog.sync();
+}
+
+/// A broken version lookup must not stop the app from starting; it then just
+/// shows no version.
+Future<AppInfo> _loadAppInfo() async {
+  try {
+    final info = await PackageInfo.fromPlatform();
+    return AppInfo(
+      version: info.version,
+      buildNumber: info.buildNumber,
+      platform: Platform.operatingSystem,
+    );
+  } on Exception catch (error) {
+    debugPrint('Could not read the app version: $error');
+    return AppInfo(platform: Platform.operatingSystem);
+  }
 }
 
 Future<UpdateController> _buildUpdateController(SharedPreferences prefs) async {
