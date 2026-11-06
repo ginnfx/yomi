@@ -43,10 +43,18 @@ if ! OUTPUT=$("$APKSIGNER" verify --print-certs "$APK" 2>&1); then
   printf 'APK failed verification with %s:\n%s\n' "$APKSIGNER" "$OUTPUT" >&2
   exit 1
 fi
-# Newer apksigner versions can label signers differently, e.g. "Signer (minSdkVersion=...)".
-ACTUAL=$(printf '%s\n' "$OUTPUT" | sed -n 's/^Signer[^:]*certificate SHA-256 digest: //p' | head -n 1 | tr -d '[:space:]')
+# Labels differ by version: "Signer #1 certificate ..." (up to 36),
+# "V3.0 Signer: certificate ..." (37) and "Signer (minSdkVersion=...) certificate ...".
+ACTUAL=$(printf '%s\n' "$OUTPUT" |
+  sed -n -E 's/^(V[0-9.]+ )?Signer[^:]*:? ?certificate SHA-256 digest: *//p' |
+  tr -d ' \r' | sort -u)
 if [ -z "$ACTUAL" ]; then
   printf 'Could not read the certificate from %s output:\n%s\n' "$APKSIGNER" "$OUTPUT" >&2
+  exit 1
+fi
+# Every signer must be the release key; installed copies reject anything else.
+if [ "$(printf '%s\n' "$ACTUAL" | wc -l | tr -d ' ')" != 1 ]; then
+  printf 'APK is signed with more than one key:\n%s\n' "$ACTUAL" >&2
   exit 1
 fi
 if [ "$ACTUAL" != "$EXPECTED" ]; then
