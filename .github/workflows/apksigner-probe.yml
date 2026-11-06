@@ -1,0 +1,32 @@
+name: apksigner probe (temporary)
+on:
+  push:
+    branches: [ci/apksigner-probe]
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Run the release signing check on a test-signed APK
+        run: |
+          set -eu
+          ls "$ANDROID_HOME/build-tools"
+          W=$(mktemp -d)
+          keytool -genkeypair -keystore "$W/k.jks" -storepass password -keypass password -alias t -keyalg RSA -keysize 2048 -validity 1 -dname CN=Probe >/dev/null
+          printf '<manifest/>' > "$W/AndroidManifest.xml"
+          (cd "$W" && zip -q unsigned.apk AndroidManifest.xml)
+          SIGNER=$(find -L "$ANDROID_HOME/build-tools" -mindepth 2 -maxdepth 2 -name apksigner | sort -V | tail -n 1)
+          "$SIGNER" sign --ks "$W/k.jks" --ks-pass pass:password --min-sdk-version 24 --out "$W/app.apk" "$W/unsigned.apk"
+          mkdir -p "$W/app/android"
+          keytool -exportcert -keystore "$W/k.jks" -storepass password -alias t | sha256sum | cut -d' ' -f1 > "$W/app/android/release-cert.sha256"
+          # The exact block from build_android.sh, from SDK= to the key comparison.
+          awk '/^SDK=/{p=1} p{print} p&&/^  echo "APK is signed by the wrong key/{w=1} w&&/^fi$/{exit}' app/scripts/build_android.sh > "$W/check.sh"
+          APP_DIR="$W/app" APK="$W/app.apk" sh -c '. "$0"; echo "PASS: $APKSIGNER -> $ACTUAL"' "$W/check.sh"
