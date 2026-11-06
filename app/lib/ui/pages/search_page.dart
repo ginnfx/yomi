@@ -51,6 +51,10 @@ const int _maxDescribedSongs = 100;
 
 class _SearchPageState extends State<SearchPage> {
   final _controller = TextEditingController();
+
+  /// Recent searches show only while the search bar is tapped into.
+  late final FocusNode _searchFocus = FocusNode()
+    ..addListener(() => setState(() {}));
   Timer? _timer;
   List<Artist> _artists = const [];
   List<Song> _songs = const [];
@@ -88,6 +92,7 @@ class _SearchPageState extends State<SearchPage> {
   void dispose() {
     _timer?.cancel();
     _controller.dispose();
+    _searchFocus.dispose();
     super.dispose();
   }
 
@@ -351,6 +356,7 @@ class _SearchPageState extends State<SearchPage> {
             padding: const EdgeInsets.symmetric(horizontal: kPagePadding),
             child: TextField(
               controller: _controller,
+              focusNode: _searchFocus,
               onChanged: _onChanged,
               onSubmitted: (_) => _rememberSearch(),
               textInputAction: TextInputAction.search,
@@ -385,7 +391,11 @@ class _SearchPageState extends State<SearchPage> {
           if (_error != null)
             ErrorView(error: _error!, onRetry: () => _search(_controller.text))
           else if (!_hasSearched) ...[
-            _RecentSearches(onSelected: _useRecent),
+            // Counts as part of the search bar, so tapping a chip doesn't close it first.
+            if (_searchFocus.hasFocus)
+              TextFieldTapRegion(
+                child: _RecentSearches(onSelected: _useRecent),
+              ),
             if (context.watch<AiController>().isAvailable)
               MoodChips(onSelected: _useRecent),
             Row(

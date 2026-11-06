@@ -159,6 +159,29 @@ void main() {
     await tester.pump(const Duration(minutes: 1));
   });
 
+  testWidgets('recent searches only appear once the search bar is tapped', (
+    tester,
+  ) async {
+    await pumpScreen(
+      tester,
+      page(),
+      size: phoneSize,
+      prefs: {
+        'recentSearches': ['halo'],
+      },
+    );
+    expect(find.widgetWithText(ActionChip, 'halo'), findsNothing);
+
+    await tester.tap(find.byType(TextField));
+    await tester.pump();
+    expect(find.widgetWithText(ActionChip, 'halo'), findsOneWidget);
+
+    await tester.tap(find.widgetWithText(ActionChip, 'halo'));
+    await tester.pump();
+    expect(find.text('Halo'), findsWidgets);
+    await tester.pump(const Duration(minutes: 1));
+  });
+
   testWidgets('mood chips appear once the AI is on, and search by mood', (
     tester,
   ) async {

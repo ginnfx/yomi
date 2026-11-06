@@ -119,6 +119,7 @@ void main() {
   tearDown(() async {
     for (final home in made) {
       home.dispose();
+      await home.saved;
     }
     made.clear();
     await dir.delete(recursive: true);
