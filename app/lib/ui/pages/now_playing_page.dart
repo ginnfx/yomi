@@ -489,9 +489,7 @@ class _TitleRow extends StatelessWidget {
               : 'Download',
           onPressed: () {
             HapticFeedback.selectionClick();
-            if (status == DownloadStatus.done ||
-                status == DownloadStatus.queued ||
-                status == DownloadStatus.downloading) {
+            if (status.isSavedOrSaving) {
               downloads.remove(song);
             } else {
               downloads.enqueue([song]);

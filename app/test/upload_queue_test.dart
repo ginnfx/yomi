@@ -231,6 +231,30 @@ void main() {
       queue.dispose();
     });
 
+    test('two tagged copies in one folder: only the first is sent', () async {
+      // Same song, different bytes (e.g. other tags or cover), both new to the library.
+      song('a.m4a', 'aaa');
+      song('a(1).m4a', 'bbb');
+      final queue = withLibrary(999);
+      await queue.addFolder(music.path);
+      await settle(queue);
+      expect(transport.uploaded, hasLength(1));
+      expect(queue.count(UploadState.likelyDuplicate), 1);
+      queue.dispose();
+    });
+
+    test('copies in one folder are caught even without a library list', () async {
+      song('a.m4a', 'aaa');
+      song('a(1).m4a', 'bbb');
+      final queue = newQueue(inspector: (path) async => tagged(path))
+        ..attach(transport);
+      await queue.addFolder(music.path);
+      await settle(queue);
+      expect(transport.uploaded, hasLength(1));
+      expect(queue.count(UploadState.likelyDuplicate), 1);
+      queue.dispose();
+    });
+
     test('a different length is treated as a different recording', () async {
       song('a.mp3', 'aaa');
       final queue = withLibrary(400);

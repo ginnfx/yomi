@@ -195,7 +195,7 @@ Future<void> showSongMenu(
   final messenger = ScaffoldMessenger.of(context);
   void tell(String text) =>
       messenger.showSnackBar(SnackBar(content: Text(text)));
-  final isSaved = downloads.statusOf(song.id) != DownloadStatus.none;
+  final isSaved = downloads.statusOf(song.id).isSavedOrSaving;
 
   final actions = <SongAction>[
     SongAction(
