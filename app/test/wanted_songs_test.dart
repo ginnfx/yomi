@@ -1,4 +1,6 @@
+import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -9,7 +11,9 @@ import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:yomi/core/export/wanted_export.dart';
 import 'package:yomi/core/reports/reports_api.dart';
+import 'package:yomi/core/spotify/imported_playlist.dart';
 import 'package:yomi/core/subsonic_client.dart';
+import 'package:yomi/state/imports_controller.dart';
 import 'package:yomi/state/reports_controller.dart';
 import 'package:yomi/ui/theme.dart';
 import 'package:yomi/ui/widgets/wanted_songs_section.dart';
@@ -108,9 +112,19 @@ void main() {
       WidgetTester tester,
       ReportsController controller, {
       Future<void> Function(BuildContext, ExportedFile)? shareFile,
+      ImportsController? imports,
     }) => tester.pumpWidget(
-      ChangeNotifierProvider<ReportsController>.value(
-        value: controller,
+      MultiProvider(
+        providers: [
+          ChangeNotifierProvider<ReportsController>.value(value: controller),
+          ChangeNotifierProvider<ImportsController>.value(
+            value:
+                imports ??
+                ImportsController(
+                  file: File('${Directory.systemTemp.path}/none-imports.json'),
+                ),
+          ),
+        ],
         child: MaterialApp(
           theme: buildYomiTheme(accentPalettes.first),
           home: YomiTheme(
@@ -248,6 +262,69 @@ void main() {
       await tester.pump();
 
       expect(find.textContaining("isn't available"), findsOneWidget);
+    });
+
+    testWidgets('recovers when the connection is re-attached mid-load', (
+      tester,
+    ) async {
+      final slow = Completer<http.Response>();
+      final controller = await _controller(
+        ReportsApi(
+          serverUrl: 'http://s',
+          auth: SubsonicClient(
+            baseUrl: 'http://s',
+            username: 'u',
+            password: 'p',
+          ),
+          port: 4534,
+          httpClient: MockClient((_) => slow.future),
+        ),
+      );
+      await pumpSection(tester, controller);
+      await tester.pump();
+
+      // The app swaps the server connection while the first request is still waiting.
+      controller.attach(_api([_song('Blue Hour', 2)]));
+      await tester.pump();
+      await tester.pump();
+      slow.complete(http.Response(jsonEncode({'songs': []}), 200));
+      await tester.pump();
+
+      expect(find.text('Blue Hour'), findsOneWidget);
+      expect(find.text('Loading…'), findsNothing);
+    });
+
+    testWidgets('exports everyone\'s wants and my own together', (
+      tester,
+    ) async {
+      final controller = await _controller(_api([_song('Shared One', 2)]));
+      // Real file work can't finish inside the test's fake clock.
+      final dir = (await tester.runAsync(
+        () => Directory.systemTemp.createTemp('yomi_wanted_mine'),
+      ))!;
+      addTearDown(() => dir.deleteSync(recursive: true));
+      final imports = ImportsController(file: File('${dir.path}/i.json'));
+      await tester.runAsync(
+        () => imports.add('My mix', const [
+          ImportEntry(title: 'Only Mine', artist: 'Me'),
+        ]),
+      );
+      ExportedFile? shared;
+      await pumpSection(
+        tester,
+        controller,
+        imports: imports,
+        shareFile: (_, file) async => shared = file,
+      );
+      await tester.pump();
+      await tester.pump();
+
+      await tester.tap(find.byTooltip('Export list'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Text file'));
+      await tester.pumpAndSettle();
+
+      expect(shared?.content, 'Mira - Shared One\nMe - Only Mine\n');
     });
   });
 }

@@ -1,6 +1,8 @@
 import 'dart:convert';
 
 import '../reports/reports_api.dart';
+import '../search_index.dart';
+import '../spotify/missing_songs.dart';
 
 /// How a list of wanted songs can be saved, to feed into another tool.
 enum WantedFormat { text, csv, json }
@@ -22,6 +24,20 @@ const String _baseName = 'yomi-wanted-songs';
 
 /// Characters that make a spreadsheet read a cell as a formula.
 const String _formulaStarts = '=+-@\t\r';
+
+/// Everyone's wanted songs plus the ones only this device knows about, such as requests
+/// that haven't reached the server yet. Each song once; the shared count wins.
+List<WantedSong> mergeWanted(List<WantedSong> shared, List<MissingSong> mine) {
+  String keyOf(String artist, String title) =>
+      '${normalizeForSearch(artist)}|${normalizeForSearch(title)}';
+  final seen = {for (final song in shared) keyOf(song.artist, song.title)};
+  return List.unmodifiable([
+    ...shared,
+    for (final song in mine)
+      if (seen.add(keyOf(song.artist, song.title)))
+        WantedSong(artist: song.artist, title: song.title, count: 1),
+  ]);
+}
 
 ExportedFile exportWanted(List<WantedSong> songs, WantedFormat format) =>
     switch (format) {

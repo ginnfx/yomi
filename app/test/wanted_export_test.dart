@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:yomi/core/export/wanted_export.dart';
 import 'package:yomi/core/reports/reports_api.dart';
+import 'package:yomi/core/spotify/missing_songs.dart';
 
 const _songs = [
   WantedSong(artist: 'Mira', title: 'Blue Hour', count: 3),
@@ -84,5 +85,46 @@ void main() {
       'artist,title,wanted_by\r\n',
     );
     expect(exportWanted(const [], WantedFormat.json).content, '[]');
+  });
+
+  group('mergeWanted', () {
+    const mine = [
+      MissingSong(title: 'Blue Hour', artist: 'Mira', playlists: ['Mix']),
+      MissingSong(title: 'Only Mine', artist: 'Me', playlists: ['Mix']),
+    ];
+
+    test('adds my own missing songs that the shared list does not have', () {
+      final merged = mergeWanted(_songs, mine);
+
+      expect(merged.map((s) => s.title), [
+        'Blue Hour',
+        'Green, Room',
+        'Only Mine',
+      ]);
+      expect(merged.last.count, 1);
+    });
+
+    test('does not list a song twice, and keeps the shared count', () {
+      final merged = mergeWanted(_songs, mine);
+
+      final blueHour = merged.where((s) => s.title == 'Blue Hour');
+      expect(blueHour, hasLength(1));
+      expect(blueHour.single.count, 3);
+    });
+
+    test('treats different capitals and spacing as the same song', () {
+      final merged = mergeWanted(_songs, const [
+        MissingSong(title: ' blue  HOUR ', artist: 'MIRA', playlists: []),
+      ]);
+
+      expect(merged, hasLength(2));
+    });
+
+    test('is just my songs when the shared list could not be loaded', () {
+      expect(mergeWanted(const [], mine).map((s) => s.title), [
+        'Blue Hour',
+        'Only Mine',
+      ]);
+    });
   });
 }

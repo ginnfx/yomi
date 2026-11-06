@@ -4,6 +4,8 @@ import 'package:provider/provider.dart';
 
 import '../../core/export/wanted_export.dart';
 import '../../core/reports/reports_api.dart';
+import '../../core/spotify/missing_songs.dart';
+import '../../state/imports_controller.dart';
 import '../../state/reports_controller.dart';
 import '../theme.dart';
 import 'share_exported_file.dart';
@@ -28,16 +30,23 @@ class WantedSongsSection extends StatefulWidget {
 class _WantedSongsSectionState extends State<WantedSongsSection> {
   bool _showAll = false;
 
-  @override
-  void initState() {
-    super.initState();
-    // After the first frame, so it never changes what's showing mid-build.
+  /// Asks for the list whenever it's wanted and nothing is on the way. Doing this from
+  /// build, rather than once at the start, means a connection swapped mid-load can't
+  /// leave the section waiting for an answer that was thrown away.
+  void _askIfNeeded(ReportsController reports) {
+    final isNeeded =
+        reports.isAvailable &&
+        !reports.isWantedLoaded &&
+        !reports.isWantedLoading &&
+        reports.wantedError == null;
+    if (!isNeeded) return;
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) context.read<ReportsController>().refreshWanted();
+      if (mounted) reports.refreshWanted();
     });
   }
 
   Future<void> _export(List<WantedSong> wanted) async {
+    final everyone = wanted;
     final format = await showModalBottomSheet<_Choice>(
       context: context,
       // Sizes to its rows instead of the default half-screen cap, which clips them on
@@ -51,21 +60,27 @@ class _WantedSongsSectionState extends State<WantedSongsSection> {
     if (format == _Choice.copy) {
       final messenger = ScaffoldMessenger.of(context);
       await Clipboard.setData(
-        ClipboardData(text: exportWanted(wanted, WantedFormat.text).content),
+        ClipboardData(text: exportWanted(everyone, WantedFormat.text).content),
       );
       messenger.showSnackBar(
-        SnackBar(content: Text('Copied ${wanted.length} songs')),
+        SnackBar(content: Text('Copied ${everyone.length} songs')),
       );
       return;
     }
-    final file = exportWanted(wanted, format.format!);
+    final file = exportWanted(everyone, format.format!);
     await (widget.shareFile ?? shareExportedFile)(context, file);
   }
 
   @override
   Widget build(BuildContext context) {
     final reports = context.watch<ReportsController>();
+    _askIfNeeded(reports);
     final wanted = reports.wanted;
+    // What gets exported: everyone's wants plus any only this device has so far.
+    final everyone = mergeWanted(
+      wanted,
+      missingFromImports(context.watch<ImportsController>().playlists),
+    );
     final shown = _showAll ? wanted : wanted.take(_shownAtFirst).toList();
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -80,11 +95,11 @@ class _WantedSongsSectionState extends State<WantedSongsSection> {
                   style: yomiText(16, weight: FontWeight.w800),
                 ),
               ),
-              if (wanted.isNotEmpty)
+              if (everyone.isNotEmpty)
                 IconButton(
                   tooltip: 'Export list',
                   icon: const Icon(Icons.ios_share_rounded),
-                  onPressed: () => _export(wanted),
+                  onPressed: () => _export(everyone),
                 ),
             ],
           ),
