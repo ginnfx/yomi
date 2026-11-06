@@ -14,6 +14,7 @@ import '../../state/session.dart';
 import '../settings/profile_section.dart';
 import '../theme.dart';
 import '../widgets/action_sheet.dart';
+import '../widgets/add_songs_sheet.dart';
 import '../widgets/cover_art.dart';
 import '../widgets/cover_color.dart';
 import '../widgets/error_view.dart';
@@ -474,48 +475,73 @@ class _CollectionPageState extends State<CollectionPage> {
         isSaved: isFullySaved,
         playlist: playlist,
       ),
-      actions: Row(
+      actions: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          HeaderIconButton(
-            icon: isFullySaved
-                ? Icons.arrow_circle_down_rounded
-                : Icons.arrow_circle_down_outlined,
-            color: isFullySaved ? context.accent : null,
-            tooltip: isFullySaved ? 'Remove download' : 'Download',
-            progress: isBusy
-                ? (songs.isEmpty ? 0 : savedCount / songs.length)
-                : null,
-            onTap: songs.isEmpty
-                ? null
-                : () => _toggleDownload(songs, isFullySaved),
+          Row(
+            children: [
+              HeaderIconButton(
+                icon: isFullySaved
+                    ? Icons.arrow_circle_down_rounded
+                    : Icons.arrow_circle_down_outlined,
+                color: isFullySaved ? context.accent : null,
+                tooltip: isFullySaved ? 'Remove download' : 'Download',
+                progress: isBusy
+                    ? (songs.isEmpty ? 0 : savedCount / songs.length)
+                    : null,
+                onTap: songs.isEmpty
+                    ? null
+                    : () => _toggleDownload(songs, isFullySaved),
+              ),
+              if (playlist != null)
+                HeaderIconButton(
+                  icon: Icons.more_horiz_rounded,
+                  tooltip: 'More options',
+                  onTap: () => _openPlaylistMenu(songs, pictureUrl),
+                ),
+              const Spacer(),
+              IconButton(
+                tooltip: 'Shuffle',
+                iconSize: 30,
+                color: player.isShuffled
+                    ? context.accent
+                    : YomiColors.faint(0.75),
+                icon: const Icon(Icons.shuffle_rounded),
+                onPressed: songs.isEmpty
+                    ? null
+                    : () async {
+                        await player.playQueue(songs);
+                        if (!player.isShuffled) await player.toggleShuffle();
+                      },
+              ),
+              const SizedBox(width: YomiSpace.s),
+              PlayButton(
+                isPlaying: isPlayingHere,
+                onTap: songs.isEmpty ? null : () => _play(player, songs),
+              ),
+            ],
           ),
           if (playlist != null)
-            HeaderIconButton(
-              icon: Icons.more_horiz_rounded,
-              tooltip: 'More options',
-              onTap: () => _openPlaylistMenu(songs, pictureUrl),
+            Padding(
+              padding: const EdgeInsets.only(top: YomiSpace.s),
+              child: _AddChip(onTap: () => _openAddSongs(songs)),
             ),
-          const Spacer(),
-          IconButton(
-            tooltip: 'Shuffle',
-            iconSize: 30,
-            color: player.isShuffled ? context.accent : YomiColors.faint(0.75),
-            icon: const Icon(Icons.shuffle_rounded),
-            onPressed: songs.isEmpty
-                ? null
-                : () async {
-                    await player.playQueue(songs);
-                    if (!player.isShuffled) await player.toggleShuffle();
-                  },
-          ),
-          const SizedBox(width: YomiSpace.s),
-          PlayButton(
-            isPlaying: isPlayingHere,
-            onTap: songs.isEmpty ? null : () => _play(player, songs),
-          ),
         ],
       ),
     );
+  }
+
+  Future<void> _openAddSongs(List<Song> songs) async {
+    final playlist = widget.playlist!;
+    final client = context.read<SessionController>().client;
+    await showAddSongsSheet(
+      context,
+      playlistName: playlist.name,
+      playlistSongs: songs,
+      onAdd: (song) => client.addToPlaylist(playlist.id, [song.id]),
+    );
+    if (mounted) _reload();
   }
 
   /// "ginnfx" with their picture for playlists, or the album's artist.
@@ -758,6 +784,34 @@ void openPlaylist(BuildContext context, Playlist playlist) {
         playlist: playlist,
         loadSongs: () => client.playlistSongs(playlist.id),
         savedSongs: client.cachedPlaylistSongs(playlist.id),
+      ),
+    ),
+  );
+}
+
+/// The "+ Add" pill under a playlist's buttons, which opens the song picker.
+class _AddChip extends StatelessWidget {
+  const _AddChip({required this.onTap});
+
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) => Material(
+    color: Colors.white.withValues(alpha: 0.12),
+    shape: const StadiumBorder(),
+    child: InkWell(
+      customBorder: const StadiumBorder(),
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.add_rounded, size: 22),
+            const SizedBox(width: 8),
+            Text('Add', style: yomiText(15, weight: FontWeight.w700)),
+          ],
+        ),
       ),
     ),
   );
