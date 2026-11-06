@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:math';
 
@@ -38,6 +39,24 @@ class TunnelController extends ChangeNotifier {
   final Directory stateDir;
   String? _musicUrl;
   int? _uploadPort;
+  Future<void> _pending = Future<void>.value();
+
+  // Joining, restarting and leaving must not stop one another mid-operation.
+  Future<T> _serialize<T>(Future<T> Function() action) {
+    final result = _pending.then((_) => action());
+    _pending = result.then<void>((_) {}, onError: (Object _, StackTrace _) {});
+    return result;
+  }
+
+  Future<void> networkChanged() => _serialize(() async {
+    try {
+      await bridge.networkChanged();
+    } on Exception catch (error) {
+      debugPrint('Tunnel network notification failed: $error');
+    }
+  });
+
+  Future<String?> reconnect() => _serialize(() => _connect(restart: true));
 
   /// Whether this device has joined and can connect by itself.
   bool get isEnrolled => prefs.containsKey(_hostKey);
@@ -61,7 +80,7 @@ class TunnelController extends ChangeNotifier {
   }
 
   /// Joins using an invite code. [serverHost] is the server's Tailscale address.
-  Future<void> join(String code, String serverHost) async {
+  Future<void> join(String code, String serverHost) => _serialize(() async {
     final trimmed = code.trim();
     if (!trimmed.startsWith(_invitePrefix)) {
       throw const TunnelException("That doesn't look like an invite code.");
@@ -72,23 +91,29 @@ class TunnelController extends ChangeNotifier {
     await _start(authKey: trimmed, serverHost: serverHost);
     await prefs.setString(_hostKey, serverHost);
     notifyListeners();
-  }
+  });
 
   /// Returns the server's loopback address, starting the tunnel if needed. Null when this
   /// device hasn't joined or the tunnel can't start right now.
-  Future<String?> connect() async {
+  Future<String?> connect() => _serialize(() => _connect());
+
+  Future<String?> _connect({bool restart = false}) async {
     final host = prefs.getString(_hostKey);
     if (host == null) return null;
     try {
       final current = _musicUrl;
-      if (current != null && await bridge.state() == _runningState) {
+      if (!restart &&
+          current != null &&
+          await bridge.state() == _runningState) {
         return current;
       }
       // Phones can suspend the node, so anything but a healthy state starts over.
       await bridge.stop();
       await _start(authKey: '', serverHost: host);
       return _musicUrl;
-    } on TunnelException catch (error) {
+    } on Exception catch (error) {
+      _musicUrl = null;
+      _uploadPort = null;
       debugPrint('Tunnel unavailable: $error');
       return null;
     }
@@ -122,7 +147,7 @@ class TunnelController extends ChangeNotifier {
   }
 
   /// Leaves the tailnet on this device. It needs a new invite to come back.
-  Future<void> leave() async {
+  Future<void> leave() => _serialize(() async {
     try {
       await bridge.stop();
     } on PlatformException catch (error) {
@@ -133,5 +158,5 @@ class TunnelController extends ChangeNotifier {
     await prefs.remove(_hostKey);
     if (await stateDir.exists()) await stateDir.delete(recursive: true);
     notifyListeners();
-  }
+  });
 }

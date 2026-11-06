@@ -141,6 +141,11 @@ class UploadQueue extends ChangeNotifier {
   UploadTransport? _transport;
   SnapshotLoader? _loadSnapshot;
   LibrarySnapshot? _snapshot;
+
+  /// Songs this queue has already chosen to send. A batch is classified before any of it
+  /// uploads, so the library alone can't catch two copies sitting in the same folder.
+  final LibrarySnapshot _claimed = LibrarySnapshot(const []);
+  bool _hasSeededClaims = false;
   bool _isRunning = false;
   bool _isDisposed = false;
   UploadPause? _pause;
@@ -326,6 +331,12 @@ class UploadQueue extends ChangeNotifier {
         if (item.facts != null && item.state != UploadState.queued)
           item.facts!.sha256: item.path,
     };
+    if (!_hasSeededClaims) {
+      _hasSeededClaims = true;
+      for (final item in _items.values) {
+        if (_isClaimed(item.state)) _claim(item.facts);
+      }
+    }
     while (_canContinue) {
       final batch = _items.values
           .where((item) => item.state == UploadState.queued)
@@ -380,15 +391,11 @@ class UploadQueue extends ChangeNotifier {
       final UploadState state;
       if (isExact) {
         state = UploadState.duplicate;
-      } else if (_snapshot?.hasLikelyMatch(
-            facts.artist,
-            facts.title,
-            facts.durationSeconds,
-          ) ??
-          false) {
+      } else if (_isLikelyDuplicate(facts)) {
         state = UploadState.likelyDuplicate;
       } else {
         state = UploadState.ready;
+        _claim(facts);
       }
       seen[facts.sha256] = item.path;
       _items[item.path] = item.copyWith(state: state);
@@ -506,6 +513,27 @@ class UploadQueue extends ChangeNotifier {
       _progress.remove(item.path);
       _changed(saveNow: true);
     }
+  }
+
+  static bool _isClaimed(UploadState state) =>
+      state == UploadState.ready ||
+      state == UploadState.uploading ||
+      state == UploadState.done;
+
+  bool _isLikelyDuplicate(FileFacts facts) =>
+      (_snapshot?.hasLikelyMatch(
+            facts.artist,
+            facts.title,
+            facts.durationSeconds,
+          ) ??
+          false) ||
+      _claimed.hasLikelyMatch(facts.artist, facts.title, facts.durationSeconds);
+
+  void _claim(FileFacts? facts) {
+    final artist = facts?.artist;
+    final title = facts?.title;
+    if (artist == null || title == null) return;
+    _claimed.add(artist, title, facts!.durationSeconds);
   }
 
   void _rememberInSnapshot(UploadItem item) {

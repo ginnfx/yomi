@@ -115,6 +115,8 @@ Future<void> main() async {
   final session = SessionController(
     connectivity: connectivity,
     tunnelConnect: tunnel.connect,
+    tunnelReconnect: tunnel.reconnect,
+    tunnelNetworkChanged: tunnel.networkChanged,
     uploadPortFor: tunnel.uploadPortFor,
     catalogCacheFor: (account) => CatalogCache(
       file: File('${supportDir.path}/catalog/responses/$account.json'),

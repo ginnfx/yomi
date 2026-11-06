@@ -13,6 +13,7 @@ class FakeBridge implements TunnelBridge {
   final List<String> calls = [];
   String currentState = 'Running';
   bool failStart = false;
+  bool failState = false;
   String? lastKey;
   int nextPort = 40000;
 
@@ -34,7 +35,14 @@ class FakeBridge implements TunnelBridge {
   }
 
   @override
-  Future<String> state() async => currentState;
+  Future<String> state() async {
+    if (failState)
+      throw PlatformException(code: 'tunnel', message: 'state failed');
+    return currentState;
+  }
+
+  @override
+  Future<void> networkChanged() async => calls.add('networkChanged');
 
   @override
   Future<void> stop() async => calls.add('stop');
@@ -128,6 +136,29 @@ void main() {
       expect(await tunnel.connect(), isNull);
     });
 
+    test('recovery restarts a backend that still reports Running', () async {
+      await tunnel.join('tskey-auth-abc', '100.1.2.3');
+      expect(await tunnel.reconnect(), 'http://127.0.0.1:40002');
+      expect(bridge.calls.where((c) => c == 'start'), hasLength(2));
+      expect(bridge.lastKey, '');
+    });
+
+    test('native state errors allow a later recovery', () async {
+      await tunnel.join('tskey-auth-abc', '100.1.2.3');
+      bridge.failState = true;
+      expect(await tunnel.connect(), isNull);
+      bridge.failState = false;
+      expect(await tunnel.connect(), isNotNull);
+    });
+
+    test(
+      'network changes notify the monitor without starting a node',
+      () async {
+        await tunnel.networkChanged();
+        expect(bridge.calls, ['networkChanged']);
+      },
+    );
+
     test('leaving removes the node key', () async {
       await tunnel.join('tskey-auth-abc', '100.1.2.3');
       File('${dir.path}/ts/node-key').writeAsStringSync('secret');
@@ -173,6 +204,50 @@ void main() {
       await Future<void>.delayed(const Duration(milliseconds: 100));
       return session;
     }
+
+    test('a failed tunnel probe retries with a restarted tunnel', () async {
+      FlutterSecureStorage.setMockInitialValues({
+        'server_url': away,
+        'username': 'u',
+        'password': 'p',
+      });
+      var restarts = 0;
+      final session = SessionController(
+        tunnelConnect: () async => tunnelUrl,
+        tunnelReconnect: () async {
+          restarts++;
+          return 'http://127.0.0.1:40002';
+        },
+        urlProbe: (url, user, password) async => ProbeResult(
+          url: url,
+          isOk: url.endsWith(':40002'),
+          elapsed: Duration.zero,
+        ),
+      );
+      await session.restoreSaved();
+      await session.checkServer();
+      expect(restarts, 1);
+      expect(session.isChecking, isFalse);
+      expect(session.isServerReachable, isTrue);
+      expect(session.serverUrl, 'http://127.0.0.1:40002');
+      session.dispose();
+    });
+
+    test('a recovery error releases the checking guard', () async {
+      FlutterSecureStorage.setMockInitialValues({
+        'server_url': away,
+        'username': 'u',
+        'password': 'p',
+      });
+      final session = SessionController(
+        tunnelConnect: () async => throw PlatformException(code: 'tunnel'),
+      );
+      await session.restoreSaved();
+      await session.checkServer();
+      expect(session.isChecking, isFalse);
+      expect(session.isServerReachable, isFalse);
+      session.dispose();
+    });
 
     test('an address that works means the tunnel never starts', () async {
       final session = await start({home});

@@ -100,7 +100,7 @@ class InviteSection extends StatelessWidget {
           leading: const Icon(Icons.vpn_key_outlined),
           title: Text(
             tunnel.isEnrolled
-                ? 'Connected with an invite'
+                ? 'Invite saved on this device'
                 : 'Use an invite code',
             style: yomiText(15, weight: FontWeight.w700),
           ),

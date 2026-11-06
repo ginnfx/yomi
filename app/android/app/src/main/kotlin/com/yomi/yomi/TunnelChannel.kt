@@ -47,6 +47,10 @@ class TunnelChannel(messenger: BinaryMessenger) {
             null
         }
         "forward" -> Bridge.forward(call.argument<String>("remote")).toInt()
+        "networkChanged" -> {
+            Bridge.networkChanged()
+            null
+        }
         "state" -> Bridge.state()
         "stop" -> {
             Bridge.stop()

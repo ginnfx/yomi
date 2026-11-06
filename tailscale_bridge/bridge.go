@@ -135,6 +135,16 @@ func relay(local net.Conn, dial dialFunc) {
 	<-done
 }
 
+// NetworkChanged wakes the monitor after a host network change or app resume.
+// Android otherwise polls interfaces only once every ten minutes.
+func NetworkChanged() {
+	mu.Lock()
+	defer mu.Unlock()
+	if node != nil {
+		node.Sys().NetMon.Get().Poll()
+	}
+}
+
 // State reports the node's Tailscale state, such as "Running" or "NeedsLogin".
 func State() string {
 	mu.Lock()

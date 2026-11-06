@@ -20,6 +20,7 @@ void main() {
   Future<SessionController> signedIn({
     List<ConnectivityResult> on = const [ConnectivityResult.wifi],
     bool withHome = true,
+    Future<void> Function()? onNetworkChanged,
   }) async {
     FlutterSecureStorage.setMockInitialValues({
       'server_url': away,
@@ -35,6 +36,7 @@ void main() {
     await Future<void>.delayed(Duration.zero);
     final session = SessionController(
       connectivity: connectivity,
+      tunnelNetworkChanged: onNetworkChanged,
       probe: (url, user, password) async {
         probes++;
         return homeReachable;
@@ -82,7 +84,12 @@ void main() {
   );
 
   test('switches by itself when the network changes', () async {
-    final session = await signedIn();
+    var notifications = 0;
+    final session = await signedIn(
+      onNetworkChanged: () async {
+        notifications++;
+      },
+    );
     expect(session.serverUrl, home);
 
     // Waits for the switch instead of a fixed time, which a busy machine can overrun.
@@ -97,6 +104,7 @@ void main() {
     await waitForUrl(away);
     expect(session.serverUrl, away);
     expect(session.routeLabel, 'Away from home');
+    expect(notifications, greaterThanOrEqualTo(1));
 
     network.add([ConnectivityResult.wifi]);
     await waitForUrl(home);

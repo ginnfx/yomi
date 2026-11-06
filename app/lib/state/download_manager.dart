@@ -12,7 +12,18 @@ import '../core/subsonic_client.dart';
 import 'connectivity_controller.dart';
 import 'settings.dart';
 
-enum DownloadStatus { none, queued, downloading, done, failed }
+enum DownloadStatus {
+  none,
+  queued,
+  downloading,
+  done,
+  failed;
+
+  /// Whether the song is saved or on its way, so the action offered is "Remove".
+  /// A failed download isn't saved: it offers "Download" again.
+  bool get isSavedOrSaving =>
+      this == done || this == queued || this == downloading;
+}
 
 typedef CoverWarmer = Future<void> Function(SubsonicClient client, Song song);
 
