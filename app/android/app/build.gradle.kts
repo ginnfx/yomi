@@ -54,7 +54,19 @@ android {
         }
     }
 
+    // youtubedl-android runs its bundled Python from the native library folder.
+    packaging {
+        jniLibs.useLegacyPackaging = true
+        // Python and its libraries ship as zip files named .so; stripping can't read them.
+        jniLibs.keepDebugSymbols += "**/*.zip.so"
+    }
+
     buildTypes {
+        // `--android-project-arg yomiSideBySide=true` installs a debug build beside the
+        // real app, so device tests don't replace (or need to uninstall) it.
+        debug {
+            if (project.hasProperty("yomiSideBySide")) applicationIdSuffix = ".sidebyside"
+        }
         release {
             if (hasReleaseKey) signingConfig = signingConfigs.getByName("release")
         }
@@ -73,6 +85,8 @@ flutter {
 
 dependencies {
     implementation("androidx.core:core:1.16.0")
+    // yt-dlp with its own Python, for playing and saving songs from YouTube.
+    implementation("io.github.junkfood02.youtubedl-android:library:0.18.1")
     // Built by tailscale_bridge/build.sh; not committed because of its size.
     implementation(files("../../../tailscale_bridge/build/tailscale_bridge.aar"))
 }

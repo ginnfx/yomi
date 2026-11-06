@@ -83,6 +83,7 @@ class ListeningController {
   }
 
   void _onStarted(Song song) {
+    if (song.isFromYoutube) return;
     final client = _client;
     if (client == null || connectivity.isOffline || client.isReadOnly) return;
     unawaited(
@@ -96,6 +97,7 @@ class ListeningController {
   }
 
   void _onScrobble(Song song, DateTime startedAt) {
+    if (song.isFromYoutube) return;
     unawaited(_submit(song, startedAt));
   }
 

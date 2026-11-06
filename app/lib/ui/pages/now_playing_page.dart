@@ -13,6 +13,7 @@ import '../../state/player_controller.dart';
 import '../../state/session.dart';
 import '../../state/settings.dart';
 import '../theme.dart';
+import '../widgets/youtube_play_button.dart';
 import '../widgets/cover_art.dart';
 import '../widgets/download_badge.dart';
 import '../widgets/equalizer.dart';
@@ -479,30 +480,38 @@ class _TitleRow extends StatelessWidget {
                   color: YomiColors.faint(0.70),
                 ),
               ),
+              if (song.isFromYoutube)
+                Padding(
+                  padding: const EdgeInsets.only(top: YomiSpace.s),
+                  child: YoutubeSaveChip(song: song),
+                ),
             ],
           ),
         ),
         const SizedBox(width: 12),
-        IconButton(
-          tooltip: status == DownloadStatus.done
-              ? 'Remove download'
-              : 'Download',
-          onPressed: () {
-            HapticFeedback.selectionClick();
-            if (status.isSavedOrSaving) {
-              downloads.remove(song);
-            } else {
-              downloads.enqueue([song]);
-            }
-          },
-          icon: status == DownloadStatus.none || status == DownloadStatus.failed
-              ? const Icon(Icons.download_rounded, size: 28)
-              : DownloadBadge(
-                  status: status,
-                  progress: downloads.progressOf(song.id),
-                  size: 26,
-                ),
-        ),
+        // A YouTube song is already a file here, and the server can't send it.
+        if (!song.isFromYoutube)
+          IconButton(
+            tooltip: status == DownloadStatus.done
+                ? 'Remove download'
+                : 'Download',
+            onPressed: () {
+              HapticFeedback.selectionClick();
+              if (status.isSavedOrSaving) {
+                downloads.remove(song);
+              } else {
+                downloads.enqueue([song]);
+              }
+            },
+            icon:
+                status == DownloadStatus.none || status == DownloadStatus.failed
+                ? const Icon(Icons.download_rounded, size: 28)
+                : DownloadBadge(
+                    status: status,
+                    progress: downloads.progressOf(song.id),
+                    size: 26,
+                  ),
+          ),
       ],
     );
   }

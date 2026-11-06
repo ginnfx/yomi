@@ -242,10 +242,18 @@ class PlaybackSyncController extends ChangeNotifier
   }
 
   Future<void> _publish(int epoch) async {
-    if (player.current == null || player.isBuffering) return;
-    final queue = player.queue;
-    final index = player.index;
-    if (index == null || index < 0 || index >= queue.length) return;
+    final current = player.current;
+    if (current == null || player.isBuffering) return;
+    // Navidrome only knows library songs; YouTube ones stay on this device.
+    if (current.isFromYoutube) return;
+    final full = player.queue;
+    final position = player.index;
+    if (position == null || position < 0 || position >= full.length) return;
+    final queue = [
+      for (final song in full)
+        if (!song.isFromYoutube) song,
+    ];
+    final index = full.take(position).where((s) => !s.isFromYoutube).length;
     await _client!.savePlayQueue(
       songs: queue,
       index: index,

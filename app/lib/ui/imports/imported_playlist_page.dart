@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/models.dart';
 import '../../core/spotify/imported_playlist.dart';
@@ -10,6 +9,7 @@ import '../../state/player_controller.dart';
 import '../../state/playlist_covers_controller.dart';
 import '../pages/reorder_page.dart';
 import '../theme.dart';
+import '../widgets/youtube_play_button.dart';
 import '../widgets/playlist_cover.dart';
 import '../widgets/playlist_recommendations.dart';
 import '../widgets/playlist_sheet.dart';
@@ -17,13 +17,6 @@ import '../widgets/song_tile.dart';
 
 /// How big the cover is at the top of the page.
 const double _heroCover = 220;
-
-/// Where to look for a song that isn't in the library.
-Uri youtubeSearchFor(String artist, String title) => Uri.https(
-  'www.youtube.com',
-  '/results',
-  {'search_query': '$artist $title'},
-);
 
 /// An imported playlist in its exact order, with empty places for songs you don't have.
 /// Otherwise it works like any playlist: rename it, give it a picture, reorder, add.
@@ -277,14 +270,7 @@ class _MissingTrack extends StatelessWidget {
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
         ),
-        trailing: IconButton(
-          tooltip: 'Find on YouTube',
-          icon: const Icon(Icons.open_in_new_rounded),
-          onPressed: () => launchUrl(
-            youtubeSearchFor(entry.artist, entry.title),
-            mode: LaunchMode.externalApplication,
-          ),
-        ),
+        trailing: YoutubePlayButton(artist: entry.artist, title: entry.title),
       ),
     );
   }

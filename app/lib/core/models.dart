@@ -91,6 +91,9 @@ class Song {
   /// A censored version: someone may want the explicit one instead.
   bool get isClean => explicitStatus == 'clean';
 
+  /// Played straight from YouTube: not in the library, so never sent to the server.
+  bool get isFromYoutube => id.startsWith('yt:');
+
   Duration get duration => Duration(seconds: durationSeconds);
 
   Map<String, Object?> toJson() => {

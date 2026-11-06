@@ -102,6 +102,17 @@ class ReportsController extends ChangeNotifier {
     );
   }
 
+  /// Closes open requests for a song someone just added to the library.
+  Future<void> markAddedMatching(String artist, String title) async {
+    final key = '${normalizeForSearch(artist)}|${normalizeForSearch(title)}';
+    for (final report in open) {
+      if (report.kind != ReportKind.missingSong) continue;
+      final reportKey =
+          '${normalizeForSearch(report.artist)}|${normalizeForSearch(report.title)}';
+      if (reportKey == key) await markAdded(report, report.songId ?? '');
+    }
+  }
+
   /// Puts songs missing from imported playlists on the server's to-add list. Each song
   /// is sent once per device; the server merges requests from different people.
   Future<void> requestMissing(List<MissingSong> missing) async {

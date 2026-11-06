@@ -1,11 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/spotify/missing_songs.dart';
 import '../../state/imports_controller.dart';
-import '../imports/imported_playlist_page.dart';
 import '../theme.dart';
+import 'youtube_play_button.dart';
 
 /// How many to show before "Show all".
 const int _shownAtFirst = 5;
@@ -65,14 +64,7 @@ class _MissingSongsSectionState extends State<MissingSongsSection> {
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
             ),
-            trailing: IconButton(
-              tooltip: 'Find on YouTube',
-              icon: const Icon(Icons.open_in_new_rounded),
-              onPressed: () => launchUrl(
-                youtubeSearchFor(song.artist, song.title),
-                mode: LaunchMode.externalApplication,
-              ),
-            ),
+            trailing: YoutubePlayButton(artist: song.artist, title: song.title),
           ),
         if (missing.length > _shownAtFirst)
           Padding(

@@ -4,7 +4,6 @@ import 'dart:isolate';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/listening/past_favourites.dart';
 import '../../core/spotify/spotify_export.dart';
@@ -12,9 +11,9 @@ import '../../core/spotify/spotify_link.dart';
 import '../../state/catalog_controller.dart';
 import '../../state/listening_log.dart';
 import '../imports/import_review_page.dart';
-import '../imports/imported_playlist_page.dart';
 import '../theme.dart';
 import 'stats_page.dart';
+import '../widgets/youtube_play_button.dart';
 
 /// Brings your Spotify years into Yomi from the files Spotify sends you.
 class SpotifyImportPage extends StatefulWidget {
@@ -267,13 +266,9 @@ class _MissingFavourites extends StatelessWidget {
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
             ),
-            trailing: IconButton(
-              tooltip: 'Find on YouTube',
-              icon: const Icon(Icons.open_in_new_rounded),
-              onPressed: () => launchUrl(
-                youtubeSearchFor(track.artist, track.track),
-                mode: LaunchMode.externalApplication,
-              ),
+            trailing: YoutubePlayButton(
+              artist: track.artist,
+              title: track.track,
             ),
           ),
       ],

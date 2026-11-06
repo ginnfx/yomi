@@ -6,23 +6,16 @@ import 'package:provider/provider.dart';
 import '../../core/messaging/music_to_send.dart';
 import '../../core/reports/reports_api.dart';
 import '../../state/reports_controller.dart';
+import '../../state/youtube_controller.dart';
 import '../theme.dart';
 import 'song_picker_sheet.dart';
 
 /// How many finished reports to keep showing under the open ones.
 const int _closedShown = 10;
 
-/// Builds extra actions for an open report, such as fetching it from YouTube.
-typedef ReportActionsBuilder = List<PopupMenuEntry<VoidCallback>> Function(
-  BuildContext context,
-  SongReport report,
-);
-
 /// "Needs fixing" for the server admin, "My requests" for everyone else.
 class ReportsSection extends StatefulWidget {
-  const ReportsSection({super.key, this.extraActions});
-
-  final ReportActionsBuilder? extraActions;
+  const ReportsSection({super.key});
 
   @override
   State<ReportsSection> createState() => _ReportsSectionState();
@@ -115,25 +108,20 @@ class _ReportsSectionState extends State<ReportsSection> {
         ),
       ),
       for (final report in ofKind)
-        _ReportRow(
-          report: report,
-          isAdmin: reports.isAdmin,
-          extraActions: widget.extraActions,
-        ),
+        _ReportRow(report: report, isAdmin: reports.isAdmin),
     ];
   }
 }
 
 class _ReportRow extends StatelessWidget {
-  const _ReportRow({
-    required this.report,
-    required this.isAdmin,
-    this.extraActions,
-  });
+  const _ReportRow({required this.report, required this.isAdmin});
 
   final SongReport report;
   final bool isAdmin;
-  final ReportActionsBuilder? extraActions;
+
+  bool get _canFetch =>
+      report.kind == ReportKind.missingSong ||
+      report.kind == ReportKind.explicitWanted;
 
   String get _detail {
     final parts = <String>[
@@ -162,7 +150,16 @@ class _ReportRow extends StatelessWidget {
             tooltip: 'Actions',
             onSelected: (action) => action(),
             itemBuilder: (menuContext) => [
-              ...?extraActions?.call(context, report),
+              if (_canFetch &&
+                  (Provider.of<YoutubeController?>(
+                        context,
+                        listen: false,
+                      )?.isAvailable ??
+                      false))
+                PopupMenuItem(
+                  value: () => _playFromYoutube(context),
+                  child: const Text('Play from YouTube'),
+                ),
               if (report.kind == ReportKind.explicitWanted &&
                   report.songId != null)
                 PopupMenuItem(
@@ -180,6 +177,27 @@ class _ReportRow extends StatelessWidget {
             ],
           ),
   );
+
+  /// Plays it here; Save to library on the player then closes a song request.
+  Future<void> _playFromYoutube(BuildContext context) async {
+    final youtube = context.read<YoutubeController>();
+    final messenger = ScaffoldMessenger.of(context);
+    final isPlaying = await youtube.play(
+      artist: report.artist,
+      title: report.title,
+      wantExplicit: report.kind == ReportKind.explicitWanted,
+    );
+    if (!isPlaying) {
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(
+            youtube.stateFor(report.artist, report.title)?.error ??
+                "Couldn't play it.",
+          ),
+        ),
+      );
+    }
+  }
 
   Future<void> _close(BuildContext context, {required bool isFixed}) async {
     final reports = context.read<ReportsController>();

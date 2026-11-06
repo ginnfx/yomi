@@ -189,6 +189,20 @@ void main() {
       expect(controller.error, isNotNull);
     });
 
+    test('saving a requested song closes its request', () async {
+      // Arrange
+      final (controller, server) = await attached();
+      server.reports = [_reportJson(id: 'want')];
+      await controller.refresh();
+
+      // Act
+      await controller.markAddedMatching('mira', '  Blue  Hour ');
+
+      // Assert
+      final post = server.requests.lastWhere((r) => r.method == 'POST');
+      expect(post.url.path, '/v1/reports/want/added');
+    });
+
     test('open reports come first', () async {
       // Arrange
       final (controller, server) = await attached();

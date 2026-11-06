@@ -10,6 +10,8 @@ flutter build macos --release "$@"
 # Incremental Flutter builds can update App.framework after Xcode signs the
 # outer bundle. Refresh the local signatures before making distributable copies.
 APP_BUNDLE="$APP_DIR/build/macos/Build/Products/Release/Yomi.app"
+# Songs missing from the library play and save through yt-dlp, run from inside the app.
+"$APP_DIR/scripts/bundle_ytdlp_macos.sh" "$APP_BUNDLE"
 for framework in "$APP_BUNDLE"/Contents/Frameworks/*.framework; do
   codesign --force --sign - --timestamp=none "$framework"
 done

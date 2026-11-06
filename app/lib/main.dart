@@ -35,6 +35,7 @@ import 'core/tunnel/tunnel_bridge.dart';
 import 'core/spotify/imported_playlist.dart';
 import 'core/reports/reports_api.dart';
 import 'core/spotify/missing_songs.dart';
+import 'core/youtube/youtube_fetcher.dart';
 import 'core/subsonic_client.dart';
 import 'dev_hooks.dart';
 import 'state/appearance_controller.dart';
@@ -54,6 +55,7 @@ import 'state/playback_sync_controller.dart';
 import 'state/profile_controller.dart';
 import 'state/reports_controller.dart';
 import 'state/session.dart';
+import 'state/youtube_controller.dart';
 import 'state/settings.dart';
 import 'state/tunnel_controller.dart';
 import 'state/update_controller.dart';
@@ -189,6 +191,12 @@ Future<void> main() async {
   await ai.load();
   final playlistCovers = PlaylistCoversController();
   final reports = ReportsController(prefs);
+  final youtube = YoutubeFetcher(
+    ytDlp: ytDlpForThisDevice(supportDir),
+    cacheDir: Directory(
+      '${(await getApplicationCacheDirectory()).path}/youtube',
+    ),
+  );
   final imports = ImportsController(
     file: File('$listeningDir/imported-playlists.json'),
   );
@@ -243,6 +251,16 @@ Future<void> main() async {
     hashCacheFile: File('$uploadsDir/hashes.json'),
   );
   await uploads.load();
+  final youtubeSongs = YoutubeController(
+    fetcher: youtube,
+    saveDir: Directory('$uploadsDir/youtube'),
+    startPlaying: (song, file) async {
+      player.registerExternalFile(song, file);
+      await player.playQueue([song]);
+    },
+    upload: (path) async => uploads.addFiles([path]),
+    onSaved: reports.markAddedMatching,
+  );
   var deviceId = prefs.getString('playbackDeviceId');
   if (deviceId == null) {
     deviceId =
@@ -532,6 +550,7 @@ Future<void> main() async {
       listeningLog: listeningLog,
       imports: imports,
       reports: reports,
+      youtubeSongs: youtubeSongs,
       playlistCovers: playlistCovers,
       tunnel: tunnel,
       messages: messages,
@@ -540,6 +559,7 @@ Future<void> main() async {
   unawaited(updates.check());
   unawaited(session.resolveRoute());
   await runDevHooks(session, player);
+  unawaited(runYoutubeSpike(youtube));
 }
 
 /// Follows the signed-in account, then brings its saved songs up to date.
@@ -656,6 +676,7 @@ class YomiApp extends StatelessWidget {
     required this.listeningLog,
     required this.imports,
     required this.reports,
+    required this.youtubeSongs,
     required this.playlistCovers,
     required this.tunnel,
     required this.messages,
@@ -681,6 +702,7 @@ class YomiApp extends StatelessWidget {
   final ListeningLog listeningLog;
   final ImportsController imports;
   final ReportsController reports;
+  final YoutubeController youtubeSongs;
   final PlaylistCoversController playlistCovers;
   final TunnelController tunnel;
   final MessagesController messages;
@@ -700,6 +722,7 @@ class YomiApp extends StatelessWidget {
         ChangeNotifierProvider<ListeningLog>.value(value: listeningLog),
         ChangeNotifierProvider<ImportsController>.value(value: imports),
         ChangeNotifierProvider<ReportsController>.value(value: reports),
+        ChangeNotifierProvider<YoutubeController>.value(value: youtubeSongs),
         ChangeNotifierProvider<PlaylistCoversController>.value(
           value: playlistCovers,
         ),

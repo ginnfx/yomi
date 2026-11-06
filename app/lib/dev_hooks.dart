@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 
+import 'core/youtube/youtube_fetcher.dart';
 import 'state/player_controller.dart';
 import 'state/session.dart';
 
@@ -37,4 +38,48 @@ Future<void> runDevHooks(
   } on Exception catch (error) {
     debugPrint('dev hook failed: $error');
   }
+}
+
+const String _devYoutube = String.fromEnvironment('YOMI_YTDLP_SPIKE');
+
+/// Debug builds started with YOMI_YTDLP_SPIKE="artist - title" search YouTube and
+/// download the best match at launch, printing what happened, to check yt-dlp works
+/// on a device.
+Future<void> runYoutubeSpike(YoutubeFetcher fetcher) async {
+  if (!kDebugMode || _devYoutube.isEmpty) return;
+  final watch = Stopwatch()..start();
+  try {
+    await fetcher.ytDlp.update();
+    final version = await fetcher.ytDlp.run(['--ignore-config', '--version']);
+    debugPrint(
+      'YTSPIKE yt-dlp ${version.trim()} after ${watch.elapsedMilliseconds}ms',
+    );
+  } on Exception catch (error) {
+    debugPrint('YTSPIKE update failed: $error');
+  }
+  var succeeded = 0;
+  final songs = _devYoutube.split(';');
+  for (final song in songs) {
+    final parts = song.trim().split(' - ');
+    watch.reset();
+    try {
+      final found = await fetcher.find(
+        artist: parts.length > 1 ? parts.first : '',
+        title: parts.last,
+      );
+      if (found.isEmpty) {
+        debugPrint('YTSPIKE nothing found for $song');
+        continue;
+      }
+      final file = await fetcher.download(found.first);
+      succeeded++;
+      debugPrint(
+        'YTSPIKE downloaded ${watch.elapsedMilliseconds}ms: '
+        '${found.first.title} ${file.lengthSync()} bytes',
+      );
+    } on Exception catch (error) {
+      debugPrint('YTSPIKE failed after ${watch.elapsedMilliseconds}ms: $error');
+    }
+  }
+  debugPrint('YTSPIKE done: $succeeded/${songs.length}');
 }

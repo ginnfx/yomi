@@ -317,6 +317,9 @@ class PlayerController extends ChangeNotifier implements TransportCommands {
           ? null
           : client.coverArtUri(song.coverArtId, size: 600),
     );
+    // Songs from YouTube exist only as a file on this device.
+    final external = _externalFiles[song.id];
+    if (external != null) return AudioSource.file(external.path, tag: tag);
     if (allowLocal) {
       final local =
           downloads.localFile(song.id) ??
@@ -327,7 +330,17 @@ class PlayerController extends ChangeNotifier implements TransportCommands {
   }
 
   bool _isLocal(Song song) =>
-      downloads.isDownloaded(song.id) || cache.isCached(song.id);
+      _externalFiles.containsKey(song.id) ||
+      downloads.isDownloaded(song.id) ||
+      cache.isCached(song.id);
+
+  final Map<String, File> _externalFiles = {};
+
+  /// Lets [song] play from [file] although the server doesn't have it.
+  void registerExternalFile(Song song, File file) =>
+      _externalFiles[song.id] = file;
+
+  File? externalFileFor(Song song) => _externalFiles[song.id];
 
   /// Start warming once playback has a safe head start, rather than waiting
   /// for AVPlayer to buffer an entire (possibly very long) song.
