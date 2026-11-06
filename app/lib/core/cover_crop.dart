@@ -163,7 +163,9 @@ abstract interface class CoverSource {
 class _DeviceCoverSource implements CoverSource {
   _DeviceCoverSource();
 
-  final CoverDownloader _downloader = CoverDownloader();
+  final CoverDownloader _downloader = CoverDownloader(
+    uploadPortFor: (url) => sharedPoolPort?.call(url),
+  );
 
   @override
   bool get isBusy => _downloader.isBusy;

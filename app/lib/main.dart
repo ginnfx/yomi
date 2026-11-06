@@ -30,6 +30,7 @@ import 'core/listening/scrobble_queue.dart';
 import 'core/lyrics.dart';
 import 'core/offline/audio_cache.dart';
 import 'core/cover_crop.dart';
+import 'core/cover_downloader.dart';
 import 'core/cover_prefiller.dart';
 import 'core/cover_sizes.dart';
 import 'core/offline/cover_warmer.dart';
@@ -132,6 +133,7 @@ Future<void> main() async {
     prefs: prefs,
     stateDir: Directory('${supportDir.path}/tailscale'),
   );
+  sharedPoolPort = tunnel.uploadPortFor;
   final session = SessionController(
     connectivity: connectivity,
     tunnelConnect: tunnel.connect,

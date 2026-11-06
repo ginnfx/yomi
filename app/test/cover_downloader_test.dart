@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -82,36 +83,39 @@ void main() {
     expect(most, 2);
   });
 
-  test('the newest request goes first, so what is on screen isn\'t kept waiting', () async {
-    final first = Completer<http.Response>();
-    final order = <String>[];
-    final loader = downloader((request) {
-      order.add(request.url.path);
-      return request.url.path == '/scrolled-past-1'
-          ? first.future
-          : Future.value(http.Response.bytes(_jpeg, 200));
-    }, maxAtOnce: 1);
+  test(
+    'the newest request goes first, so what is on screen isn\'t kept waiting',
+    () async {
+      final first = Completer<http.Response>();
+      final order = <String>[];
+      final loader = downloader((request) {
+        order.add(request.url.path);
+        return request.url.path == '/scrolled-past-1'
+            ? first.future
+            : Future.value(http.Response.bytes(_jpeg, 200));
+      }, maxAtOnce: 1);
 
-    final all = [
-      for (final name in const [
-        'scrolled-past-1',
-        'scrolled-past-2',
-        'scrolled-past-3',
-        'on-screen',
-      ])
-        loader.fetch('http://s/$name'),
-    ];
-    await Future<void>.delayed(Duration.zero);
-    first.complete(http.Response.bytes(_jpeg, 200));
-    await Future.wait(all);
+      final all = [
+        for (final name in const [
+          'scrolled-past-1',
+          'scrolled-past-2',
+          'scrolled-past-3',
+          'on-screen',
+        ])
+          loader.fetch('http://s/$name'),
+      ];
+      await Future<void>.delayed(Duration.zero);
+      first.complete(http.Response.bytes(_jpeg, 200));
+      await Future.wait(all);
 
-    expect(order, [
-      '/scrolled-past-1',
-      '/on-screen',
-      '/scrolled-past-3',
-      '/scrolled-past-2',
-    ]);
-  });
+      expect(order, [
+        '/scrolled-past-1',
+        '/on-screen',
+        '/scrolled-past-3',
+        '/scrolled-past-2',
+      ]);
+    },
+  );
 
   test('says when it is busy', () async {
     final release = Completer<http.Response>();
@@ -170,4 +174,125 @@ void main() {
       expect(urls, isNot(contains('/queued')));
     },
   );
+
+  sharedPoolTests();
+}
+
+class _Calls {
+  final List<Uri> urls = [];
+}
+
+void sharedPoolTests() {
+  const navidrome =
+      'http://music:4533/rest/getCoverArt?u=a&t=T&s=S&id=al-1_ab&size=240';
+
+  group('poolCoverUri', () {
+    test('points a Navidrome cover address at the upload service', () {
+      final pooled = poolCoverUri(Uri.parse(navidrome), 4534)!;
+
+      expect(pooled.port, 4534);
+      expect(pooled.path, '/v1/pool/cover/al-1_ab');
+      expect(pooled.queryParameters['size'], '240');
+      expect(pooled.queryParameters['u'], 'a');
+    });
+
+    test('leaves other addresses alone', () {
+      expect(poolCoverUri(Uri.parse('http://x/art.jpg'), 4534), isNull);
+      expect(
+        poolCoverUri(Uri.parse('http://m:4533/rest/getCoverArt?u=a'), 4534),
+        isNull,
+      );
+    });
+
+    test('keeps odd characters in an ID from changing the path', () {
+      final pooled = poolCoverUri(
+        Uri.parse('http://m:4533/rest/getCoverArt?id=a%2F..%2Fb'),
+        4534,
+      )!;
+
+      expect(pooled.path, '/v1/pool/cover/a%2F..%2Fb');
+    });
+  });
+
+  CoverDownloader pooled(Future<http.Response> Function(http.Request) answer) =>
+      CoverDownloader(
+        newClient: () => MockClient(answer),
+        uploadPortFor: (_) => 4534,
+      );
+
+  test('asks the shared pool first and uses its picture', () async {
+    final calls = _Calls();
+    final loader = pooled((request) async {
+      calls.urls.add(request.url);
+      return http.Response.bytes(_jpeg, 200);
+    });
+
+    expect(await loader.fetch(navidrome), _jpeg);
+    expect(calls.urls.map((u) => u.port), [4534]);
+  });
+
+  test('falls back to Navidrome when the pool does not answer', () async {
+    final calls = _Calls();
+    final loader = pooled((request) async {
+      calls.urls.add(request.url);
+      return request.url.port == 4534
+          ? http.Response('404 page not found', 404)
+          : http.Response.bytes(_jpeg, 200);
+    });
+
+    expect(await loader.fetch(navidrome), _jpeg);
+    expect(calls.urls.map((u) => u.port), [4534, 4533]);
+  });
+
+  test('stops asking an upload service that has no pool', () async {
+    final calls = _Calls();
+    final loader = pooled((request) async {
+      calls.urls.add(request.url);
+      return request.url.port == 4534
+          ? http.Response('404 page not found', 404)
+          : http.Response.bytes(_jpeg, 200);
+    });
+
+    await loader.fetch(navidrome);
+    await loader.fetch(navidrome);
+
+    expect(calls.urls.map((u) => u.port), [4534, 4533, 4533]);
+  });
+
+  test('keeps using the pool after it says one cover is missing', () async {
+    final calls = _Calls();
+    final loader = pooled((request) async {
+      calls.urls.add(request.url);
+      if (request.url.port != 4534) return http.Response.bytes(_jpeg, 200);
+      return request.url.path.endsWith('al-1_ab')
+          ? http.Response('{"message":"no such cover"}', 404)
+          : http.Response.bytes(_jpeg, 200);
+    });
+
+    await loader.fetch(navidrome);
+    await loader.fetch(navidrome.replaceAll('al-1_ab', 'al-2'));
+
+    expect(calls.urls.map((u) => u.port), [4534, 4533, 4534]);
+  });
+
+  test('falls back when the pool cannot be reached', () async {
+    final loader = pooled((request) async {
+      if (request.url.port == 4534) throw const SocketException('refused');
+      return http.Response.bytes(_jpeg, 200);
+    });
+
+    expect(await loader.fetch(navidrome), _jpeg);
+  });
+
+  test('never sends other addresses to the pool', () async {
+    final calls = _Calls();
+    final loader = pooled((request) async {
+      calls.urls.add(request.url);
+      return http.Response.bytes(_jpeg, 200);
+    });
+
+    await loader.fetch('http://x/art.jpg');
+
+    expect(calls.urls.map((u) => u.host), ['x']);
+  });
 }
