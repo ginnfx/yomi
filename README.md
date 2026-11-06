@@ -41,4 +41,17 @@ GOOS=linux GOARCH=arm GOARM=7 CGO_ENABLED=0 go build -o dist/yomi-upload .
 Configured through environment variables: `YOMI_LISTEN`, `YOMI_NAVIDROME`, `YOMI_MUSIC`,
 `YOMI_MAX_FILE_MB`.
 
+## Optional music assistant
+
+Ask Yomi uses `YOMI_LLM_KEY` (with optional `YOMI_LLM_URL` and `YOMI_LLM_MODEL`).
+Its chat endpoint can search Navidrome's artists, albums and songs, then retrieve an
+artist's tracks before making recommendations. It uses the signed-in listener's
+credentials against `YOMI_NAVIDROME`; credentials and file paths are never sent to
+the model. Lookups are read-only, paginated and limited to six per chat within the
+existing timeout. The model requests tools through the existing JSON response mode.
+Library errors are reported separately from empty results.
+
+Deploy the updated Go service to enable catalog lookup; the app's chat API is unchanged.
+The separate Discover feature still suggests outside music from the taste summary.
+
 [1]:	https://www.navidrome.org/

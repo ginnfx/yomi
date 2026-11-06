@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -33,9 +35,33 @@ class AssistantPage extends StatefulWidget {
 class _AssistantPageState extends State<AssistantPage> {
   final _question = TextEditingController();
   final _scroll = ScrollController();
+  final _composerFocus = FocusNode();
+
+  bool get _reduceMotion =>
+      MediaQuery.disableAnimationsOf(context) ||
+      context.motion(YomiMotion.standard) == Duration.zero;
+
+  void _followConversation({bool force = false}) {
+    if (!force && _scroll.hasClients && _scroll.position.extentAfter > 120) {
+      return;
+    }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_scroll.hasClients) return;
+      if (_reduceMotion) {
+        _scroll.jumpTo(_scroll.position.maxScrollExtent);
+      } else {
+        _scroll.animateTo(
+          _scroll.position.maxScrollExtent,
+          duration: const Duration(milliseconds: 360),
+          curve: Curves.easeOutCubic,
+        );
+      }
+    });
+  }
 
   @override
   void dispose() {
+    _composerFocus.dispose();
     _question.dispose();
     _scroll.dispose();
     super.dispose();
@@ -43,14 +69,15 @@ class _AssistantPageState extends State<AssistantPage> {
 
   Future<void> _ask(String text) async {
     final assistant = context.read<AssistantController>();
+    if (text.trim().isEmpty || assistant.isThinking || !assistant.isAvailable) {
+      return;
+    }
     _question.clear();
-    await assistant.ask(text);
-    if (!mounted || !_scroll.hasClients) return;
-    await _scroll.animateTo(
-      _scroll.position.maxScrollExtent,
-      duration: context.motion(YomiMotion.standard),
-      curve: YomiMotion.curve,
-    );
+    final request = assistant.ask(text);
+    _followConversation(force: true);
+    await request;
+    if (!mounted) return;
+    _followConversation();
   }
 
   @override
@@ -66,34 +93,52 @@ class _AssistantPageState extends State<AssistantPage> {
               IconButton(
                 tooltip: 'Start over',
                 icon: const Icon(Icons.refresh_rounded),
-                onPressed: assistant.clear,
+                onPressed: assistant.isThinking ? null : assistant.clear,
               ),
           ],
         ),
         body: Column(
           children: [
             Expanded(
-              child: assistant.turns.isEmpty
-                  ? _Starters(onPicked: _ask)
-                  : ListView(
-                      controller: _scroll,
-                      padding: const EdgeInsets.all(kPagePadding),
-                      children: [
-                        for (final turn in assistant.turns)
-                          turn.isUser
-                              ? _Question(text: turn.text)
-                              : _Answer(answer: turn.answer!),
-                        if (assistant.isThinking) const _Thinking(),
-                        if (assistant.error != null)
-                          Padding(
-                            padding: const EdgeInsets.only(top: YomiSpace.s),
-                            child: Text(
-                              assistant.error!,
-                              style: yomiText(13, color: YomiColors.danger),
+              child: AnimatedSwitcher(
+                duration: _reduceMotion
+                    ? Duration.zero
+                    : const Duration(milliseconds: 240),
+                switchInCurve: Curves.easeOutCubic,
+                switchOutCurve: Curves.easeInCubic,
+                child: assistant.turns.isEmpty
+                    ? _Starters(key: const ValueKey('starters'), onPicked: _ask)
+                    : ListView(
+                        key: const ValueKey('conversation'),
+                        controller: _scroll,
+                        padding: const EdgeInsets.all(kPagePadding),
+                        children: [
+                          for (final turn in assistant.turns)
+                            _MessageEntrance(
+                              key: ObjectKey(turn),
+                              child: turn.isUser
+                                  ? _Question(text: turn.text)
+                                  : _Answer(answer: turn.answer!),
                             ),
+                          AnimatedSwitcher(
+                            duration: _reduceMotion
+                                ? Duration.zero
+                                : const Duration(milliseconds: 180),
+                            child: assistant.isThinking
+                                ? const _Thinking()
+                                : const SizedBox.shrink(),
                           ),
-                      ],
-                    ),
+                          if (assistant.error != null)
+                            Padding(
+                              padding: const EdgeInsets.only(top: YomiSpace.s),
+                              child: Text(
+                                assistant.error!,
+                                style: yomiText(13, color: YomiColors.danger),
+                              ),
+                            ),
+                        ],
+                      ),
+              ),
             ),
             SafeArea(
               top: false,
@@ -104,21 +149,74 @@ class _AssistantPageState extends State<AssistantPage> {
                   kPagePadding,
                   YomiSpace.s,
                 ),
-                child: TextField(
-                  controller: _question,
-                  enabled: !assistant.isThinking,
-                  maxLength: 500,
-                  textInputAction: TextInputAction.send,
-                  onSubmitted: _ask,
-                  decoration: InputDecoration(
-                    counterText: '',
-                    hintText: 'Ask for music in your own words',
-                    suffixIcon: IconButton(
-                      tooltip: 'Ask',
-                      icon: Icon(Icons.send_rounded, color: context.accent),
-                      onPressed: assistant.isThinking
-                          ? null
-                          : () => _ask(_question.text),
+                child: ListenableBuilder(
+                  listenable: _composerFocus,
+                  builder: (context, _) => AnimatedContainer(
+                    duration: _reduceMotion
+                        ? Duration.zero
+                        : const Duration(milliseconds: 200),
+                    curve: Curves.easeOutCubic,
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(YomiRadius.sheet),
+                      border: Border.all(
+                        color: context.accent.withValues(
+                          alpha: _composerFocus.hasFocus ? 0.55 : 0.0,
+                        ),
+                      ),
+                      boxShadow: [
+                        BoxShadow(
+                          color: context.accent.withValues(
+                            alpha: _composerFocus.hasFocus ? 0.08 : 0,
+                          ),
+                          blurRadius: 18,
+                        ),
+                      ],
+                    ),
+                    child: TextField(
+                      controller: _question,
+                      focusNode: _composerFocus,
+                      enabled: !assistant.isThinking,
+                      maxLength: 500,
+                      textInputAction: TextInputAction.send,
+                      onSubmitted: _ask,
+                      decoration: InputDecoration(
+                        counterText: '',
+                        hintText: 'Ask for music in your own words',
+                        suffixIcon: ValueListenableBuilder<TextEditingValue>(
+                          valueListenable: _question,
+                          builder: (context, value, _) {
+                            final canSend =
+                                value.text.trim().isNotEmpty &&
+                                !assistant.isThinking;
+                            return AnimatedScale(
+                              scale: canSend ? 1 : 0.9,
+                              duration: _reduceMotion
+                                  ? Duration.zero
+                                  : const Duration(milliseconds: 180),
+                              child: IconButton(
+                                tooltip: 'Ask',
+                                icon: AnimatedSwitcher(
+                                  duration: _reduceMotion
+                                      ? Duration.zero
+                                      : const Duration(milliseconds: 180),
+                                  child: Icon(
+                                    assistant.isThinking
+                                        ? Icons.more_horiz_rounded
+                                        : Icons.send_rounded,
+                                    key: ValueKey(assistant.isThinking),
+                                    color: canSend
+                                        ? context.accent
+                                        : YomiColors.textSecondary,
+                                  ),
+                                ),
+                                onPressed: canSend
+                                    ? () => _ask(_question.text)
+                                    : null,
+                              ),
+                            );
+                          },
+                        ),
+                      ),
                     ),
                   ),
                 ),
@@ -132,7 +230,7 @@ class _AssistantPageState extends State<AssistantPage> {
 }
 
 class _Starters extends StatelessWidget {
-  const _Starters({required this.onPicked});
+  const _Starters({super.key, required this.onPicked});
 
   final ValueChanged<String> onPicked;
 
@@ -183,24 +281,106 @@ class _Question extends StatelessWidget {
   );
 }
 
-class _Thinking extends StatelessWidget {
+/// Stable keys keep existing turns from animating again as new turns arrive.
+class _MessageEntrance extends StatelessWidget {
+  const _MessageEntrance({super.key, required this.child});
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final reduced =
+        MediaQuery.disableAnimationsOf(context) ||
+        context.motion(YomiMotion.standard) == Duration.zero;
+    return TweenAnimationBuilder<double>(
+      tween: Tween(begin: reduced ? 1 : 0, end: 1),
+      duration: reduced ? Duration.zero : const Duration(milliseconds: 320),
+      curve: Curves.easeOutCubic,
+      child: child,
+      builder: (context, value, child) => Opacity(
+        opacity: value,
+        child: Transform.translate(
+          offset: Offset(0, 10 * (1 - value)),
+          child: child,
+        ),
+      ),
+    );
+  }
+}
+
+class _Thinking extends StatefulWidget {
   const _Thinking();
 
   @override
-  Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.symmetric(vertical: YomiSpace.m),
-    child: Row(
-      children: [
-        SizedBox.square(
-          dimension: 16,
-          child: CircularProgressIndicator(
-            strokeWidth: 2,
-            color: context.accent,
-          ),
+  State<_Thinking> createState() => _ThinkingState();
+}
+
+class _ThinkingState extends State<_Thinking>
+    with SingleTickerProviderStateMixin {
+  late final _pulse = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 1200),
+  );
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (MediaQuery.disableAnimationsOf(context) ||
+        context.motion(YomiMotion.standard) == Duration.zero) {
+      _pulse.stop();
+      _pulse.value = 0;
+    } else {
+      _pulse.repeat();
+    }
+  }
+
+  @override
+  void dispose() {
+    _pulse.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => Semantics(
+    label: 'Yomi is thinking',
+    liveRegion: true,
+    child: ExcludeSemantics(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: YomiSpace.m),
+        child: Row(
+          children: [
+            AnimatedBuilder(
+              animation: _pulse,
+              builder: (context, _) => Row(
+                mainAxisSize: MainAxisSize.min,
+                children: List.generate(3, (index) {
+                  final wave =
+                      (math.sin(_pulse.value * 2 * math.pi - index * 0.8) + 1) /
+                      2;
+                  return Transform.translate(
+                    offset: Offset(0, -3 * wave),
+                    child: Container(
+                      width: 5,
+                      height: 5,
+                      margin: const EdgeInsets.only(right: 4),
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: context.accent.withValues(
+                          alpha: 0.35 + 0.65 * wave,
+                        ),
+                      ),
+                    ),
+                  );
+                }),
+              ),
+            ),
+            const SizedBox(width: YomiSpace.s),
+            Text(
+              'Thinking…',
+              style: yomiText(14, color: YomiColors.textSecondary),
+            ),
+          ],
         ),
-        const SizedBox(width: YomiSpace.s),
-        Text('Thinking…', style: yomiText(14, color: YomiColors.textSecondary)),
-      ],
+      ),
     ),
   );
 }
@@ -242,7 +422,10 @@ class _Answer extends StatelessWidget {
               ),
             ),
           for (final suggestion in answer.songs)
-            _SuggestionRow(suggestion: suggestion),
+            _MessageEntrance(
+              key: ValueKey('${suggestion.artist}/${suggestion.title}'),
+              child: _SuggestionRow(suggestion: suggestion),
+            ),
         ],
       ),
     );
