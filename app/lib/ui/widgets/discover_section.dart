@@ -3,7 +3,9 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../../core/ai/assistant.dart';
 import '../../state/assistant_controller.dart';
+import '../../state/settings.dart';
 import '../theme.dart';
 import 'report_sheet.dart';
 import 'youtube_play_button.dart';
@@ -27,14 +29,18 @@ class _DiscoverSectionState extends State<DiscoverSection> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       final discover = context.read<DiscoverController?>();
-      if (discover != null) unawaited(discover.refreshIfDue());
+      final isOn = context.read<SettingsController?>()?.isDiscoverOn ?? true;
+      if (discover != null && isOn) unawaited(discover.refreshIfDue());
     });
   }
 
   @override
   Widget build(BuildContext context) {
     // Screens built without it (in tests, or before sign-in) show nothing.
-    final songs = context.watch<DiscoverController?>()?.songs ?? const [];
+    final isOn = context.watch<SettingsController?>()?.isDiscoverOn ?? true;
+    final songs = !isOn
+        ? const <SuggestedSong>[]
+        : context.watch<DiscoverController?>()?.songs ?? const [];
     return AnimatedSize(
       duration: context.motion(YomiMotion.standard),
       alignment: Alignment.topCenter,

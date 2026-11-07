@@ -214,14 +214,16 @@ Future<void> main() async {
   final reports = ReportsController(prefs);
   late final CatalogController catalogForAi;
   late final HomeController homeForAi;
-  TasteSummary tasteSummary() => (
-    topArtists: topArtistsOf(homeForAi.taste),
-    moods: topMoodsOf(
-      library: catalogForAi.songs,
-      taste: homeForAi.taste,
-      tagFor: ai.tagFor,
-    ),
-  );
+  TasteSummary tasteSummary() => settings.sendsTasteToAssistant
+      ? (
+          topArtists: topArtistsOf(homeForAi.taste),
+          moods: topMoodsOf(
+            library: catalogForAi.songs,
+            taste: homeForAi.taste,
+            tagFor: ai.tagFor,
+          ),
+        )
+      : (topArtists: const <String>[], moods: const <String>[]);
   final assistant = AssistantController(
     index: () => catalogForAi.searchIndex,
     taste: tasteSummary,

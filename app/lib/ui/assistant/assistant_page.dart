@@ -11,6 +11,7 @@ import '../theme.dart';
 import '../widgets/cover_art.dart';
 import '../widgets/report_sheet.dart';
 import '../widgets/youtube_play_button.dart';
+import 'yomi_avatar.dart';
 
 /// Ideas shown before the first question.
 const List<String> _starters = [
@@ -36,6 +37,12 @@ class _AssistantPageState extends State<AssistantPage> {
   final _question = TextEditingController();
   final _scroll = ScrollController();
   final _composerFocus = FocusNode();
+
+  /// Answers that were already there when the page opened appear at once; only
+  /// ones that arrive while you watch are typed out.
+  late final Set<ChatTurn> _alreadyShown = {
+    ...context.read<AssistantController>().turns,
+  };
 
   bool get _reduceMotion =>
       MediaQuery.disableAnimationsOf(context) ||
@@ -87,7 +94,7 @@ class _AssistantPageState extends State<AssistantPage> {
       child: Scaffold(
         backgroundColor: Colors.transparent,
         appBar: AppBar(
-          title: Text('Ask Yomi', style: yomiText(20, weight: FontWeight.w800)),
+          title: _Title(isThinking: assistant.isThinking),
           actions: [
             if (assistant.turns.isNotEmpty)
               IconButton(
@@ -116,9 +123,13 @@ class _AssistantPageState extends State<AssistantPage> {
                           for (final turn in assistant.turns)
                             _MessageEntrance(
                               key: ObjectKey(turn),
+                              fromRight: turn.isUser,
                               child: turn.isUser
                                   ? _Question(text: turn.text)
-                                  : _Answer(answer: turn.answer!),
+                                  : _Answer(
+                                      answer: turn.answer!,
+                                      isFresh: !_alreadyShown.contains(turn),
+                                    ),
                             ),
                           AnimatedSwitcher(
                             duration: _reduceMotion
@@ -238,24 +249,115 @@ class _Starters extends StatelessWidget {
   Widget build(BuildContext context) => ListView(
     padding: const EdgeInsets.all(kPagePadding),
     children: [
+      const SizedBox(height: YomiSpace.xl),
+      const Center(child: YomiAvatar(size: 96)),
+      const SizedBox(height: YomiSpace.l),
       Text(
         'What do you feel like hearing?',
+        textAlign: TextAlign.center,
         style: yomiText(22, weight: FontWeight.w800),
       ),
-      const SizedBox(height: YomiSpace.m),
+      const SizedBox(height: YomiSpace.xs),
+      Text(
+        'Ask in your own words and Yomi will find it.',
+        textAlign: TextAlign.center,
+        style: yomiText(
+          14,
+          weight: FontWeight.w500,
+          color: YomiColors.textSecondary,
+        ),
+      ),
+      const SizedBox(height: YomiSpace.xl),
       Wrap(
+        alignment: WrapAlignment.center,
         spacing: YomiSpace.s,
         runSpacing: YomiSpace.s,
         children: [
-          for (final starter in _starters)
-            ActionChip(
-              label: Text(starter),
-              onPressed: () => onPicked(starter),
+          for (var i = 0; i < _starters.length; i++)
+            _Staggered(
+              index: i,
+              child: ActionChip(
+                label: Text(_starters[i]),
+                onPressed: () => onPicked(_starters[i]),
+              ),
             ),
         ],
       ),
     ],
   );
+}
+
+/// The assistant's name with its picture and what it is doing.
+class _Title extends StatelessWidget {
+  const _Title({required this.isThinking});
+
+  final bool isThinking;
+
+  @override
+  Widget build(BuildContext context) => Row(
+    mainAxisSize: MainAxisSize.min,
+    children: [
+      YomiAvatar(size: 34, isThinking: isThinking),
+      const SizedBox(width: YomiSpace.m),
+      Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text('Ask Yomi', style: yomiText(18, weight: FontWeight.w800)),
+          AnimatedSwitcher(
+            duration: context.motion(YomiMotion.standard),
+            child: Text(
+              isThinking ? 'Thinking…' : 'Your music assistant',
+              key: ValueKey(isThinking),
+              style: yomiText(
+                11.5,
+                weight: FontWeight.w500,
+                color: isThinking ? context.accent : YomiColors.textSecondary,
+              ),
+            ),
+          ),
+        ],
+      ),
+    ],
+  );
+}
+
+/// Fades and rises into place, each item a little after the one before it.
+class _Staggered extends StatelessWidget {
+  const _Staggered({required this.index, required this.child});
+
+  final int index;
+  final Widget child;
+
+  static const Duration _step = Duration(milliseconds: 70);
+  static const Duration _each = Duration(milliseconds: 360);
+
+  @override
+  Widget build(BuildContext context) {
+    final isReduced =
+        MediaQuery.disableAnimationsOf(context) ||
+        context.motion(YomiMotion.standard) == Duration.zero;
+    if (isReduced) return child;
+    final delay = _step * index;
+    final total = delay + _each;
+    return TweenAnimationBuilder<double>(
+      tween: Tween(begin: 0, end: 1),
+      duration: total,
+      curve: Interval(
+        delay.inMilliseconds / total.inMilliseconds,
+        1,
+        curve: Curves.easeOutCubic,
+      ),
+      child: child,
+      builder: (context, value, child) => Opacity(
+        opacity: value,
+        child: Transform.translate(
+          offset: Offset(0, 12 * (1 - value)),
+          child: child,
+        ),
+      ),
+    );
+  }
 }
 
 class _Question extends StatelessWidget {
@@ -283,8 +385,13 @@ class _Question extends StatelessWidget {
 
 /// Stable keys keep existing turns from animating again as new turns arrive.
 class _MessageEntrance extends StatelessWidget {
-  const _MessageEntrance({super.key, required this.child});
+  const _MessageEntrance({
+    super.key,
+    required this.child,
+    this.fromRight = false,
+  });
   final Widget child;
+  final bool fromRight;
 
   @override
   Widget build(BuildContext context) {
@@ -299,8 +406,15 @@ class _MessageEntrance extends StatelessWidget {
       builder: (context, value, child) => Opacity(
         opacity: value,
         child: Transform.translate(
-          offset: Offset(0, 10 * (1 - value)),
-          child: child,
+          offset: Offset(
+            (fromRight ? 14 : -14) * (1 - value),
+            10 * (1 - value),
+          ),
+          child: Transform.scale(
+            scale: 0.96 + 0.04 * value,
+            alignment: fromRight ? Alignment.centerRight : Alignment.centerLeft,
+            child: child,
+          ),
         ),
       ),
     );
@@ -348,6 +462,8 @@ class _ThinkingState extends State<_Thinking>
         padding: const EdgeInsets.symmetric(vertical: YomiSpace.m),
         child: Row(
           children: [
+            const YomiAvatar(size: 28, isThinking: true),
+            const SizedBox(width: YomiSpace.m),
             AnimatedBuilder(
               animation: _pulse,
               builder: (context, _) => Row(
@@ -373,11 +489,6 @@ class _ThinkingState extends State<_Thinking>
                 }),
               ),
             ),
-            const SizedBox(width: YomiSpace.s),
-            Text(
-              'Thinking…',
-              style: yomiText(14, color: YomiColors.textSecondary),
-            ),
           ],
         ),
       ),
@@ -386,46 +497,71 @@ class _ThinkingState extends State<_Thinking>
 }
 
 class _Answer extends StatelessWidget {
-  const _Answer({required this.answer});
+  const _Answer({required this.answer, this.isFresh = false});
 
   final ChatAnswer answer;
+
+  /// Typed out as it appears, instead of showing at once.
+  final bool isFresh;
 
   @override
   Widget build(BuildContext context) {
     final library = answer.librarySongs;
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: YomiSpace.s),
-      child: Column(
+      child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          if (answer.reply.isNotEmpty)
-            Text(answer.reply, style: yomiText(15, weight: FontWeight.w500)),
-          if (library.isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.only(top: YomiSpace.s),
-              child: Wrap(
-                spacing: YomiSpace.s,
-                children: [
-                  FilledButton.icon(
-                    onPressed: () =>
-                        context.read<PlayerController>().playQueue(library),
-                    icon: const Icon(Icons.play_arrow_rounded),
-                    label: Text('Play ${library.length}'),
+          const YomiAvatar(size: 30),
+          const SizedBox(width: YomiSpace.m),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (answer.reply.isNotEmpty)
+                  _TypedText(
+                    answer.reply,
+                    animate: isFresh,
+                    style: yomiText(15, weight: FontWeight.w500, height: 1.35),
                   ),
-                  if (library.length > 1)
-                    OutlinedButton.icon(
-                      onPressed: () => _savePlaylist(context),
-                      icon: const Icon(Icons.playlist_add_rounded),
-                      label: const Text('Save as playlist'),
+                if (library.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(top: YomiSpace.s),
+                    child: _Staggered(
+                      index: isFresh ? 2 : 0,
+                      child: Wrap(
+                        spacing: YomiSpace.s,
+                        children: [
+                          FilledButton.icon(
+                            onPressed: () => context
+                                .read<PlayerController>()
+                                .playQueue(library),
+                            icon: const Icon(Icons.play_arrow_rounded),
+                            label: Text('Play ${library.length}'),
+                          ),
+                          if (library.length > 1)
+                            OutlinedButton.icon(
+                              onPressed: () => _savePlaylist(context),
+                              icon: const Icon(Icons.playlist_add_rounded),
+                              label: const Text('Save as playlist'),
+                            ),
+                        ],
+                      ),
                     ),
-                ],
-              ),
+                  ),
+                for (var i = 0; i < answer.songs.length; i++)
+                  _MessageEntrance(
+                    key: ValueKey(
+                      '${answer.songs[i].artist}/${answer.songs[i].title}',
+                    ),
+                    child: _Staggered(
+                      index: isFresh ? i + 3 : 0,
+                      child: _SuggestionRow(suggestion: answer.songs[i]),
+                    ),
+                  ),
+              ],
             ),
-          for (final suggestion in answer.songs)
-            _MessageEntrance(
-              key: ValueKey('${suggestion.artist}/${suggestion.title}'),
-              child: _SuggestionRow(suggestion: suggestion),
-            ),
+          ),
         ],
       ),
     );
@@ -447,6 +583,44 @@ class _Answer extends StatelessWidget {
         const SnackBar(content: Text("Couldn't save the playlist. Try again.")),
       );
     }
+  }
+}
+
+/// Reveals text word by word, quickly, so a reply feels like it is being said.
+class _TypedText extends StatelessWidget {
+  const _TypedText(this.text, {required this.animate, required this.style});
+
+  final String text;
+  final bool animate;
+  final TextStyle style;
+
+  static const Duration _perWord = Duration(milliseconds: 28);
+  static const Duration _longest = Duration(milliseconds: 1600);
+
+  @override
+  Widget build(BuildContext context) {
+    final isReduced =
+        MediaQuery.disableAnimationsOf(context) ||
+        context.motion(YomiMotion.standard) == Duration.zero;
+    if (!animate || isReduced) return Text(text, style: style);
+    final words = text.split(' ');
+    final duration = _perWord * words.length > _longest
+        ? _longest
+        : _perWord * words.length;
+    return TweenAnimationBuilder<double>(
+      tween: Tween(begin: 0, end: 1),
+      duration: duration,
+      builder: (context, value, _) {
+        final shown = (words.length * value).ceil().clamp(1, words.length);
+        // The full text is laid out invisibly, so the bubble never changes size.
+        return Stack(
+          children: [
+            Opacity(opacity: 0, child: Text(text, style: style)),
+            Text(words.take(shown).join(' '), style: style),
+          ],
+        );
+      },
+    );
   }
 }
 

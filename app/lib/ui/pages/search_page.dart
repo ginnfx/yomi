@@ -149,7 +149,9 @@ class _SearchPageState extends State<SearchPage> {
     final isDescription =
         wordCount >= _minWordsForDescription ||
         (wordCount > 1 && results.songs.length < _fewResults);
-    if (isDescription && context.read<AiController>().isAvailable) {
+    if (isDescription &&
+        context.read<SettingsController>().isAiSearchOn &&
+        context.read<AiController>().isAvailable) {
       _timer = Timer(_describeDebounce, () => _interpret(catalog, text));
     }
   }
@@ -415,7 +417,8 @@ class _SearchPageState extends State<SearchPage> {
               TextFieldTapRegion(
                 child: _RecentSearches(onSelected: _useRecent),
               ),
-            if (context.watch<AiController>().isAvailable)
+            if (context.watch<AiController>().isAvailable &&
+                context.watch<SettingsController>().isAiSearchOn)
               MoodChips(onSelected: _useRecent),
             Row(
               children: [

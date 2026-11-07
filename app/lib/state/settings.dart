@@ -82,6 +82,24 @@ class SettingsController extends ChangeNotifier {
   bool get isAssistantOn => _prefs.getBool('assistantOn') ?? false;
   Future<void> setAssistantOn(bool value) =>
       _set(() => _prefs.setBool('assistantOn', value));
+
+  /// Whether DeepSeek helps understand descriptions typed into Search ("calm songs
+  /// for studying"). Off, Search only matches names in the library.
+  bool get isAiSearchOn => _prefs.getBool('aiSearchOn') ?? true;
+  Future<void> setAiSearchOn(bool value) =>
+      _set(() => _prefs.setBool('aiSearchOn', value));
+
+  /// Whether your top artists and moods go along with questions to the assistant.
+  bool get sendsTasteToAssistant =>
+      _prefs.getBool('assistantTaste') ?? true;
+  Future<void> setSendsTasteToAssistant(bool value) =>
+      _set(() => _prefs.setBool('assistantTaste', value));
+
+  /// Whether Home suggests songs from outside the library once a week.
+  bool get isDiscoverOn => _prefs.getBool('discoverOn') ?? true;
+  Future<void> setDiscoverOn(bool value) =>
+      _set(() => _prefs.setBool('discoverOn', value));
+
   Future<void> setShareListening(bool value) =>
       _set(() => _prefs.setBool('shareListening', value));
 
@@ -103,6 +121,9 @@ class SettingsController extends ChangeNotifier {
           key.startsWith('keepPlaylist.') ||
           const {
             'shareListening',
+            'aiSearchOn',
+            'assistantTaste',
+            'discoverOn',
             'recentSearches',
             'lessArtists',
             'lessSongs',
