@@ -30,9 +30,13 @@ class SystemNotificationSink implements NotificationSink {
   final FlutterLocalNotificationsPlugin _plugin =
       FlutterLocalNotificationsPlugin();
   bool _isReady = false;
+  Future<void>? _starting;
 
   @override
-  Future<void> start({required ValueChanged<String> onTap}) async {
+  Future<void> start({required ValueChanged<String> onTap}) =>
+      _starting ??= _start(onTap);
+
+  Future<void> _start(ValueChanged<String> onTap) async {
     try {
       const darwin = DarwinInitializationSettings(
         requestAlertPermission: false,
@@ -67,6 +71,8 @@ class SystemNotificationSink implements NotificationSink {
 
   @override
   Future<void> askPermission() async {
+    // Asking before the plugin is ready would do nothing, and never be retried.
+    await _starting;
     if (!_isReady) return;
     try {
       if (Platform.isAndroid) {

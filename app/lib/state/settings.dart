@@ -96,8 +96,7 @@ class SettingsController extends ChangeNotifier {
       _set(() => _prefs.setBool('aiSearchOn', value));
 
   /// Whether your top artists and moods go along with questions to the assistant.
-  bool get sendsTasteToAssistant =>
-      _prefs.getBool('assistantTaste') ?? true;
+  bool get sendsTasteToAssistant => _prefs.getBool('assistantTaste') ?? true;
   Future<void> setSendsTasteToAssistant(bool value) =>
       _set(() => _prefs.setBool('assistantTaste', value));
 

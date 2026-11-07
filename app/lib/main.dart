@@ -415,7 +415,11 @@ Future<void> main() async {
     );
   }
 
-  settings.addListener(askForNotificationsOnce);
+  settings.addListener(() {
+    // Switching notifications off and on again asks again, in case it was refused.
+    if (!settings.areMessageNotificationsOn) hasAskedForNotifications = false;
+    askForNotificationsOnce();
+  });
   final profileSync = ProfileSync(
     profile: profile,
     messages: messages,
