@@ -1,9 +1,13 @@
 import 'dart:async';
+import 'dart:io';
 import 'dart:convert';
 import 'dart:math';
 
 import 'package:flutter/widgets.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+
+import '../core/vault_storage.dart';
+
 import 'package:http/http.dart' as http;
 
 import '../core/connection_probe.dart';
@@ -28,6 +32,16 @@ const int _routineAttempts = 2;
 const Duration _reachRetryEvery = Duration(seconds: 15);
 const Duration _primaryRetryEvery = Duration(seconds: 60);
 const Duration _roleRetryAfter = Duration(seconds: 15);
+const List<String> _secureKeys = [
+  _accountKey,
+  _lastUrlKey,
+  _awayKey,
+  _homeKey,
+  _extraKey,
+  _modeKey,
+  _userKey,
+  _passwordKey,
+];
 const String _accountKey = 'account_id';
 const String _lastUrlKey = 'last_url';
 const String _awayKey = 'server_url';
@@ -84,7 +98,7 @@ Future<ProbeResult> _probeTunnel(String url, String user, String password) =>
 /// address saved, it checks which one works and switches by itself when the network changes.
 class SessionController extends ChangeNotifier with WidgetsBindingObserver {
   SessionController({
-    FlutterSecureStorage? storage,
+    VaultStorage? storage,
     ConnectivityController? connectivity,
     HomeProbe? probe,
     UrlProbe? urlProbe,
@@ -102,10 +116,16 @@ class SessionController extends ChangeNotifier with WidgetsBindingObserver {
        _roleProbe = roleProbe ?? probeIsReplica,
        _storage =
            storage ??
-           const FlutterSecureStorage(
-             // The login Keychain works for locally built Mac apps without a
-             // provisioning profile; credentials still stay in Apple's Keychain.
-             mOptions: MacOsOptions(usesDataProtectionKeychain: false),
+           VaultStorage(
+             const FlutterSecureStorage(
+               // The login Keychain works for locally built Mac apps without a
+               // provisioning profile; credentials still stay in Apple's Keychain.
+               mOptions: MacOsOptions(usesDataProtectionKeychain: false),
+             ),
+             legacyKeys: _secureKeys,
+             // One Keychain item, so a Mac asks for its password once, not once
+             // per saved setting.
+             isVaultOn: Platform.isMacOS,
            ),
        _connectivity = connectivity,
        _probe = probe ?? _pingProbe,
@@ -128,7 +148,7 @@ class SessionController extends ChangeNotifier with WidgetsBindingObserver {
   String? get accountId => _accountId;
 
   final http.Client? _httpClient;
-  final FlutterSecureStorage _storage;
+  final VaultStorage _storage;
   final ConnectivityController? _connectivity;
   final HomeProbe _probe;
   final UrlProbe _urlProbe;

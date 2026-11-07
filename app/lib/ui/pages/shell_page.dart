@@ -7,6 +7,8 @@ import 'package:provider/provider.dart';
 
 import '../../state/profile_controller.dart';
 import '../../state/session.dart';
+import '../../state/update_controller.dart';
+import '../widgets/release_notes_sheet.dart';
 import '../theme.dart';
 import '../widgets/mini_player.dart';
 import '../widgets/desktop_player.dart';
@@ -96,6 +98,7 @@ class _ShellPageState extends State<ShellPage>
   @override
   void initState() {
     super.initState();
+    SchedulerBinding.instance.addPostFrameCallback((_) => _showWhatsNew());
     if (devOpenSettings) {
       SchedulerBinding.instance.addPostFrameCallback((_) async {
         await Future<void>.delayed(const Duration(seconds: 6));
@@ -108,6 +111,14 @@ class _ShellPageState extends State<ShellPage>
         if (mounted) openNowPlaying(context);
       });
     }
+  }
+
+  /// The first launch after an update says what changed, once.
+  Future<void> _showWhatsNew() async {
+    final updates = context.read<UpdateController?>();
+    final release = await updates?.takeWhatsNew();
+    if (release == null || !mounted) return;
+    await showReleaseNotes(context, release, isInstalled: true);
   }
 
   @override

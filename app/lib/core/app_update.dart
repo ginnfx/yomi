@@ -188,6 +188,22 @@ class UpdateClient {
     return release;
   }
 
+  /// The published release for one version, for showing what it changed.
+  Future<ReleaseInfo?> fetchRelease(AppVersion version) async {
+    final body = await _getText(
+      Uri.parse(
+        'https://api.github.com/repos/$kUpdateRepo/releases/tags/v$version',
+      ),
+      accept: 'application/vnd.github+json',
+    );
+    try {
+      final json = jsonDecode(body);
+      return json is Map<String, dynamic> ? ReleaseInfo.tryParse(json) : null;
+    } on FormatException {
+      return null;
+    }
+  }
+
   /// Reads the hash from `sha256sum` style output: `<hash>  <filename>`.
   Future<String> fetchChecksum(Uri url) async {
     final text = await _getText(url);

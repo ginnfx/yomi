@@ -12,6 +12,7 @@ const Duration kUpdateCheckInterval = Duration(hours: 6);
 const String _lastCheckKey = 'update.lastCheckMs';
 const String _latestKey = 'update.latest';
 const String _dismissedKey = 'update.dismissed';
+const String _seenVersionKey = 'update.seenVersion';
 
 /// How this platform takes an update.
 enum UpdateMode {
@@ -140,6 +141,29 @@ class UpdateController extends ChangeNotifier {
       return;
     }
     await _downloadAndInstall(release);
+  }
+
+  /// What changed in the version now running, once, the first time it opens after
+  /// an update. Null on a fresh install, on later launches, or if the notes
+  /// can't be found. Never blocks anything: a failure only means no notes.
+  Future<ReleaseInfo?> takeWhatsNew() async {
+    if (mode == UpdateMode.disabled) return null;
+    final current = currentVersion.toString();
+    final seen = prefs.getString(_seenVersionKey);
+    if (seen == current) return null;
+    await prefs.setString(_seenVersionKey, current);
+    if (seen == null) return null;
+    final cached = _cachedRelease();
+    if (cached != null && cached.version.toString() == current) {
+      return cached.notes.isEmpty ? null : cached;
+    }
+    try {
+      final release = await client.fetchRelease(currentVersion);
+      return release == null || release.notes.isEmpty ? null : release;
+    } on Exception catch (error) {
+      debugPrint('Could not fetch the release notes: $error');
+      return null;
+    }
   }
 
   Future<void> dismiss() async {

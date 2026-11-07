@@ -38,6 +38,8 @@ class Harness {
   Map<String, dynamic>? latest;
   UpdateMode mode;
   int apiCalls = 0;
+  int tagCalls = 0;
+  final byTag = <String, Map<String, dynamic>>{};
   bool isApiDown = false;
   String checksum = apkHash;
   DateTime now = DateTime(2026, 11, 4, 12);
@@ -62,6 +64,14 @@ class Harness {
           return http.StreamedResponse(
             Stream.value(utf8.encode(jsonEncode(latest))),
             200,
+          );
+        }
+        if (path.contains('/releases/tags/')) {
+          tagCalls++;
+          final tagged = byTag[path.split('/').last.substring(1)];
+          return http.StreamedResponse(
+            Stream.value(utf8.encode(jsonEncode(tagged))),
+            tagged == null ? 404 : 200,
           );
         }
         final body = path.endsWith('.sha256')
@@ -524,5 +534,54 @@ void main() {
     expect(h.opened.single.path, '/ginnfx/yomi/releases/tag/v1.0.2');
     expect(h.installed, isEmpty);
     expect(c.phase, UpdatePhase.available);
+  });
+
+  group('what is new', () {
+    test(
+      'says nothing on a fresh install, and remembers the version',
+      () async {
+        final h = Harness();
+        final c = await h.build(current: '1.0.2');
+
+        expect(await c.takeWhatsNew(), isNull);
+        expect(h.tagCalls, 0);
+      },
+    );
+
+    test(
+      'shows the notes once after updating, from the saved release',
+      () async {
+        SharedPreferences.setMockInitialValues({'update.seenVersion': '1.0.1'});
+        final h = Harness(latest: release('1.0.2'));
+        final c = await h.build(current: '1.0.2');
+        await c.check();
+
+        final notes = await c.takeWhatsNew();
+
+        expect(notes!.notes, 'Notes for 1.0.2');
+        expect(h.tagCalls, 0, reason: 'the cached release already has them');
+        expect(await c.takeWhatsNew(), isNull, reason: 'only once');
+      },
+    );
+
+    test('fetches the notes of this version when they are not saved', () async {
+      SharedPreferences.setMockInitialValues({'update.seenVersion': '1.0.0'});
+      final h = Harness();
+      h.byTag['1.0.2'] = release('1.0.2');
+      final c = await h.build(current: '1.0.2');
+
+      final notes = await c.takeWhatsNew();
+
+      expect(notes!.notes, 'Notes for 1.0.2');
+      expect(h.tagCalls, 1);
+    });
+
+    test('a missing release only means no notes', () async {
+      SharedPreferences.setMockInitialValues({'update.seenVersion': '1.0.0'});
+      final h = Harness();
+      final c = await h.build(current: '1.0.2');
+
+      expect(await c.takeWhatsNew(), isNull);
+    });
   });
 }

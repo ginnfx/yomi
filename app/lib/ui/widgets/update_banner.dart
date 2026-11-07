@@ -3,8 +3,10 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../../core/release_notes.dart';
 import '../../state/update_controller.dart';
 import '../theme.dart';
+import 'release_notes_sheet.dart';
 
 /// Small banner shown when a newer Yomi is out, then through download and install.
 class UpdateBanner extends StatelessWidget {
@@ -42,6 +44,11 @@ class _BannerBody extends StatelessWidget {
         ? 'Downloading update'
         : 'Downloading update · ${(progress * 100).floor()}%';
   }
+
+  /// The first line of the release notes, while there is an update to read about.
+  String get _preview => updates.phase == UpdatePhase.available
+      ? releaseNotePreview(updates.release?.notes ?? '')
+      : '';
 
   String? get _actionLabel => switch (updates.phase) {
     UpdatePhase.downloading ||
@@ -81,13 +88,29 @@ class _BannerBody extends StatelessWidget {
                   onTap: () => _showDetails(context),
                   child: Padding(
                     padding: const EdgeInsets.symmetric(vertical: 8),
-                    child: Text(
-                      _title,
-                      style: yomiText(
-                        13,
-                        weight: FontWeight.w600,
-                        color: YomiColors.textPrimary,
-                      ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          _title,
+                          style: yomiText(
+                            13,
+                            weight: FontWeight.w600,
+                            color: YomiColors.textPrimary,
+                          ),
+                        ),
+                        if (_preview.isNotEmpty)
+                          Text(
+                            '$_preview · What\'s new',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: yomiText(
+                              12,
+                              weight: FontWeight.w500,
+                              color: YomiColors.textSecondary,
+                            ),
+                          ),
+                      ],
                     ),
                   ),
                 ),
@@ -120,40 +143,6 @@ class _BannerBody extends StatelessWidget {
   void _showDetails(BuildContext context) {
     final release = updates.release;
     if (release == null) return;
-    showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      builder: (sheetContext) => SafeArea(
-        child: ConstrainedBox(
-          constraints: BoxConstraints(
-            maxHeight: MediaQuery.sizeOf(sheetContext).height * 0.7,
-          ),
-          child: Padding(
-            padding: const EdgeInsets.all(20),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  "What's new in Yomi ${release.version}",
-                  style: yomiText(18, weight: FontWeight.w700),
-                ),
-                const SizedBox(height: 12),
-                Flexible(
-                  child: SingleChildScrollView(
-                    child: Text(
-                      release.notes.isEmpty
-                          ? 'This update has no release notes.'
-                          : release.notes,
-                      style: yomiText(14, color: YomiColors.textSecondary),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
+    unawaited(showReleaseNotes(context, release));
   }
 }
