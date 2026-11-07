@@ -83,6 +83,12 @@ class SettingsController extends ChangeNotifier {
   Future<void> setAssistantOn(bool value) =>
       _set(() => _prefs.setBool('assistantOn', value));
 
+  /// Whether a new message from a friend shows a notification while Yomi isn't open.
+  bool get areMessageNotificationsOn =>
+      _prefs.getBool('messageNotifications') ?? true;
+  Future<void> setMessageNotificationsOn(bool value) =>
+      _set(() => _prefs.setBool('messageNotifications', value));
+
   /// Whether DeepSeek helps understand descriptions typed into Search ("calm songs
   /// for studying"). Off, Search only matches names in the library.
   bool get isAiSearchOn => _prefs.getBool('aiSearchOn') ?? true;
@@ -122,6 +128,7 @@ class SettingsController extends ChangeNotifier {
           const {
             'shareListening',
             'aiSearchOn',
+            'messageNotifications',
             'assistantTaste',
             'discoverOn',
             'recentSearches',

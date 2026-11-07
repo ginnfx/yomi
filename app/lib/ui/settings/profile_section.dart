@@ -118,6 +118,17 @@ class _ProfileSectionState extends State<ProfileSection> {
             );
           },
         ),
+        Builder(
+          builder: (context) {
+            final settings = context.watch<SettingsController>();
+            return SettingsSwitch(
+              title: 'Notify me about messages',
+              subtitle: 'A banner when a friend writes while Yomi is closed.',
+              value: settings.areMessageNotificationsOn,
+              onChanged: settings.setMessageNotificationsOn,
+            );
+          },
+        ),
         Padding(
           padding: const EdgeInsets.symmetric(vertical: 10),
           child: Row(

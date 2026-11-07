@@ -59,6 +59,9 @@ import 'state/listening_controller.dart';
 import 'state/listening_log.dart';
 import 'state/messages_controller.dart';
 import 'state/profile_sync.dart';
+import 'core/notifications/message_notifier.dart';
+import 'core/notifications/notification_sink.dart';
+import 'ui/pages/messages_page.dart';
 import 'state/player_controller.dart';
 import 'state/playlist_covers_controller.dart';
 import 'state/playback_sync_controller.dart';
@@ -379,6 +382,33 @@ Future<void> main() async {
   home.addListener(shareTaste);
   settings.addListener(shareTaste);
   String? messagingUrl;
+  final notifications = SystemNotificationSink();
+  final messageNotifier = MessageNotifier(
+    messages: messages,
+    sink: notifications,
+    isEnabled: () => settings.areMessageNotificationsOn,
+    nameOf: (user) => messages.profileOf(user).name,
+  )..start();
+  unawaited(
+    notifications.start(
+      onTap: (user) => _navigatorKey.currentState?.push(
+        yomiRoute<void>(builder: (_) => ThreadPage(user: user)),
+      ),
+    ),
+  );
+  // Asked once someone is signed in with notifications on, not at first launch.
+  var hasAskedForNotifications = false;
+  void askForNotificationsOnce() {
+    if (hasAskedForNotifications ||
+        !session.isSignedIn ||
+        !settings.areMessageNotificationsOn) {
+      return;
+    }
+    hasAskedForNotifications = true;
+    unawaited(notifications.askPermission());
+  }
+
+  settings.addListener(askForNotificationsOnce);
   final profileSync = ProfileSync(
     profile: profile,
     messages: messages,
@@ -401,6 +431,7 @@ Future<void> main() async {
         unawaited(profile.clear());
         unawaited(settings.clearPersonal());
         profileSync.reset();
+        messageNotifier.reset();
       }
       unawaited(
         account == null
@@ -521,6 +552,8 @@ Future<void> main() async {
   });
   session.addListener(followSession);
   followSession();
+  askForNotificationsOnce();
+  session.addListener(askForNotificationsOnce);
 
   var isInForeground = true;
   final coverPrefiller = CoverPrefiller(
