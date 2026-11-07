@@ -149,6 +149,7 @@ Future<void> main() async {
   final session = SessionController(
     connectivity: connectivity,
     tunnelConnect: tunnel.connect,
+    tunnelResolve: tunnel.resolve,
     tunnelReconnect: tunnel.reconnect,
     tunnelNetworkChanged: tunnel.networkChanged,
     uploadPortFor: tunnel.uploadPortFor,

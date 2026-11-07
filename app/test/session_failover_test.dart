@@ -10,7 +10,7 @@ const backup = 'http://backup.example:4533';
 void main() {
   late SessionController session;
 
-  Future<void> start(Set<String> working) async {
+  Future<void> start(Set<String> working, {bool embedded = false}) async {
     FlutterSecureStorage.setMockInitialValues({
       'server_url': 'http://127.0.0.1:1', // main address is dead
       'home_url': dead,
@@ -20,6 +20,10 @@ void main() {
       'extra_urls': '["$backup","$away"]',
     });
     session = SessionController(
+      tunnelResolve: embedded
+          ? (url) async => url == backup ? "http://127.0.0.1:40002" : null
+          : null,
+      uploadPortFor: (url) => url == "http://127.0.0.1:40002" ? 40003 : 4534,
       probe: (url, user, password) async => false,
       urlProbe: (url, user, password) async => ProbeResult(
         url: url,
@@ -32,6 +36,58 @@ void main() {
     await session.checkServer();
     await Future<void>.delayed(const Duration(milliseconds: 20));
   }
+
+  test('a suspended backup tunnel restarts and resolves fresh ports', () async {
+    FlutterSecureStorage.setMockInitialValues({
+      'server_url': 'http://127.0.0.1:1',
+      'username': 'u',
+      'password': 'p',
+      'route_mode': 'away',
+      'extra_urls': '["$backup"]',
+    });
+    var restarted = false;
+    session = SessionController(
+      probe: (_, _, _) async => false,
+      urlProbe: (url, _, _) async =>
+          ProbeResult(url: url, isOk: false, elapsed: Duration.zero),
+      tunnelProbe: (url, _, _) async => ProbeResult(
+        url: url,
+        isOk: url.endsWith(':41002'),
+        elapsed: Duration.zero,
+      ),
+      tunnelResolve: (url) async => url == backup
+          ? 'http://127.0.0.1:${restarted ? 41002 : 40002}'
+          : null,
+      tunnelReconnect: () async {
+        restarted = true;
+        return 'http://127.0.0.1:41000';
+      },
+    );
+    await session.restore();
+    await session.checkServer();
+    await Future<void>.delayed(const Duration(milliseconds: 100));
+    expect(restarted, isTrue);
+    expect(session.serverUrl, 'http://127.0.0.1:41002');
+    expect(session.isServerReachable, isTrue);
+    expect(session.isOnTunnel, isTrue);
+    session.dispose();
+  });
+
+  test(
+    'doctor and playback use backup tunnel with its companion port',
+    () async {
+      await start({'http://127.0.0.1:40002'}, embedded: true);
+      expect(session.isServerReachable, isTrue);
+      expect(session.serverUrl, 'http://127.0.0.1:40002');
+      expect(session.isOnBackup, isTrue);
+      expect(session.uploadServicePort, 40003);
+      final results = await session.diagnose();
+      expect(results.singleWhere((r) => r.url == backup).isOk, isTrue);
+      session.useUrl(backup);
+      expect(session.serverUrl, 'http://127.0.0.1:40002');
+      session.dispose();
+    },
+  );
 
   test(
     'switches to the first working backup when the main address is dead',

@@ -108,6 +108,7 @@ class SessionController extends ChangeNotifier with WidgetsBindingObserver {
     UrlProbe? urlProbe,
     LanFinder? lanFinder,
     this.tunnelConnect,
+    this.tunnelResolve,
     this.tunnelReconnect,
     this.tunnelNetworkChanged,
     UrlProbe? tunnelProbe,
@@ -167,6 +168,31 @@ class SessionController extends ChangeNotifier with WidgetsBindingObserver {
 
   /// Starts the embedded tunnel and returns its address, if this device has joined.
   final Future<String?> Function()? tunnelConnect;
+  final Future<String?> Function(String url)? tunnelResolve;
+  final Map<String, String> _resolvedUrls = {};
+
+  Future<ProbeResult> _probeAddress(
+    String url,
+    String user,
+    String password,
+  ) async {
+    final direct = await _urlProbe(url, user, password);
+    if (direct.isOk) {
+      _resolvedUrls.remove(url);
+      return direct;
+    }
+    final local = await tunnelResolve?.call(url);
+    if (local == null) return direct;
+    final result = await _tunnelProbe(local, user, password);
+    if (result.isOk) _resolvedUrls[url] = local;
+    return ProbeResult(
+      url: url,
+      isOk: result.isOk,
+      elapsed: result.elapsed,
+      problem: result.problem,
+    );
+  }
+
   final Future<String?> Function()? tunnelReconnect;
   final Future<void> Function()? tunnelNetworkChanged;
 
@@ -413,12 +439,13 @@ class SessionController extends ChangeNotifier with WidgetsBindingObserver {
       if (!_valid(epoch)) return;
       // The tunnel exists because the away address failed, so it isn't undone by
       // merely choosing "away" again. Only home, or a failed check, moves off it.
-      if (_isOnTunnel && chosen == ActiveRoute.away) return;
+      if (_isOnTunnel && !_isOnBackup && chosen == ActiveRoute.away) return;
       // A backup address took over because the away address failed. Move back only once
       // the away address answers, or each check would bounce between the two.
       if (_isOnBackup && chosen == ActiveRoute.away) {
         final away = _awayUrl ?? _homeUrl!;
-        if (!(await _urlProbe(away, _user, _password)).isOk || !_valid(epoch))
+        if (!(await _probeAddress(away, _user, _password)).isOk ||
+            !_valid(epoch))
           return;
       }
       _isOnTunnel = false;
@@ -472,11 +499,11 @@ class SessionController extends ChangeNotifier with WidgetsBindingObserver {
 
   /// The current address is dead: try every other known address at once and switch to the
   /// first one (in priority order) that answers.
-  Future<bool> _failOver(String deadUrl) async {
+  Future<bool> _failOver(String deadUrl, {bool retryTunnel = true}) async {
     final epoch = _epoch;
     final others = candidateUrls.where((u) => u != deadUrl).toList();
     final results = await Future.wait(
-      others.map((u) => _urlProbe(u, _user, _password)),
+      others.map((u) => _probeAddress(u, _user, _password)),
     );
     if (!_valid(epoch)) return false;
     final working = results.where((r) => r.isOk).toList();
@@ -487,6 +514,14 @@ class SessionController extends ChangeNotifier with WidgetsBindingObserver {
       _isOnTunnel = false;
       _build(url);
       return true;
+    }
+    // Restart the shared node only after every peer failed. A dead primary must
+    // never tear down a working backup during doctor or primary-return checks.
+    if (retryTunnel && tunnelResolve != null && tunnelReconnect != null) {
+      await tunnelReconnect!();
+      if (!_valid(epoch)) return false;
+      _resolvedUrls.clear();
+      return _failOver(deadUrl, retryTunnel: false);
     }
     return _connectThroughTunnel();
   }
@@ -520,7 +555,7 @@ class SessionController extends ChangeNotifier with WidgetsBindingObserver {
 
   /// Tries every known address and reports how each one did. Used by the Connection doctor.
   Future<List<ProbeResult>> diagnose() =>
-      Future.wait(candidateUrls.map((u) => _urlProbe(u, _user, _password)));
+      Future.wait(candidateUrls.map((u) => _probeAddress(u, _user, _password)));
 
   /// Switches to [url] by hand, e.g. from the doctor, after it answered.
   void useUrl(String url) {
@@ -686,6 +721,7 @@ class SessionController extends ChangeNotifier with WidgetsBindingObserver {
     _awayUrl = null;
     _homeUrl = null;
     _extraUrls = const [];
+    _resolvedUrls.clear();
     _isOnBackup = false;
     _user = '';
     _password = '';
@@ -712,6 +748,9 @@ class SessionController extends ChangeNotifier with WidgetsBindingObserver {
   }
 
   void _build(String url) {
+    final logicalUrl = url;
+    if (_resolvedUrls.containsKey(url)) _isOnTunnel = true;
+    url = _resolvedUrls[url] ?? url;
     _client = SubsonicClient(
       baseUrl: url,
       username: _user,
@@ -721,7 +760,7 @@ class SessionController extends ChangeNotifier with WidgetsBindingObserver {
       outbox: _outbox,
       httpClient: _httpClient,
     );
-    unawaited(_rememberUrl(url));
+    unawaited(_rememberUrl(logicalUrl));
     unawaited(_refreshRole(url));
     _uploader = BulkUploadApi(
       serverUrl: url,
@@ -766,10 +805,11 @@ class SessionController extends ChangeNotifier with WidgetsBindingObserver {
     if (_isSigningOut || !_isOnReplica) return;
     for (final url in candidateUrls) {
       if (url == serverUrl) continue;
-      final result = await _urlProbe(url, _user, _password);
+      final result = await _probeAddress(url, _user, _password);
       if (!_valid(epoch)) return;
       if (!result.isOk) continue;
-      if (await _roleProbe(url, _uploadPort(url)) != false) continue;
+      final resolved = _resolvedUrls[url] ?? url;
+      if (await _roleProbe(resolved, _uploadPort(resolved)) != false) continue;
       if (!_valid(epoch)) return;
       _isOnReplica = false;
       _isOnBackup = url != _awayUrl && url != _homeUrl;

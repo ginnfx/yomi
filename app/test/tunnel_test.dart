@@ -69,6 +69,28 @@ void main() {
   });
 
   group('TunnelController', () {
+    test('backup forwards reuse the node and map the companion port', () async {
+      await tunnel.join('tskey-auth-abc', '100.1.2.3');
+      bridge.calls.clear();
+      final local = await tunnel.resolve('http://100.105.93.93:4533');
+      expect(local, 'http://127.0.0.1:40002');
+      expect(tunnel.uploadPortFor(local!), 40003);
+      expect(bridge.calls, [
+        'forward 100.105.93.93:4533',
+        'forward 100.105.93.93:4534',
+      ]);
+      expect(await tunnel.resolve('http://100.105.93.93:4533'), local);
+      expect(bridge.calls.length, 2);
+      await tunnel.reconnect();
+      expect(await tunnel.resolve('http://100.105.93.93:4533'), isNot(local));
+    });
+
+    test('LAN and unenrolled backups never start an embedded node', () async {
+      expect(await tunnel.resolve('http://192.168.1.10:4533'), isNull);
+      expect(await tunnel.resolve('http://100.105.93.93:4533'), isNull);
+      expect(bridge.calls, isEmpty);
+    });
+
     test('rejects something that is not an invite code, offline', () async {
       await expectLater(
         tunnel.join('hello', '100.1.2.3'),

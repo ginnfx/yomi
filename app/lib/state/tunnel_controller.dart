@@ -37,6 +37,8 @@ class TunnelController extends ChangeNotifier {
   final TunnelBridge bridge;
   final SharedPreferences prefs;
   final Directory stateDir;
+  final Map<String, String> _forwards = {};
+  final Map<String, int> _uploadPorts = {};
   String? _musicUrl;
   int? _uploadPort;
   Future<void> _pending = Future<void>.value();
@@ -67,7 +69,30 @@ class TunnelController extends ChangeNotifier {
 
   /// The upload service's port for [url], when that differs from the usual one.
   int uploadPortFor(String url) =>
-      isTunnelUrl(url) ? (_uploadPort ?? uploadPort) : uploadPort;
+      _uploadPorts[url] ??
+      (isTunnelUrl(url) ? (_uploadPort ?? uploadPort) : uploadPort);
+
+  /// Resolve a tailnet address through this app's node, never the system VPN.
+  Future<String?> resolve(String url) => _serialize(() async {
+    final uri = Uri.tryParse(url);
+    if (uri == null ||
+        uri.scheme != 'http' ||
+        !(uri.host.startsWith('100.') || uri.host.endsWith('.ts.net')))
+      return null;
+    if (await _connect() == null) return null;
+    final cached = _forwards[url];
+    if (cached != null) return cached;
+    try {
+      final music = await bridge.forward('${uri.host}:${uri.port}');
+      final upload = await bridge.forward('${uri.host}:$uploadPort');
+      final local = uri.replace(host: '127.0.0.1', port: music).toString();
+      _forwards[url] = local;
+      _uploadPorts[local] = upload;
+      return local;
+    } on Exception {
+      return null;
+    }
+  });
 
   String get _hostname {
     var id = prefs.getString(_deviceKey);
@@ -108,6 +133,8 @@ class TunnelController extends ChangeNotifier {
         return current;
       }
       // Phones can suspend the node, so anything but a healthy state starts over.
+      _forwards.clear();
+      _uploadPorts.clear();
       await bridge.stop();
       await _start(authKey: '', serverHost: host);
       return _musicUrl;
@@ -149,6 +176,8 @@ class TunnelController extends ChangeNotifier {
   /// Leaves the tailnet on this device. It needs a new invite to come back.
   Future<void> leave() => _serialize(() async {
     try {
+      _forwards.clear();
+      _uploadPorts.clear();
       await bridge.stop();
     } on PlatformException catch (error) {
       debugPrint('Tunnel stop failed: ${error.message}');
