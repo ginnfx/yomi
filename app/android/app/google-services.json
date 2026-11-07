@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "22001675592",
+    "project_id": "yomi-e3179",
+    "storage_bucket": "yomi-e3179.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:22001675592:android:d601f84d5529009a28577d",
+        "android_client_info": {
+          "package_name": "com.yomi.yomi"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCPytjOeYFwqsa4iZp7cJvDFUAluaxsHTc"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

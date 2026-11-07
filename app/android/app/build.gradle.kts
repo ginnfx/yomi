@@ -26,10 +26,12 @@ if (isReleaseBuild && !hasReleaseKey) {
 
 android {
     namespace = "com.yomi.yomi"
-    compileSdk = flutter.compileSdkVersion
+    // The notification library needs API 37 to compile against.
+    compileSdk = maxOf(flutter.compileSdkVersion, 37)
     ndkVersion = flutter.ndkVersion
 
     compileOptions {
+        isCoreLibraryDesugaringEnabled = true
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
@@ -91,6 +93,7 @@ flutter {
 
 dependencies {
     implementation("androidx.core:core:1.16.0")
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.5")
     // Android push tokens. Does nothing until google-services.json adds a project.
     implementation(platform("com.google.firebase:firebase-bom:33.7.0"))
     implementation("com.google.firebase:firebase-messaging")
