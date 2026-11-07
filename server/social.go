@@ -385,6 +385,16 @@ func (r *StateSync) Run(ctx context.Context) error {
 	}
 	if r.seen == nil {
 		r.seen = map[string]stateFile{}
+		// Include copies from earlier processes so deletions while offline propagate too.
+		for label, root := range r.Roots {
+			local, err := listStateFiles(root, label)
+			if err != nil && !errors.Is(err, os.ErrNotExist) {
+				return err
+			}
+			for _, file := range local {
+				r.seen[file.Root+"/"+file.Name] = file
+			}
+		}
 	}
 	isChanged := false
 	var firstFailure error
@@ -401,6 +411,29 @@ func (r *StateSync) Run(ctx context.Context) error {
 			continue
 		}
 		r.seen[key] = file
+		isChanged = true
+	}
+	// A complete manifest is authoritative for previously mirrored files.
+	present := make(map[string]bool, len(files))
+	for _, file := range files {
+		present[file.Root+"/"+file.Name] = true
+	}
+	for key, old := range r.seen {
+		if present[key] {
+			continue
+		}
+		root, known := r.Roots[old.Root]
+		name := filepath.FromSlash(old.Name)
+		if !known || !filepath.IsLocal(name) {
+			continue
+		}
+		if err := os.Remove(filepath.Join(root, name)); err != nil && !errors.Is(err, os.ErrNotExist) {
+			if firstFailure == nil {
+				firstFailure = err
+			}
+			continue
+		}
+		delete(r.seen, key)
 		isChanged = true
 	}
 	if isChanged && r.OnChanged != nil {

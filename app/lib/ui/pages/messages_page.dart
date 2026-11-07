@@ -307,15 +307,17 @@ class _ThreadPageState extends State<ThreadPage> {
   }
 
   Future<void> _sendText() async {
-    final text = _text.text.trim();
+    final submitted = _text.value;
+    final reply = _replyingTo;
+    final text = submitted.text.trim();
     if (text.isEmpty || _isSending) return;
     setState(() => _isSending = true);
-    final isSent = await _messages.send(text: text, replyTo: _replyingTo?.id);
+    final isSent = await _messages.send(text: text, replyTo: reply?.id);
     if (!mounted) return;
     // A refused message stays in the box, so nothing typed is lost.
     if (isSent) {
-      _text.clear();
-      _replyingTo = null;
+      if (_text.value == submitted) _text.clear();
+      if (identical(_replyingTo, reply)) _replyingTo = null;
     }
     setState(() => _isSending = false);
   }

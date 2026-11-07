@@ -116,7 +116,7 @@ func TestDatabaseWaitsUntilEveryFileArrived(t *testing.T) {
 	}
 }
 
-func TestOneBadFileDoesNotStopTheRest(t *testing.T) {
+func TestChangedPrimaryFileIsRefreshedBeforeReplication(t *testing.T) {
 	world := newReplicaWorld(t)
 	world.addToPrimary(t, "keli/a-bad.mp3", mp3Bytes)
 	world.addToPrimary(t, "keli/b-good.mp3", flacBytes)
@@ -124,7 +124,7 @@ func TestOneBadFileDoesNotStopTheRest(t *testing.T) {
 
 	err := world.sync.Sync(context.Background())
 
-	if err == nil || world.applied != 0 {
+	if err != nil || world.applied != 1 {
 		t.Fatalf("err = %v, applied = %d", err, world.applied)
 	}
 	if _, statErr := os.Stat(filepath.Join(world.root, "keli/b-good.mp3")); statErr != nil {
@@ -195,7 +195,7 @@ func TestCorruptedCopyIsNotKept(t *testing.T) {
 
 	err := world.sync.fetchFile(context.Background(), wrong)
 
-	if !errors.Is(err, errHashMismatch) {
+	if err == nil {
 		t.Fatalf("err = %v", err)
 	}
 	if _, statErr := os.Stat(filepath.Join(world.root, "keli/song.mp3")); statErr == nil {

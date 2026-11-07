@@ -22,10 +22,14 @@ class MessagesController extends ChangeNotifier {
     this.savedChats,
     this.me,
     this.listenForEvents = false,
+    this.readSavedFile,
   });
 
   /// Where chats are kept on this device. Without it nothing is saved.
   final Directory? savedChats;
+
+  /// Optional reader for saved chats, allowing disk reads to be controlled in tests.
+  final Future<String> Function(File file)? readSavedFile;
 
   /// The signed-in user, for showing messages written here before they're sent.
   final String Function()? me;
@@ -33,6 +37,7 @@ class MessagesController extends ChangeNotifier {
   /// Whether to hold a connection open so new messages arrive at once.
   final bool listenForEvents;
   int _listenGeneration = 0;
+  int _accountGeneration = 0;
   int _revision = -1;
   List<ChatMessage> _pending = const [];
   bool _isFlushing = false;
@@ -91,6 +96,7 @@ class MessagesController extends ChangeNotifier {
 
   /// Connects to a server, or stops everything with null.
   void attach(MessagingTransport? transport) {
+    _accountGeneration++;
     _transport = transport;
     _sharedTasteKey = null;
     _inboxTimer?.cancel();
@@ -108,7 +114,8 @@ class MessagesController extends ChangeNotifier {
       return;
     }
     _isAvailable = true;
-    _queueWrite(_loadPending);
+    final generation = _accountGeneration;
+    _queueWrite(() => _loadPending(generation));
     if (listenForEvents) unawaited(_listen(_listenGeneration));
     _inboxTimer = Timer.periodic(inboxPollEvery, (_) => unawaited(refresh()));
     unawaited(refresh());
@@ -143,6 +150,7 @@ class MessagesController extends ChangeNotifier {
   /// Fetches the inbox and people. A failed poll keeps what's on screen and stays quiet,
   /// since the next one is moments away.
   Future<void> refresh() async {
+    final generation = _accountGeneration;
     final transport = _transport;
     if (transport == null || _isPolling) return;
     _isPolling = true;
@@ -151,16 +159,19 @@ class MessagesController extends ChangeNotifier {
         transport.conversations(),
         transport.profiles(),
       ]);
+      if (generation != _accountGeneration) return;
       _conversations = results[0] as List<ChatConversation>;
       _people = results[1] as List<ChatProfile>;
       _isAvailable = true;
     } on MessagingUnavailable {
+      if (generation != _accountGeneration) return;
       _isAvailable = false;
     } on MessagingException catch (error) {
+      if (generation != _accountGeneration) return;
       debugPrint('Could not refresh messages: $error');
     } finally {
       _isPolling = false;
-      _changed();
+      if (generation == _accountGeneration) _changed();
     }
   }
 
@@ -171,20 +182,29 @@ class MessagesController extends ChangeNotifier {
     required String bio,
     File? avatar,
     File? banner,
+    bool removeAvatar = false,
+    bool removeBanner = false,
   }) async {
+    final generation = _accountGeneration;
     final transport = _transport;
     if (transport == null) return false;
     try {
       await transport.saveProfile(displayName: displayName, bio: bio);
+      if (generation != _accountGeneration) return false;
+      if (removeAvatar) await transport.deleteAvatar();
+      if (removeBanner) await transport.deleteBanner();
       if (avatar != null) await transport.saveAvatar(avatar);
       if (banner != null) await transport.saveBanner(banner);
       // Friends' lists carry the new picture version only after a refresh.
-      if (avatar != null || banner != null) unawaited(refresh());
+      if (avatar != null || banner != null || removeAvatar || removeBanner)
+        unawaited(refresh());
       return true;
     } on MessagingUnavailable {
+      if (generation != _accountGeneration) return false;
       _isAvailable = false;
       _changed();
     } on MessagingException catch (error) {
+      if (generation != _accountGeneration) return false;
       debugPrint('Could not publish profile: $error');
     }
     return false;
@@ -227,13 +247,29 @@ class MessagesController extends ChangeNotifier {
     }
   }
 
+  Future<bool> unregisterDevice({
+    required String token,
+    required String kind,
+  }) async {
+    final transport = _transport;
+    if (transport == null) return false;
+    try {
+      await transport.unregisterDevice(token: token, kind: kind);
+      return true;
+    } on MessagingException catch (error) {
+      debugPrint('Could not unregister push: $error');
+      return false;
+    }
+  }
+
   Future<void> openThread(String user) async {
+    final generation = _accountGeneration;
     _openThread = user;
     _thread = const [];
     _threadTimer?.cancel();
-    final saved = await _readSaved(user);
+    final saved = await _readSaved(user, generation);
     // Left, or moved to another chat, while reading from disk.
-    if (user != _openThread) return;
+    if (generation != _accountGeneration || user != _openThread) return;
     _thread = saved;
     _mayHaveOlder = true;
     _pollCursor = _thread.isEmpty ? 0 : _thread.last.id;
@@ -259,10 +295,12 @@ class MessagesController extends ChangeNotifier {
 
   Future<void> _pullThread() async {
     final user = _openThread;
+    final generation = _accountGeneration;
     final transport = _transport;
     if (user == null || transport == null) return;
     try {
       final fresh = await transport.thread(user, after: _pollCursor);
+      if (generation != _accountGeneration) return;
       if (user != _openThread) return; // Moved to another thread meanwhile.
       if (fresh.isEmpty) return;
       _pollCursor = fresh.last.id;
@@ -270,10 +308,13 @@ class MessagesController extends ChangeNotifier {
       _saveThread(user);
       _changed();
       await transport.markRead(user, _thread.last.id);
+      if (generation != _accountGeneration) return;
     } on MessagingUnavailable {
+      if (generation != _accountGeneration) return;
       _isAvailable = false;
       _changed();
     } on MessagingException catch (error) {
+      if (generation != _accountGeneration) return;
       debugPrint('Could not refresh this conversation: $error');
     }
   }
@@ -295,19 +336,23 @@ class MessagesController extends ChangeNotifier {
   /// reactions. Polling for new messages alone would never see those.
   Future<void> refreshOpenThread() async {
     final user = _openThread;
+    final generation = _accountGeneration;
     final transport = _transport;
     if (user == null || transport == null) return;
     try {
       final latest = await transport.thread(user);
+      if (generation != _accountGeneration) return;
       if (user != _openThread || latest.isEmpty) return;
       _thread = List.unmodifiable(_merge(_thread, latest));
       _pollCursor = _thread.last.id;
       _saveThread(user);
       _changed();
     } on MessagingUnavailable {
+      if (generation != _accountGeneration) return;
       _isAvailable = false;
       _changed();
     } on MessagingException catch (error) {
+      if (generation != _accountGeneration) return;
       debugPrint('Could not refresh this conversation: $error');
     }
   }
@@ -315,10 +360,12 @@ class MessagesController extends ChangeNotifier {
   /// Fetches the page before what's showing. Once a page comes back empty, that's all.
   Future<void> loadOlder() async {
     final user = _openThread;
+    final generation = _accountGeneration;
     final transport = _transport;
     if (user == null || transport == null || _thread.isEmpty) return;
     try {
       final older = await transport.thread(user, before: _thread.first.id);
+      if (generation != _accountGeneration) return;
       if (user != _openThread) return;
       if (older.isEmpty) {
         _mayHaveOlder = false;
@@ -328,12 +375,14 @@ class MessagesController extends ChangeNotifier {
       }
       _changed();
     } on MessagingException catch (error) {
+      if (generation != _accountGeneration) return;
       debugPrint('Could not load older messages: $error');
     }
   }
 
   /// Sets or, with an empty [emoji], removes your reaction. Shown straight away.
   Future<void> react(int messageId, String emoji) async {
+    final generation = _accountGeneration;
     final transport = _transport;
     final user = me?.call();
     if (transport == null || user == null) return;
@@ -345,9 +394,11 @@ class MessagesController extends ChangeNotifier {
     _changed();
     try {
       await transport.react(messageId, emoji);
+      if (generation != _accountGeneration) return;
       final open = _openThread;
       if (open != null) _saveThread(open);
     } on MessagingException catch (error) {
+      if (generation != _accountGeneration) return;
       debugPrint('Could not save a reaction: $error');
       _thread = before;
       _error = "Couldn't add that reaction.";
@@ -411,6 +462,7 @@ class MessagesController extends ChangeNotifier {
     String? playlistId,
     int? replyTo,
   }) async {
+    final generation = _accountGeneration;
     final transport = _transport;
     if (transport == null) return false;
     _error = null;
@@ -429,6 +481,7 @@ class MessagesController extends ChangeNotifier {
     );
     try {
       final sent = await _deliver(transport, draft);
+      if (generation != _accountGeneration) return false;
       if (user == _openThread) {
         _thread = List.unmodifiable(_merge(_thread, [sent]));
         _saveThread(user);
@@ -436,15 +489,18 @@ class MessagesController extends ChangeNotifier {
       _changed();
       return true;
     } on MessagingOffline catch (error) {
+      if (generation != _accountGeneration) return false;
       debugPrint('A message will be sent later: $error');
       _pending = List.unmodifiable([..._pending, draft]);
       _queueWrite(_savePending);
       _changed();
       return true;
     } on MessagingUnavailable {
+      if (generation != _accountGeneration) return false;
       _isAvailable = false;
       _error = "Messages aren't available on this server right now.";
     } on MessagingException catch (error) {
+      if (generation != _accountGeneration) return false;
       _error = error.message;
     }
     _changed();
@@ -475,24 +531,30 @@ class MessagesController extends ChangeNotifier {
   /// Sends messages written while the server was away, oldest first, and stops if it's
   /// still away. One it refuses can never succeed, so it's dropped rather than blocking.
   Future<void> flushPending() async {
+    final generation = _accountGeneration;
     final transport = _transport;
     if (transport == null || _isFlushing) return;
     _isFlushing = true;
     try {
       await _writes;
+      if (generation != _accountGeneration) return;
       while (_pending.isNotEmpty) {
         final draft = _pending.first;
         try {
           final sent = await _deliver(transport, draft);
+          if (generation != _accountGeneration) return;
           if (draft.to == _openThread) {
             _thread = List.unmodifiable(_merge(_thread, [sent]));
             _saveThread(draft.to);
           }
         } on MessagingOffline {
+          if (generation != _accountGeneration) return;
           return;
         } on MessagingUnavailable {
+          if (generation != _accountGeneration) return;
           return;
         } on MessagingException catch (error) {
+          if (generation != _accountGeneration) return;
           debugPrint('Dropping a message the server refused: $error');
         }
         _pending = List.unmodifiable(_pending.skip(1));
@@ -526,13 +588,17 @@ class MessagesController extends ChangeNotifier {
     return dir == null ? null : File('${dir.path}/pending.json');
   }
 
-  Future<List<ChatMessage>> _readSaved(String user) async {
+  Future<List<ChatMessage>> _readSaved(String user, int generation) async {
     await _writes;
+    if (generation != _accountGeneration) return const [];
     final file = _threadFile(user);
     if (file == null) return const [];
     try {
-      if (!await file.exists()) return const [];
-      return _decode(await file.readAsString());
+      if (!await file.exists() || generation != _accountGeneration)
+        return const [];
+      final text = await (readSavedFile?.call(file) ?? file.readAsString());
+      if (generation != _accountGeneration) return const [];
+      return _decode(text);
     } on Object catch (error) {
       debugPrint('Ignoring a saved chat: $error');
       return const [];
@@ -557,10 +623,16 @@ class MessagesController extends ChangeNotifier {
     if (file != null) await _write(file, _pending);
   }
 
-  Future<void> _loadPending() async {
+  Future<void> _loadPending(int generation) async {
+    if (generation != _accountGeneration) return;
     final file = _pendingFile;
-    if (file == null || !await file.exists()) return;
-    final saved = _decode(await file.readAsString());
+    if (file == null ||
+        !await file.exists() ||
+        generation != _accountGeneration)
+      return;
+    final text = await (readSavedFile?.call(file) ?? file.readAsString());
+    if (generation != _accountGeneration) return;
+    final saved = _decode(text);
     final known = {for (final message in _pending) message.id};
     _pending = List.unmodifiable([
       ...saved.where((message) => !known.contains(message.id)),

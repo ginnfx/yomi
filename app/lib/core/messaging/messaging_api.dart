@@ -241,9 +241,12 @@ abstract interface class MessagingTransport {
   });
   Future<void> saveAvatar(File image);
   Future<void> saveBanner(File image);
+  Future<void> deleteAvatar();
+  Future<void> deleteBanner();
 
   /// Tells the server where to push this device: [kind] is "apns" or "apns-sandbox".
   Future<void> registerDevice({required String token, required String kind});
+  Future<void> unregisterDevice({required String token, required String kind});
 
   /// Where a person's picture lives. [version] makes the address change with the
   /// picture, so image caches fetch the new one.
@@ -485,6 +488,22 @@ class MessagingApi implements MessagingTransport {
       bytes: await image.readAsBytes(),
     );
   }
+
+  @override
+  Future<void> deleteAvatar() => _call('DELETE', _uri('/v1/profile/avatar'));
+
+  @override
+  Future<void> deleteBanner() => _call('DELETE', _uri('/v1/profile/banner'));
+
+  @override
+  Future<void> unregisterDevice({
+    required String token,
+    required String kind,
+  }) => _call(
+    'DELETE',
+    _uri('/v1/devices'),
+    body: {'token': token, 'kind': kind},
+  );
 
   @override
   Uri avatarUri(String user, {int version = 0}) =>

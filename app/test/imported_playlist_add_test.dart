@@ -26,6 +26,13 @@ const _library = [
     durationSeconds: 1,
   ),
   Song(
+    id: 'c',
+    title: 'Also Want',
+    artist: 'Third',
+    album: 'Z',
+    durationSeconds: 1,
+  ),
+  Song(
     id: 'b',
     title: 'Want It',
     artist: 'Oak',
@@ -105,10 +112,26 @@ void main() {
     await tester.tap(find.widgetWithText(InkWell, 'Add').first);
     await settleScreen(tester);
     expect(find.text('Add to From Spotify'), findsOneWidget);
-    await tester.tap(find.byTooltip('Add').first);
+    await tester.tap(
+      find.descendant(
+        of: find.byKey(const ValueKey('add-b')),
+        matching: find.byTooltip('Add'),
+      ),
+    );
+    await settleScreen(tester);
+    await tester.tap(
+      find.descendant(
+        of: find.byKey(const ValueKey('add-c')),
+        matching: find.byTooltip('Add'),
+      ),
+    );
     await settleScreen(tester);
 
     // Assert
-    expect(imports.playlists.single.entries.map((e) => e.songId), ['a', 'b']);
+    expect(imports.playlists.single.entries.map((e) => e.songId), [
+      'a',
+      'b',
+      'c',
+    ]);
   });
 }

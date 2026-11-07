@@ -147,6 +147,12 @@ class SessionController extends ChangeNotifier with WidgetsBindingObserver {
   /// Stays the same however the server is reached, until sign-out.
   String? get accountId => _accountId;
 
+  /// Removes account-bound external registrations before credentials are cleared.
+  Future<void> Function()? beforeSignOut;
+  int _epoch = 0;
+  bool _isSigningOut = false;
+  bool _valid(int epoch) => epoch == _epoch && !_isSigningOut;
+
   final http.Client? _httpClient;
   final VaultStorage _storage;
   final ConnectivityController? _connectivity;
@@ -394,11 +400,13 @@ class SessionController extends ChangeNotifier with WidgetsBindingObserver {
   /// Decides between home and away: on home Wi-Fi it probes the home address quickly,
   /// anywhere else it uses the away address. Safe to call often.
   Future<void> refreshRoute() async {
-    if (_client == null || _isResolving) return;
+    final epoch = _epoch;
+    if (_isSigningOut || _client == null || _isResolving) return;
     _isResolving = true;
     notifyListeners();
     try {
       final chosen = await _chooseRoute();
+      if (!_valid(epoch)) return;
       // The tunnel exists because the away address failed, so it isn't undone by
       // merely choosing "away" again. Only home, or a failed check, moves off it.
       if (_isOnTunnel && chosen == ActiveRoute.away) return;
@@ -406,7 +414,8 @@ class SessionController extends ChangeNotifier with WidgetsBindingObserver {
       // the away address answers, or each check would bounce between the two.
       if (_isOnBackup && chosen == ActiveRoute.away) {
         final away = _awayUrl ?? _homeUrl!;
-        if (!(await _urlProbe(away, _user, _password)).isOk) return;
+        if (!(await _urlProbe(away, _user, _password)).isOk || !_valid(epoch))
+          return;
       }
       _isOnTunnel = false;
       final url = chosen == ActiveRoute.home
@@ -426,8 +435,9 @@ class SessionController extends ChangeNotifier with WidgetsBindingObserver {
   /// Quick reachability check for the current address. Flips to offline mode on failure and
   /// retries on its own until the server answers again.
   Future<void> checkServer() async {
+    final epoch = _epoch;
     final client = _client;
-    if (client == null || _isChecking) return;
+    if (_isSigningOut || client == null || _isChecking) return;
     _isChecking = true;
     notifyListeners();
     var reachable = false;
@@ -435,6 +445,7 @@ class SessionController extends ChangeNotifier with WidgetsBindingObserver {
       await client.ping(timeout: _isOnTunnel ? _tunnelTimeout : _reachTimeout);
       reachable = true;
     } on Exception {
+      if (!_valid(epoch)) return;
       try {
         reachable = await _failOver(client.baseUrl);
       } on Exception catch (error) {
@@ -443,6 +454,7 @@ class SessionController extends ChangeNotifier with WidgetsBindingObserver {
     } finally {
       _isChecking = false;
     }
+    if (!_valid(epoch)) return;
     _reachRetry?.cancel();
     if (!reachable) {
       _reachRetry = Timer(_reachRetryEvery, checkServer);
@@ -455,10 +467,12 @@ class SessionController extends ChangeNotifier with WidgetsBindingObserver {
   /// The current address is dead: try every other known address at once and switch to the
   /// first one (in priority order) that answers.
   Future<bool> _failOver(String deadUrl) async {
+    final epoch = _epoch;
     final others = candidateUrls.where((u) => u != deadUrl).toList();
     final results = await Future.wait(
       others.map((u) => _urlProbe(u, _user, _password)),
     );
+    if (!_valid(epoch)) return false;
     final working = results.where((r) => r.isOk).toList();
     if (working.isNotEmpty) {
       final url = working.first.url;
@@ -474,15 +488,17 @@ class SessionController extends ChangeNotifier with WidgetsBindingObserver {
   /// Last resort after every direct address failed, so a device that can reach the
   /// server by LAN or the Tailscale app never pays for a second network stack.
   Future<bool> _connectThroughTunnel() async {
+    final epoch = _epoch;
     var url = await tunnelConnect?.call();
-    if (url == null) return false;
+    if (url == null || !_valid(epoch)) return false;
     var result = await _tunnelProbe(url, _user, _password);
+    if (!_valid(epoch)) return false;
     if (!result.isOk) {
       // Running only describes the backend, not whether its peer path works.
       url = await tunnelReconnect?.call();
-      if (url == null) return false;
+      if (url == null || !_valid(epoch)) return false;
       result = await _tunnelProbe(url, _user, _password);
-      if (!result.isOk) return false;
+      if (!result.isOk || !_valid(epoch)) return false;
     }
     _isOnBackup = false;
     _isOnTunnel = true;
@@ -543,10 +559,12 @@ class SessionController extends ChangeNotifier with WidgetsBindingObserver {
   }
 
   Future<ActiveRoute> _autoRoute() async {
+    final epoch = _epoch;
     // Off Wi-Fi there is no way to be on the home network, so skip the probe.
     if (_connectivity != null && !_connectivity.isOnWifi)
       return ActiveRoute.away;
     if (await _probe(_homeUrl!, _user, _password)) return ActiveRoute.home;
+    if (!_valid(epoch)) return ActiveRoute.away;
     // Already home: one slow answer, often just after wake, isn't a reason to leave.
     if (_route == ActiveRoute.home &&
         await _probe(_homeUrl!, _user, _password)) {
@@ -559,6 +577,7 @@ class SessionController extends ChangeNotifier with WidgetsBindingObserver {
   /// The saved home address stopped answering, usually because the router handed the server
   /// a new IP. Looks for it on this Wi-Fi and, if found, saves it as the new home address.
   Future<void> _healHome() async {
+    final epoch = _epoch;
     final last = _lastScan;
     final isRecent =
         last != null && DateTime.now().difference(last) < _scanEvery;
@@ -568,10 +587,11 @@ class SessionController extends ChangeNotifier with WidgetsBindingObserver {
     _lastScan = DateTime.now();
     try {
       final found = await _lanFinder(_user, _password);
-      if (found == null || _client == null) return;
+      if (found == null || _client == null || !_valid(epoch)) return;
       final isNew = found != _homeUrl;
       _homeUrl = found;
       if (isNew) await _remember();
+      if (!_valid(epoch)) return;
       if (_mode != RouteMode.away || !_isServerReachable) {
         _reachRetry?.cancel();
         useUrl(found);
@@ -602,11 +622,13 @@ class SessionController extends ChangeNotifier with WidgetsBindingObserver {
   /// A check nobody is waiting on. Only when it keeps failing does the full check run,
   /// which may change the route or show the app as offline.
   Future<void> _routineCheck() async {
+    final epoch = _epoch;
     final client = _client;
     if (client == null) return;
     for (var attempt = 0; attempt < _routineAttempts; attempt++) {
       try {
         await client.ping(timeout: _isOnTunnel ? _tunnelTimeout : _wakeTimeout);
+        if (!_valid(epoch)) return;
         if (!_isServerReachable) {
           _reachRetry?.cancel();
           _isServerReachable = true;
@@ -617,10 +639,17 @@ class SessionController extends ChangeNotifier with WidgetsBindingObserver {
         debugPrint('Routine server check failed: $error');
       }
     }
-    await checkServer();
+    if (_valid(epoch)) await checkServer();
   }
 
   Future<void> signOut() async {
+    _epoch++;
+    _isSigningOut = true;
+    try {
+      await beforeSignOut?.call();
+    } on Object catch (error) {
+      debugPrint('Could not remove account registration: $error');
+    }
     final cache = _catalogCache;
     _catalogCache = null;
     _accountId = null;
@@ -643,6 +672,10 @@ class SessionController extends ChangeNotifier with WidgetsBindingObserver {
     _isOnBackup = false;
     _user = '';
     _password = '';
+    _isSigningOut = false;
+    _primaryRetry?.cancel();
+    _roleRetry?.cancel();
+    _debounce?.cancel();
     notifyListeners();
   }
 
@@ -712,12 +745,15 @@ class SessionController extends ChangeNotifier with WidgetsBindingObserver {
   /// Moves back once a non-backup address answers again. The player stays on the
   /// current song until it ends, so nothing audibly changes.
   Future<void> returnToPrimary() async {
-    if (!_isOnReplica) return;
+    final epoch = _epoch;
+    if (_isSigningOut || !_isOnReplica) return;
     for (final url in candidateUrls) {
       if (url == serverUrl) continue;
       final result = await _urlProbe(url, _user, _password);
+      if (!_valid(epoch)) return;
       if (!result.isOk) continue;
       if (await _roleProbe(url, _uploadPort(url)) != false) continue;
+      if (!_valid(epoch)) return;
       _isOnReplica = false;
       _isOnBackup = url != _awayUrl && url != _homeUrl;
       _isOnTunnel = false;
@@ -731,6 +767,7 @@ class SessionController extends ChangeNotifier with WidgetsBindingObserver {
 
   @override
   void dispose() {
+    _epoch++;
     _binding?.removeObserver(this);
     _routeRefresh?.cancel();
     _primaryRetry?.cancel();

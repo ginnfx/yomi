@@ -145,9 +145,11 @@ class UploadQueue extends ChangeNotifier {
 
   /// Songs this queue has already chosen to send. A batch is classified before any of it
   /// uploads, so the library alone can't catch two copies sitting in the same folder.
-  final LibrarySnapshot _claimed = LibrarySnapshot(const []);
+  LibrarySnapshot _claimed = LibrarySnapshot(const []);
   bool _hasSeededClaims = false;
   bool _isRunning = false;
+  int _epoch = 0;
+  int _runningEpoch = 0;
   bool _isInspecting = false;
   bool _isDisposed = false;
   UploadPause? _pause;
@@ -216,22 +218,37 @@ class UploadQueue extends ChangeNotifier {
   void attach(UploadTransport? transport, {SnapshotLoader? loadSnapshot}) {
     _transport = transport;
     _loadSnapshot = loadSnapshot;
-    if (transport == null) return;
+    if (transport == null) {
+      _epoch++;
+      _items.clear();
+      _progress.clear();
+      _snapshot = null;
+      _claimed = LibrarySnapshot(const []);
+      _hasSeededClaims = false;
+      _pause = null;
+      _resumeTimer?.cancel();
+      unawaited(_save());
+      _changed();
+      return;
+    }
     if (_pause == UploadPause.signInAgain) _pause = null;
     start();
   }
 
   /// Adds every audio file under [folder]. Returns how many were new.
   Future<int> addFolder(String folder) async {
+    final epoch = _epoch;
     final found = <String>[];
     await for (final entity in Directory(
       folder,
     ).list(recursive: true, followLinks: false)) {
+      if (epoch != _epoch) return 0;
       if (entity is File && hasUploadExtension(entity.path)) {
         found.add(entity.path);
       }
     }
     found.sort();
+    if (epoch != _epoch) return 0;
     return addFiles(found);
   }
 
@@ -322,12 +339,15 @@ class UploadQueue extends ChangeNotifier {
   }
 
   Future<void> _run() async {
+    _runningEpoch = _epoch;
+    final epoch = _epoch;
     _isRunning = true;
     _runStarted = DateTime.now();
     _handledAtRunStart = _handledCount;
     _changed();
     try {
       await _prepareSnapshot();
+      if (epoch != _epoch) return;
       // Files added mid-run may land after inspection finished, so go again until
       // nothing is left that can be done.
       do {
@@ -342,20 +362,28 @@ class UploadQueue extends ChangeNotifier {
       await _save();
       _changed();
       _scheduleResumeIfWaiting();
+      if (epoch != _epoch) start();
     }
   }
 
   Future<void> _prepareSnapshot() async {
     if (_snapshot != null) return;
+    final epoch = _epoch;
     try {
-      _snapshot = await _loadSnapshot?.call();
+      final snapshot = await _loadSnapshot?.call();
+      if (epoch != _epoch) return;
+      _snapshot = snapshot;
     } on Object catch (error) {
       // Exact duplicates are still caught; only the softer check is lost.
       debugPrint('Could not load the library for duplicate checks: $error');
     }
   }
 
-  bool get _canContinue => !_isDisposed && _pause == null && _transport != null;
+  bool get _canContinue =>
+      !_isDisposed &&
+      _runningEpoch == _epoch &&
+      _pause == null &&
+      _transport != null;
 
   Future<void> _inspectPass() async {
     _isInspecting = true;
@@ -388,6 +416,7 @@ class UploadQueue extends ChangeNotifier {
       for (final item in batch) {
         if (!_canContinue) return;
         final result = await _inspectOne(item);
+        if (!_canContinue) return;
         if (result != null) inspected.add(result);
       }
       await _classify(inspected, seen);
@@ -395,8 +424,10 @@ class UploadQueue extends ChangeNotifier {
   }
 
   Future<UploadItem?> _inspectOne(UploadItem item) async {
+    final epoch = _epoch;
     try {
       final stat = await File(item.path).stat();
+      if (epoch != _epoch) return null;
       if (stat.type == FileSystemEntityType.notFound) {
         _fail(item, 'This file is no longer there.');
         return null;
@@ -404,6 +435,7 @@ class UploadQueue extends ChangeNotifier {
       final modifiedMs = stat.modified.millisecondsSinceEpoch;
       final key = '${item.path}|${stat.size}|$modifiedMs';
       final facts = _hashCache[key] ?? await _inspector(item.path);
+      if (epoch != _epoch) return null;
       _hashCache[key] = facts;
       return item.copyWith(
         facts: facts,
@@ -411,6 +443,7 @@ class UploadQueue extends ChangeNotifier {
         modifiedMs: modifiedMs,
       );
     } on FileSystemException catch (error) {
+      if (epoch != _epoch) return null;
       debugPrint('Cannot read ${item.path}: $error');
       _pause = UploadPause.needsFolderAccess;
       _changed(saveNow: true);
@@ -424,7 +457,7 @@ class UploadQueue extends ChangeNotifier {
   ) async {
     if (inspected.isEmpty) return;
     final known = await _knownHashes(inspected);
-    if (known == null) return;
+    if (known == null || !_canContinue) return;
     for (final item in inspected) {
       final facts = item.facts!;
       final isExact =
@@ -447,6 +480,7 @@ class UploadQueue extends ChangeNotifier {
 
   /// Null means the check couldn't happen and the queue has paused.
   Future<Set<String>?> _knownHashes(List<UploadItem> items) async {
+    final epoch = _epoch;
     final transport = _transport;
     if (transport == null) return null;
     try {
@@ -454,15 +488,21 @@ class UploadQueue extends ChangeNotifier {
         for (final item in items) item.facts!.sha256,
       ]);
     } on UploadRouteMissing {
+      if (epoch != _epoch) return null;
       _pause = UploadPause.serverNeedsUpdate;
     } on UploadAuthFailed {
+      if (epoch != _epoch) return null;
       _pause = UploadPause.signInAgain;
     } on UploadUnreachable {
+      if (epoch != _epoch) return null;
       _pause = UploadPause.waitingForServer;
     } on UploadRetryLater catch (wait) {
+      if (epoch != _epoch) return null;
       await Future<void>.delayed(wait.after);
+      if (epoch != _epoch) return null;
       return _knownHashes(items);
     } on UploadRejected catch (error) {
+      if (epoch != _epoch) return null;
       debugPrint('Duplicate check refused: $error');
       _pause = UploadPause.waitingForServer;
     }
@@ -497,12 +537,14 @@ class UploadQueue extends ChangeNotifier {
   }
 
   Future<void> _send(UploadItem item) async {
+    final epoch = _epoch;
     final transport = _transport;
     if (transport == null) {
       _items[item.path] = item.copyWith(state: UploadState.ready);
       return;
     }
     void onProgress(double progress) {
+      if (epoch != _epoch) return;
       _progress[item.path] = progress;
       _changed();
     }
@@ -514,6 +556,7 @@ class UploadQueue extends ChangeNotifier {
         name: item.name,
         onProgress: onProgress,
       );
+      if (epoch != _epoch) return;
       _items[item.path] = item.copyWith(
         state: result == PutResult.duplicate
             ? UploadState.duplicate
@@ -521,32 +564,42 @@ class UploadQueue extends ChangeNotifier {
       );
       _rememberInSnapshot(item);
     } on UploadRouteMissing {
+      if (epoch != _epoch) return;
       _pause = UploadPause.serverNeedsUpdate;
       _items[item.path] = item.copyWith(state: UploadState.ready);
     } on UploadRetryLater catch (wait) {
+      if (epoch != _epoch) return;
       _retryNotBefore = DateTime.now().add(wait.after);
       _items[item.path] = item.copyWith(state: UploadState.ready);
     } on UploadUnreachable {
+      if (epoch != _epoch) return;
       _pause = UploadPause.waitingForServer;
       _items[item.path] = item.copyWith(state: UploadState.ready);
     } on UploadAuthFailed {
+      if (epoch != _epoch) return;
       _pause = UploadPause.signInAgain;
       _items[item.path] = item.copyWith(state: UploadState.ready);
     } on UploadReadOnly {
+      if (epoch != _epoch) return;
       _pause = UploadPause.onBackupServer;
       _items[item.path] = item.copyWith(state: UploadState.ready);
     } on UploadStorageFull {
+      if (epoch != _epoch) return;
       _pause = UploadPause.storageFull;
       _items[item.path] = item.copyWith(state: UploadState.ready);
     } on UploadCorrupted {
+      if (epoch != _epoch) return;
       _retryOrFail(item, 'The file kept arriving damaged.');
     } on UploadRejected catch (error) {
+      if (epoch != _epoch) return;
       _fail(item, error.message);
     } on FileSystemException catch (error) {
+      if (epoch != _epoch) return;
       debugPrint('Cannot read ${item.path}: $error');
       _pause = UploadPause.needsFolderAccess;
       _items[item.path] = item.copyWith(state: UploadState.ready);
     } on Object catch (error) {
+      if (epoch != _epoch) return;
       // Nothing unexpected may strand a file as "uploading" or end this worker.
       debugPrint('Unexpected upload failure for ${item.name}: $error');
       _retryOrFail(item, 'Something went wrong sending this file.');
@@ -664,7 +717,12 @@ class UploadQueue extends ChangeNotifier {
     }
   }
 
-  Future<void> _writeAtomically(File file, String contents) async {
+  Future<void> _fileWrites = Future.value();
+
+  Future<void> _writeAtomically(File file, String contents) =>
+      _fileWrites = _fileWrites.then((_) => _writeFile(file, contents));
+
+  Future<void> _writeFile(File file, String contents) async {
     final temp = File('${file.path}.tmp');
     try {
       await file.parent.create(recursive: true);

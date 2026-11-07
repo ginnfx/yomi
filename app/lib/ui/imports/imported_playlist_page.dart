@@ -93,7 +93,7 @@ class ImportedPlaylistPage extends StatelessWidget {
     BuildContext context,
     ImportedPlaylist playlist,
     Song song,
-  ) => context.read<ImportsController>().update(playlist.withSongAdded(song));
+  ) => context.read<ImportsController>().addSong(playlist.id, song);
 
   @override
   Widget build(BuildContext context) {

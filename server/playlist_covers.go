@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -154,6 +156,11 @@ func (s *Server) coverTarget(w http.ResponseWriter, r *http.Request, isChange bo
 		return "", false
 	}
 	if !isChange {
+		if s.importedBy(user, id) && s.PlaylistOwner != nil {
+			if _, err := s.PlaylistOwner(r.Context(), r.URL.Query(), id); errors.Is(err, errNoSuchPlaylist) {
+				return importedCoverKey(user, id), true
+			}
+		}
 		return id, true
 	}
 	owner, err := s.PlaylistOwner(r.Context(), r.URL.Query(), id)
@@ -161,7 +168,7 @@ func (s *Server) coverTarget(w http.ResponseWriter, r *http.Request, isChange bo
 	case errors.Is(err, errNoSuchPlaylist) && s.importedBy(user, id):
 		// Not a Navidrome playlist, so only an import can carry this ID. A real playlist's
 		// owner always wins, because import IDs are chosen by the caller.
-		return id, true
+		return importedCoverKey(user, id), true
 	case errors.Is(err, errNoSuchPlaylist):
 		writeError(w, http.StatusNotFound, "no such playlist")
 		return "", false
@@ -204,7 +211,13 @@ func (s *Server) handleDeletePlaylistCover(w http.ResponseWriter, r *http.Reques
 	if !ok {
 		return
 	}
-	if err := s.PlaylistCovers.Delete(id); err != nil {
+	var err error
+	if strings.HasPrefix(id, ".import-") {
+		_, err = s.PlaylistCovers.Save(id, nil)
+	} else {
+		err = s.PlaylistCovers.Delete(id)
+	}
+	if err != nil {
 		log.Printf("delete playlist cover: %v", err)
 		writeError(w, http.StatusInternalServerError, "couldn't remove the picture")
 		return
@@ -218,7 +231,11 @@ func (s *Server) handlePlaylistCover(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	image, version, err := s.PlaylistCovers.Read(id)
-	if errors.Is(err, os.ErrNotExist) {
+	// Legacy imported covers were global. Keep them readable, but never writable by imports.
+	if errors.Is(err, os.ErrNotExist) && strings.HasPrefix(id, ".import-") {
+		image, version, err = s.PlaylistCovers.Read(r.PathValue("id"))
+	}
+	if errors.Is(err, os.ErrNotExist) || (err == nil && len(image) == 0) {
 		writeError(w, http.StatusNotFound, "this playlist has no picture")
 		return
 	}
@@ -254,6 +271,24 @@ func (s *Server) handlePlaylistCovers(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "couldn't list the pictures")
 		return
 	}
+	// Imported IDs are private namespaces; advertise only this user's mappings.
+	user := r.URL.Query().Get("u")
+	if s.History != nil {
+		safe, err := sanitizeUser(user)
+		if err == nil {
+			names, _ := filepath.Glob(filepath.Join(s.History.importsDir(safe), "*.json"))
+			for _, name := range names {
+				id := strings.TrimSuffix(filepath.Base(name), ".json")
+				if data, version, err := s.PlaylistCovers.Read(importedCoverKey(user, id)); err == nil {
+					if len(data) == 0 {
+						delete(versions, id)
+					} else {
+						versions[id] = version
+					}
+				}
+			}
+		}
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"covers": versions})
 }
 
@@ -264,4 +299,11 @@ func (s *Server) importedBy(user, id string) bool {
 	}
 	safe, err := sanitizeUser(user)
 	return err == nil && s.History.HasImport(safe, id)
+}
+
+// Imported playlist IDs are caller-chosen, so their artwork must be scoped to its user.
+func importedCoverKey(user, id string) string {
+	safe, _ := sanitizeUser(user)
+	sum := sha256.Sum256([]byte(safe + "\x00" + id))
+	return ".import-" + hex.EncodeToString(sum[:])
 }

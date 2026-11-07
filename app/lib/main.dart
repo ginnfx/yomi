@@ -386,7 +386,12 @@ Future<void> main() async {
   final pushRegistration = PushRegistration(
     register: ({required token, required kind}) =>
         messages.registerDevice(token: token, kind: kind),
+    unregister: ({required token, required kind}) =>
+        messages.unregisterDevice(token: token, kind: kind),
+    isEnabled: settings.areMessageNotificationsOn,
+    prefs: prefs,
   )..start();
+  session.beforeSignOut = pushRegistration.deactivate;
   final notifications = SystemNotificationSink();
   final messageNotifier = MessageNotifier(
     messages: messages,
@@ -419,6 +424,7 @@ Future<void> main() async {
   }
 
   settings.addListener(() {
+    unawaited(pushRegistration.setEnabled(settings.areMessageNotificationsOn));
     // Switching notifications off and on again asks again, in case it was refused.
     if (!settings.areMessageNotificationsOn) hasAskedForNotifications = false;
     askForNotificationsOnce();
@@ -528,12 +534,13 @@ Future<void> main() async {
     final addressChanged = client != null && client.baseUrl != aiUrl;
     aiUrl = client?.baseUrl;
     final isReachable = session.isServerReachable;
+    final becameReachable = isReachable && !wasReachable;
     // Covers still loading may be stuck on an address that no longer works.
     if (client != null && (addressChanged || (isReachable && !wasReachable))) {
       CoverImageService.instance.retryFailed();
     }
     player.isServerDown = !isReachable;
-    if (client != null && isReachable && !wasReachable) {
+    if (client != null && becameReachable) {
       unawaited(client.flushOutbox());
       unawaited(messages.flushPending());
     }
@@ -546,7 +553,13 @@ Future<void> main() async {
       messagingUrl = client.baseUrl;
       messages.attach(session.messaging);
       pushRegistration.serverGone();
-      unawaited(pushRegistration.serverReady());
+    }
+    if (client != null && (addressChanged || becameReachable)) {
+      unawaited(
+        pushRegistration
+            .setEnabled(settings.areMessageNotificationsOn)
+            .then((_) => pushRegistration.serverReady()),
+      );
       profileSync.publish();
     }
     uploads.attach(

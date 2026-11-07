@@ -31,6 +31,19 @@ class ProfileController extends ChangeNotifier {
     return file.existsSync() ? file : null;
   }
 
+  bool get avatarRemovalPending =>
+      _prefs.getBool('avatarRemovalPending') ?? false;
+  bool get bannerRemovalPending =>
+      _prefs.getBool('bannerRemovalPending') ?? false;
+
+  Future<void> acknowledgeImageRemovals({
+    bool avatar = false,
+    bool banner = false,
+  }) async {
+    if (avatar) await _prefs.remove('avatarRemovalPending');
+    if (banner) await _prefs.remove('bannerRemovalPending');
+  }
+
   String get bio => _prefs.getString('bio') ?? '';
 
   Future<void> setBio(String value) async {
@@ -58,6 +71,7 @@ class ProfileController extends ChangeNotifier {
     await source.copy(target.path);
     await _deleteFileAt('bannerPath');
     await _prefs.setString('bannerPath', target.path);
+    await _prefs.remove('bannerRemovalPending');
     notifyListeners();
   }
 
@@ -76,10 +90,14 @@ class ProfileController extends ChangeNotifier {
     await target.writeAsBytes(bytes, flush: true);
     await _deleteFileAt(key);
     await _prefs.setString(key, target.path);
+    await _prefs.remove(
+      prefix == 'avatar' ? 'avatarRemovalPending' : 'bannerRemovalPending',
+    );
     notifyListeners();
   }
 
   Future<void> clearBanner() async {
+    await _prefs.setBool('bannerRemovalPending', true);
     await _deleteFileAt('bannerPath');
     await _prefs.remove('bannerPath');
     notifyListeners();
@@ -108,10 +126,12 @@ class ProfileController extends ChangeNotifier {
     await source.copy(target.path);
     await _deleteFileAt('avatarPath');
     await _prefs.setString('avatarPath', target.path);
+    await _prefs.remove('avatarRemovalPending');
     notifyListeners();
   }
 
   Future<void> clearAvatar() async {
+    await _prefs.setBool('avatarRemovalPending', true);
     await _deleteFileAt('avatarPath');
     await _prefs.remove('avatarPath');
     notifyListeners();
@@ -129,7 +149,14 @@ class ProfileController extends ChangeNotifier {
   Future<void> clear() async {
     await _deleteFileAt('avatarPath');
     await _deleteFileAt('bannerPath');
-    for (final key in const ['nickname', 'bio', 'avatarPath', 'bannerPath']) {
+    for (final key in const [
+      'nickname',
+      'bio',
+      'avatarPath',
+      'bannerPath',
+      'avatarRemovalPending',
+      'bannerRemovalPending',
+    ]) {
       await _prefs.remove(key);
     }
     notifyListeners();

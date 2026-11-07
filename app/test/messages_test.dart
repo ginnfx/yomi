@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -10,6 +11,16 @@ import 'package:yomi/ui/pages/messages_page.dart';
 import 'support/screen_harness.dart';
 
 class FakeTransport implements MessagingTransport {
+  @override
+  Future<void> deleteAvatar() async {}
+  @override
+  Future<void> deleteBanner() async {}
+  @override
+  Future<void> unregisterDevice({
+    required String token,
+    required String kind,
+  }) async {}
+
   @override
   Future<void> saveTaste({
     required List<String> topArtists,
@@ -32,6 +43,7 @@ class FakeTransport implements MessagingTransport {
     ChatProfile(user: 'demo'),
     ChatProfile(user: 'sam', displayName: 'Sam', bio: 'Mostly jazz'),
   ];
+  Completer<void>? sendGate;
   Exception? failure;
   final List<int> readUpTo = [];
   int nextId = 1;
@@ -85,6 +97,7 @@ class FakeTransport implements MessagingTransport {
     String? playlistId,
     int? replyTo,
   }) async {
+    await sendGate?.future;
     final error = failure;
     if (error != null) throw error;
     final message = ChatMessage(
@@ -291,6 +304,33 @@ void main() {
       });
       await pumpScreen(tester, wrap(const MessagesPage()), size: phoneSize);
       expect(find.textContaining('backup server'), findsOneWidget);
+    });
+
+    testWidgets('a draft edited while sending is preserved', (tester) async {
+      await tester.runAsync(() async {
+        controller.attach(transport);
+        await controller.refresh();
+      });
+      await pumpScreen(
+        tester,
+        wrap(const ThreadPage(user: 'sam')),
+        size: phoneSize,
+      );
+      transport.sendGate = Completer<void>();
+      await tester.enterText(find.byType(TextField), 'submitted');
+      await tester.tap(find.byTooltip('Send'));
+      await tester.pump();
+      await tester.enterText(find.byType(TextField), 'next draft');
+      transport.sendGate!.complete();
+      await tester.runAsync(() async {
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+      });
+      await settleScreen(tester);
+      expect(
+        tester.widget<TextField>(find.byType(TextField)).controller!.text,
+        'next draft',
+      );
+      expect(transport.messages.single.text, 'submitted');
     });
 
     testWidgets('sending clears the box, a failure keeps the text', (

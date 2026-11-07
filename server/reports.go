@@ -36,6 +36,7 @@ const (
 const (
 	reportsFile            = "reports.json"
 	maxReportNoteChars     = 300
+	maxReportNotes         = 20
 	maxReportTextChars     = 200
 	maxOpenReportsPerUser  = 200
 	maxStoredReports       = 5000
@@ -187,7 +188,13 @@ func (s *ReportStore) Add(user string, input ReportInput) (Report, bool, error) 
 		if !slices.Contains(updated.Reporters, user) {
 			updated.Reporters = append(slices.Clone(updated.Reporters), user)
 		}
-		updated.Notes = append(slices.Clone(updated.Notes), note()...)
+		// Repeated import retries must not grow the report indefinitely.
+		if input.Note != "" && !slices.ContainsFunc(updated.Notes, func(n ReportNote) bool { return n.User == user && n.Text == input.Note }) {
+			if len(updated.Notes) >= maxReportNotes {
+				return Report{}, false, errTooManyReports
+			}
+			updated.Notes = append(slices.Clone(updated.Notes), note()...)
+		}
 		updated.UpdatedMs = now
 		updated.Count = len(updated.Reporters)
 		s.reports = slices.Clone(s.reports)
@@ -454,10 +461,20 @@ func (s *Server) handleReportAdded(w http.ResponseWriter, r *http.Request) {
 		s.writeReportError(w, errReportNotOpen)
 		return
 	}
-	report, err = s.Reports.Close(id, reportResolved, "Added by "+user, strings.TrimSpace(body.SongID))
+	songID := strings.TrimSpace(body.SongID)
+	if songID == "" || s.SongPath == nil {
+		writeError(w, http.StatusBadRequest, "a song in the library is needed")
+		return
+	}
+	if _, err := s.SongPath(r.Context(), r.URL.Query(), songID); err != nil {
+		writeError(w, http.StatusBadRequest, "that song isn't in the library")
+		return
+	}
+	report, err = s.Reports.Close(id, reportResolved, "Added by "+user, songID)
 	if !s.writeReportError(w, err) {
 		return
 	}
+	report.Reporters, report.Notes = nil, nil
 	writeJSON(w, http.StatusOK, report)
 }
 

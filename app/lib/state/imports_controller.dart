@@ -18,6 +18,17 @@ class ImportsController extends ChangeNotifier {
   ImportsApi? _api;
   List<ImportedPlaylist> _playlists = const [];
   Set<String> _unsent = const {};
+  Set<String> _deleted = const {};
+  Future<void> _writes = Future.value();
+  Future<void> _remoteWork = Future.value();
+  int _generation = 0;
+
+  Future<void> _serialize(Future<void> Function() action) {
+    final next = _remoteWork.then((_) => action());
+    _remoteWork = next.catchError((Object _) {});
+    return next;
+  }
+
   List<Song>? _matchedAgainst;
 
   List<ImportedPlaylist> get playlists => _playlists;
@@ -35,6 +46,9 @@ class ImportsController extends ChangeNotifier {
       _unsent = ((json['unsent'] as List<dynamic>?) ?? const [])
           .cast<String>()
           .toSet();
+      _deleted = ((json['deleted'] as List<dynamic>?) ?? const [])
+          .cast<String>()
+          .toSet();
       notifyListeners();
     } on Object catch (error) {
       debugPrint('Ignoring saved imports: $error');
@@ -42,13 +56,19 @@ class ImportsController extends ChangeNotifier {
   }
 
   Future<void> attach(ImportsApi? api) async {
+    _generation++;
     _api = api;
     if (api == null) {
       _playlists = const [];
       _unsent = const {};
+      _deleted = const {};
       _matchedAgainst = null;
       try {
-        if (await _file.exists()) await _file.delete();
+        final deletion = _writes.then((_) async {
+          if (await _file.exists()) await _file.delete();
+        });
+        _writes = deletion.catchError((Object _) {});
+        await deletion;
       } on FileSystemException catch (error) {
         debugPrint('Could not delete saved imports: $error');
       }
@@ -59,30 +79,41 @@ class ImportsController extends ChangeNotifier {
   }
 
   /// Sends what's waiting, then takes in anything from other devices.
-  Future<void> sync() async {
+  Future<void> sync() {
     final api = _api;
-    if (api == null) return;
-    try {
-      for (final id in _unsent.toList()) {
-        final playlist = _playlists.where((p) => p.id == id).firstOrNull;
-        if (playlist != null) await api.save(playlist);
-        _unsent = {..._unsent}..remove(id);
+    final generation = _generation;
+    if (api == null) return Future.value();
+    return _serialize(() async {
+      if (generation != _generation) return;
+      try {
+        for (final id in _deleted.toList()) {
+          await api.delete(id);
+          if (generation != _generation) return;
+          _deleted = {..._deleted}..remove(id);
+          await _save();
+        }
+        for (final id in _unsent.toList()) {
+          await _uploadNow(id, api, generation);
+          if (generation != _generation) return;
+        }
+        final remote = await api.list();
+        if (generation != _generation) return;
+        final waiting = {
+          for (final playlist in _playlists)
+            if (_unsent.contains(playlist.id)) playlist.id: playlist,
+        };
+        _playlists = List.unmodifiable([
+          ...waiting.values,
+          ...remote.where(
+            (p) => !waiting.containsKey(p.id) && !_deleted.contains(p.id),
+          ),
+        ]);
+        await _save();
+        if (generation == _generation) notifyListeners();
+      } on Object catch (error) {
+        debugPrint('Could not sync imported playlists: $error');
       }
-      final remote = await api.list();
-      if (!identical(api, _api)) return;
-      final waiting = {
-        for (final playlist in _playlists)
-          if (_unsent.contains(playlist.id)) playlist.id: playlist,
-      };
-      _playlists = List.unmodifiable([
-        ...waiting.values,
-        ...remote.where((p) => !waiting.containsKey(p.id)),
-      ]);
-      await _save();
-      notifyListeners();
-    } on Object catch (error) {
-      debugPrint('Could not sync imported playlists: $error');
-    }
+    });
   }
 
   static String _newId() {
@@ -114,35 +145,58 @@ class ImportsController extends ChangeNotifier {
     await _store(playlist);
   }
 
+  Future<void> addSong(String playlistId, Song song) async {
+    final playlist = _playlists.where((p) => p.id == playlistId).firstOrNull;
+    if (playlist != null) await update(playlist.withSongAdded(song));
+  }
+
   Future<void> remove(String id) async {
+    final api = _api;
+    final generation = _generation;
+    _deleted = {..._deleted, id};
     _playlists = List.unmodifiable(_playlists.where((p) => p.id != id));
     _unsent = {..._unsent}..remove(id);
     await _save();
+    if (generation != _generation) return;
     notifyListeners();
-    try {
-      await _api?.delete(id);
-    } on Object catch (error) {
-      debugPrint('Could not delete an import from the server: $error');
-    }
+    if (api == null) return;
+    await _serialize(() async {
+      if (generation != _generation) return;
+      try {
+        await api.delete(id);
+        if (generation != _generation) return;
+        _deleted = {..._deleted}..remove(id);
+        await _save();
+      } on Object catch (error) {
+        debugPrint('Could not delete an import from the server: $error');
+      }
+    });
   }
 
   Future<void> _store(
     ImportedPlaylist playlist, {
     bool waitForServer = true,
   }) async {
+    final api = _api;
+    final generation = _generation;
     _unsent = {..._unsent, playlist.id};
     await _save();
+    if (generation != _generation) return;
     notifyListeners();
-    final upload = _upload(playlist);
+    if (api == null) return;
+    final upload = _serialize(() => _uploadNow(playlist.id, api, generation));
     if (waitForServer) await upload;
   }
 
-  Future<void> _upload(ImportedPlaylist playlist) async {
-    final api = _api;
-    if (api == null) return;
+  Future<void> _uploadNow(String id, ImportsApi api, int generation) async {
+    if (generation != _generation || _deleted.contains(id)) return;
+    final playlist = _playlists.where((p) => p.id == id).firstOrNull;
+    if (playlist == null) return;
     try {
       await api.save(playlist);
-      _unsent = {..._unsent}..remove(playlist.id);
+      if (generation != _generation) return;
+      final current = _playlists.where((p) => p.id == id).firstOrNull;
+      if (identical(current, playlist)) _unsent = {..._unsent}..remove(id);
       await _save();
     } on Object catch (error) {
       debugPrint('An imported playlist will be sent later: $error');
@@ -154,7 +208,9 @@ class ImportsController extends ChangeNotifier {
     if (identical(library, _matchedAgainst) || _playlists.isEmpty) return;
     _matchedAgainst = library;
     final matcher = TrackMatcher(library);
+    final generation = _generation;
     for (final playlist in _playlists) {
+      if (generation != _generation) return;
       final next = playlist.rematched(matcher);
       if (!identical(next, playlist)) await update(next);
     }
@@ -171,16 +227,20 @@ class ImportsController extends ChangeNotifier {
     ];
   }
 
-  Future<void> _save() async {
+  Future<void> _save() {
+    final snapshot = jsonEncode({
+      'playlists': [for (final p in _playlists) p.toJson()],
+      'unsent': _unsent.toList(),
+      'deleted': _deleted.toList(),
+    });
+    return _writes = _writes.then((_) => _write(snapshot));
+  }
+
+  Future<void> _write(String snapshot) async {
     try {
       final temp = File('${_file.path}.tmp');
       await temp.parent.create(recursive: true);
-      await temp.writeAsString(
-        jsonEncode({
-          'playlists': [for (final p in _playlists) p.toJson()],
-          'unsent': _unsent.toList(),
-        }),
-      );
+      await temp.writeAsString(snapshot);
       await temp.rename(_file.path);
     } on FileSystemException catch (error) {
       debugPrint('Could not save imports: $error');

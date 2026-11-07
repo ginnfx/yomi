@@ -20,8 +20,6 @@ import 'package:yomi/state/reports_controller.dart';
 import 'package:yomi/ui/theme.dart';
 import 'package:yomi/ui/widgets/wanted_songs_section.dart';
 
-import 'support/screen_harness.dart';
-
 Map<String, dynamic> _song(String title, int count) => {
   'artist': 'Mira',
   'title': title,

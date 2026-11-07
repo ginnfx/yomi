@@ -229,6 +229,7 @@ class SubsonicClient {
   bool _isFlushingOutbox = false;
 
   Future<void> _send(OutboxItem item) async {
+    _requireWritable();
     if (item.endpoint == _removeSongAction) {
       await _removeSong(
         item.params['playlistId'] as String,

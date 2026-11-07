@@ -10,6 +10,9 @@
 # phone in a file only the service can read; it never goes into the repository.
 set -eu
 
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+. "$SCRIPT_DIR/push_setup_common.sh"
+
 KEY_FILE=${1:-}
 TEAM_ID=${YOMI_TEAM_ID:-5W29Q45NKL}
 TOPIC=${YOMI_BUNDLE_ID:-com.brajanzalta.yomi}
@@ -33,34 +36,13 @@ openssl pkey -in "$KEY_FILE" -noout
 # The phone's shell can't make temporary files, so files are written here and copied.
 WORK=$(mktemp -d)
 trap 'rm -rf "$WORK"' EXIT
-cat > "$WORK/push.env" <<ENV
-export YOMI_APNS_KEY_FILE=$REMOTE_DIR/apns.p8
-export YOMI_APNS_KEY_ID=$KEY_ID
-export YOMI_APNS_TEAM_ID=$TEAM_ID
-export YOMI_APNS_TOPIC=$TOPIC
-ENV
 scp -O "$KEY_FILE" "homelab:$REMOTE_DIR/apns.p8"
-scp -O "$WORK/push.env" "homelab:$REMOTE_DIR/push.env"
-ssh homelab "chmod 600 $REMOTE_DIR/apns.p8 $REMOTE_DIR/push.env"
-
-# Make start.sh read push.env, once. Edited here and copied back, so it doesn't
-# depend on the phone's sed.
-if ! ssh homelab "grep -q push.env $REMOTE_DIR/start.sh"; then
-  scp -O "homelab:$REMOTE_DIR/start.sh" "$WORK/start.sh"
-  python3 - "$WORK/start.sh" <<'PY'
-import sys
-path = sys.argv[1]
-text = open(path).read()
-line = "[ -f ./push.env ] && . ./push.env\n"
-marker = "exec ./yomi-upload"
-if "push.env" not in text:
-    text = text.replace(marker, line + marker, 1)
-open(path, "w").write(text)
-PY
-  ssh homelab "cp $REMOTE_DIR/start.sh $REMOTE_DIR/start.sh.before-push"
-  scp -O "$WORK/start.sh" "homelab:$REMOTE_DIR/start.sh.new"
-  ssh homelab "chmod 755 $REMOTE_DIR/start.sh.new && mv $REMOTE_DIR/start.sh.new $REMOTE_DIR/start.sh"
-fi
+ssh homelab "chmod 600 $REMOTE_DIR/apns.p8"
+sync_push_settings "$WORK" \
+  "YOMI_APNS_KEY_FILE=$REMOTE_DIR/apns.p8" \
+  "YOMI_APNS_KEY_ID=$KEY_ID" \
+  "YOMI_APNS_TEAM_ID=$TEAM_ID" \
+  "YOMI_APNS_TOPIC=$TOPIC"
 
 # Restart; the watchdog brings it back within a minute.
 ssh homelab "$BB pkill -f '^./yomi-upload\$'" || true

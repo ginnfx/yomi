@@ -39,6 +39,7 @@ class AssistantController extends ChangeNotifier {
   AiApi? _api;
   List<ChatTurn> _turns = const [];
   bool _isThinking = false;
+  int _generation = 0;
   String? _error;
 
   List<ChatTurn> get turns => _turns;
@@ -48,10 +49,13 @@ class AssistantController extends ChangeNotifier {
 
   void attach(AiApi? api) {
     _api = api;
+    if (api == null) clear();
     notifyListeners();
   }
 
   void clear() {
+    _generation++;
+    _isThinking = false;
     _turns = const [];
     _error = null;
     notifyListeners();
@@ -61,6 +65,7 @@ class AssistantController extends ChangeNotifier {
     final text = question.trim();
     final api = _api;
     if (text.isEmpty || api == null || _isThinking) return;
+    final generation = _generation;
     _turns = List.unmodifiable([..._turns, ChatTurn.user(text)]);
     _isThinking = true;
     _error = null;
@@ -75,16 +80,20 @@ class AssistantController extends ChangeNotifier {
         topArtists: summary.topArtists,
         moods: summary.moods,
       );
+      if (generation != _generation) return;
       _turns = List.unmodifiable([
         ..._turns,
         ChatTurn.assistant(answer.matchedWith(index())),
       ]);
     } on Exception catch (error) {
+      if (generation != _generation) return;
       debugPrint('Assistant failed: $error');
       _error = _describe(error);
     } finally {
-      _isThinking = false;
-      notifyListeners();
+      if (generation == _generation) {
+        _isThinking = false;
+        notifyListeners();
+      }
     }
   }
 }

@@ -68,6 +68,7 @@ class _SearchPageState extends State<SearchPage> {
   /// Songs that fit the mood or description, shown beside title matches.
   List<Song> _vibeSongs = const [];
   bool _hasMore = false;
+  int _serverOffset = 0;
   Object? _error;
   bool _isLoading = false;
   int _generation = 0;
@@ -228,7 +229,7 @@ class _SearchPageState extends State<SearchPage> {
         results = await session.client.search(
           text,
           count: _pageSize,
-          offset: more ? _songs.length : 0,
+          offset: more ? _serverOffset : 0,
         );
       } on SubsonicException catch (error) {
         if (error.kind != ErrorKind.unreachable) rethrow;
@@ -236,13 +237,18 @@ class _SearchPageState extends State<SearchPage> {
         results = await session.client.search(
           text,
           count: _pageSize,
-          offset: more ? _songs.length : 0,
+          offset: more ? _serverOffset : 0,
         );
       }
       if (!mounted || generation != _generation) return;
       setState(() {
+        _serverOffset = (more ? _serverOffset : 0) + results.songs.length;
         if (more) {
-          _songs = [..._songs, ...results.songs];
+          final showing = {for (final song in _songs) song.id};
+          _songs = [
+            ..._songs,
+            ...results.songs.where((song) => !showing.contains(song.id)),
+          ];
         } else {
           _artists = results.artists;
           // Songs already showing stay where they are, so a result can't change just as

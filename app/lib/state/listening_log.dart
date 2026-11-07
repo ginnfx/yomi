@@ -28,6 +28,7 @@ class ListeningLog extends ChangeNotifier {
   int _cursor = 0;
   int _uploadedUntilMs = 0;
   bool _isSyncing = false;
+  int _generation = 0;
   bool _hasCheckedImported = false;
 
   List<ListenEvent> get events => _merged;
@@ -63,8 +64,10 @@ class ListeningLog extends ChangeNotifier {
   Future<void> attach(HistoryApi? api, String? account) async {
     _api = api;
     if (account == _account) return;
+    _generation++;
     final previous = _account;
     _account = account;
+    _remotePlays = null;
     _byId = const {};
     _merged = const [];
     _imported = ImportedHistory.empty();
@@ -90,11 +93,13 @@ class ListeningLog extends ChangeNotifier {
   }
 
   Future<void> _read(String account) async {
+    final generation = _generation;
     try {
       final file = _fileFor(account);
       if (await file.exists()) {
         final text = await file.readAsString();
         final saved = await Isolate.run(() => _decode(text));
+        if (generation != _generation) return;
         _cursor = saved.cursor;
         _uploadedUntilMs = saved.uploadedUntilMs;
         _setEvents({for (final event in saved.events) event.id: event});
@@ -102,11 +107,13 @@ class ListeningLog extends ChangeNotifier {
       final importedFile = _importedFileFor(account);
       if (await importedFile.exists()) {
         final text = await importedFile.readAsString();
-        _imported = await Isolate.run(
+        final imported = await Isolate.run(
           () => ImportedHistory.fromJson(
             jsonDecode(text) as Map<String, dynamic>,
           ),
         );
+        if (generation != _generation) return;
+        _imported = imported;
       }
     } on Object catch (error) {
       // A saved copy only: the next sync rebuilds it from the server.
@@ -127,11 +134,14 @@ class ListeningLog extends ChangeNotifier {
     final api = _api;
     final account = _account;
     if (api == null || account == null || _isSyncing) return;
+    final generation = _generation;
     _isSyncing = true;
     try {
       _addLocalPlays();
-      await _upload(api);
-      await _download(api);
+      await _upload(api, generation);
+      if (generation != _generation) return;
+      await _download(api, generation);
+      if (generation != _generation) return;
       await _pullImported(api, account);
       if (account == _account) await _save(account);
     } on Object catch (error) {
@@ -167,7 +177,7 @@ class ListeningLog extends ChangeNotifier {
 
   /// Sends everything from the last upload's time on. Including that exact moment means a
   /// play in the same millisecond isn't missed; the server ignores what it already has.
-  Future<void> _upload(HistoryApi api) async {
+  Future<void> _upload(HistoryApi api, int generation) async {
     final waiting = [
       for (final event in _merged)
         if (event.at.millisecondsSinceEpoch >= _uploadedUntilMs) event,
@@ -179,13 +189,15 @@ class ListeningLog extends ChangeNotifier {
         end > waiting.length ? waiting.length : end,
       );
       await api.upload(batch);
+      if (generation != _generation) return;
       _uploadedUntilMs = batch.last.at.millisecondsSinceEpoch;
     }
   }
 
-  Future<void> _download(HistoryApi api) async {
+  Future<void> _download(HistoryApi api, int generation) async {
     while (true) {
       final page = await api.read(_cursor);
+      if (generation != _generation) return;
       // Going backwards means the server's log was replaced. It's lost what it had, so
       // everything goes up again on the next sync.
       if (page.next < _cursor) _uploadedUntilMs = 0;
@@ -253,13 +265,17 @@ class ListeningLog extends ChangeNotifier {
     if (account == null) return 0;
     final before = _imported.seen.length;
     final current = _imported;
+    final generation = _generation;
+    final api = _api;
     final next = await Isolate.run(() => current.adding(rows));
+    if (generation != _generation) return 0;
     _imported = next;
     await _saveImportedFile(account);
     notifyListeners();
     try {
       final body = await Isolate.run(() => jsonEncode(next.toJson()));
-      await _api?.saveImported(body);
+      if (generation != _generation) return 0;
+      await api?.saveImported(body);
     } on Object catch (error) {
       debugPrint('Could not send imported history to the server: $error');
     }

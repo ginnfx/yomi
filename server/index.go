@@ -28,6 +28,7 @@ type indexEntry struct {
 	SHA256 string `json:"sha256"`
 	Path   string `json:"path"`
 	Size   int64  `json:"size"`
+	ModNs  int64  `json:"modNs,omitempty"`
 }
 
 // HashIndex maps content hashes to stored files, persisted as an append-only JSONL file
@@ -39,6 +40,8 @@ type HashIndex struct {
 	byHash    map[string]indexEntry
 	byPath    map[string]indexEntry
 	isSeeding atomic.Bool
+	seedMu    sync.Mutex
+	refreshMu sync.Mutex
 }
 
 // openHashIndex loads the index file, skipping damaged lines such as a torn final write.
@@ -65,8 +68,7 @@ func openHashIndex(root, file string) (*HashIndex, error) {
 			log.Printf("index: skipping damaged line")
 			continue
 		}
-		index.byHash[entry.SHA256] = entry
-		index.byPath[entry.Path] = entry
+		index.setLocked(entry)
 	}
 	return index, scanner.Err()
 }
@@ -74,24 +76,102 @@ func openHashIndex(root, file string) (*HashIndex, error) {
 // Lookup returns the stored file for hash. A file deleted since it was indexed doesn't
 // count, otherwise it could never be uploaded again.
 func (i *HashIndex) Lookup(hash string) (indexEntry, bool) {
+	for {
+		i.mu.RLock()
+		entry, ok := i.byHash[hash]
+		i.mu.RUnlock()
+		if !ok {
+			return indexEntry{}, false
+		}
+		info, err := os.Stat(filepath.Join(i.root, entry.Path))
+		if err == nil && info.Size() == entry.Size && info.ModTime().UnixNano() == entry.ModNs {
+			return entry, true
+		}
+		i.refresh(entry.Path)
+		i.mu.RLock()
+		next, exists := i.byHash[hash]
+		i.mu.RUnlock()
+		// An unreadable or actively changing file cannot establish a duplicate.
+		if exists && next == entry {
+			return indexEntry{}, false
+		}
+	}
+}
+
+func (i *HashIndex) setLocked(entry indexEntry) {
+	if old, ok := i.byPath[entry.Path]; ok && old.SHA256 != entry.SHA256 {
+		delete(i.byHash, old.SHA256)
+		for path, other := range i.byPath {
+			if path != entry.Path && other.SHA256 == old.SHA256 {
+				i.byHash[other.SHA256] = other
+				break
+			}
+		}
+	}
+	i.byPath[entry.Path] = entry
+	i.byHash[entry.SHA256] = entry
+}
+
+func (i *HashIndex) refresh(path string) {
+	i.refreshMu.Lock()
+	defer i.refreshMu.Unlock()
+	full := filepath.Join(i.root, path)
+	info, err := os.Stat(full)
+	if err != nil {
+		i.mu.Lock()
+		if old, ok := i.byPath[path]; ok {
+			delete(i.byPath, path)
+			delete(i.byHash, old.SHA256)
+			for _, other := range i.byPath {
+				if other.SHA256 == old.SHA256 {
+					i.byHash[other.SHA256] = other
+					break
+				}
+			}
+		}
+		i.mu.Unlock()
+		return
+	}
+	hash, size, err := hashFile(full)
+	if err != nil {
+		return
+	}
+	after, err := os.Stat(full)
+	if err != nil || info.Size() != after.Size() || info.ModTime() != after.ModTime() {
+		return
+	}
+	if err := i.Add(indexEntry{SHA256: hash, Path: path, Size: size, ModNs: info.ModTime().UnixNano()}); err != nil {
+		log.Printf("index: refresh %s: %v", path, err)
+	}
+}
+
+// LookupPath checks a particular replica destination, including duplicate content paths.
+func (i *HashIndex) LookupPath(path string) (indexEntry, bool) {
 	i.mu.RLock()
-	entry, ok := i.byHash[hash]
+	entry, ok := i.byPath[path]
 	i.mu.RUnlock()
+	info, err := os.Stat(filepath.Join(i.root, path))
+	if err != nil {
+		return indexEntry{}, false
+	}
+	if !ok || info.Size() != entry.Size || info.ModTime().UnixNano() != entry.ModNs {
+		i.refresh(path)
+		i.mu.RLock()
+		entry, ok = i.byPath[path]
+		i.mu.RUnlock()
+	}
 	if !ok {
 		return indexEntry{}, false
 	}
-	if _, err := os.Stat(filepath.Join(i.root, entry.Path)); err != nil {
-		i.mu.Lock()
-		delete(i.byHash, hash)
-		delete(i.byPath, entry.Path)
-		i.mu.Unlock()
-		return indexEntry{}, false
-	}
-	return entry, true
+	info, err = os.Stat(filepath.Join(i.root, path))
+	return entry, err == nil && info.Size() == entry.Size && info.ModTime().UnixNano() == entry.ModNs
 }
 
 // Add records a stored file and appends it to the index file.
 func (i *HashIndex) Add(entry indexEntry) error {
+	if info, err := os.Stat(filepath.Join(i.root, entry.Path)); err == nil && entry.ModNs == 0 {
+		entry.ModNs = info.ModTime().UnixNano()
+	}
 	line, err := json.Marshal(entry)
 	if err != nil {
 		return err
@@ -106,8 +186,7 @@ func (i *HashIndex) Add(entry indexEntry) error {
 	if _, err := handle.Write(append(line, '\n')); err != nil {
 		return err
 	}
-	i.byHash[entry.SHA256] = entry
-	i.byPath[entry.Path] = entry
+	i.setLocked(entry)
 	return nil
 }
 
@@ -124,9 +203,24 @@ func (i *HashIndex) Count() int {
 // Entries returns a copy of every indexed file.
 func (i *HashIndex) Entries() []indexEntry {
 	i.mu.RLock()
+	paths := make([]string, 0, len(i.byPath))
+	for path := range i.byPath {
+		paths = append(paths, path)
+	}
+	i.mu.RUnlock()
+	for _, path := range paths {
+		i.mu.RLock()
+		entry := i.byPath[path]
+		i.mu.RUnlock()
+		info, err := os.Stat(filepath.Join(i.root, path))
+		if err != nil || info.Size() != entry.Size || info.ModTime().UnixNano() != entry.ModNs {
+			i.refresh(path)
+		}
+	}
+	i.mu.RLock()
 	defer i.mu.RUnlock()
-	entries := make([]indexEntry, 0, len(i.byHash))
-	for _, entry := range i.byHash {
+	entries := make([]indexEntry, 0, len(i.byPath))
+	for _, entry := range i.byPath {
 		entries = append(entries, entry)
 	}
 	return entries
@@ -135,6 +229,8 @@ func (i *HashIndex) Entries() []indexEntry {
 // Seed hashes audio files not yet in the index and removes temp files left by a crash.
 // It runs one file at a time because the server's CPU is shared with playback.
 func (i *HashIndex) Seed() {
+	i.seedMu.Lock()
+	defer i.seedMu.Unlock()
 	i.isSeeding.Store(true)
 	defer i.isSeeding.Store(false)
 	err := filepath.WalkDir(i.root, func(path string, entry fs.DirEntry, err error) error {
@@ -166,19 +262,16 @@ func (i *HashIndex) Seed() {
 
 func (i *HashIndex) seedFile(path, relative string) {
 	i.mu.RLock()
-	_, known := i.byPath[relative]
+	entry, known := i.byPath[relative]
 	i.mu.RUnlock()
-	if known {
-		return
-	}
-	hash, size, err := hashFile(path)
+	info, err := os.Stat(path)
 	if err != nil {
-		log.Printf("index: could not hash %s: %v", relative, err)
 		return
 	}
-	if err := i.Add(indexEntry{SHA256: hash, Path: relative, Size: size}); err != nil {
-		log.Printf("index: could not record %s: %v", relative, err)
+	if known && entry.Size == info.Size() && entry.ModNs == info.ModTime().UnixNano() {
+		return
 	}
+	i.refresh(relative)
 }
 
 func isTempFile(name string) bool {

@@ -8,6 +8,8 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:provider/provider.dart';
 import 'package:yomi/core/recommendations.dart';
+import 'package:yomi/core/models.dart';
+import 'package:yomi/state/session.dart';
 import 'package:yomi/core/subsonic_client.dart';
 import 'package:yomi/state/ai_controller.dart';
 import 'package:yomi/state/catalog_controller.dart';
@@ -20,12 +22,47 @@ import 'package:yomi/ui/pages/search_page.dart';
 import 'support/screen_harness.dart';
 
 class _Home extends ChangeNotifier implements HomeController {
+  _Home([this.initialShelves = const []]);
+  final List<HomeShelf> initialShelves;
   @override
-  List<HomeShelf> get shelves => const [];
+  List<HomeShelf> get shelves => initialShelves;
   @override
   TasteProfile get taste => TasteProfile.empty;
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
+
+class _PagedClient extends SubsonicClient {
+  _PagedClient()
+    : super(baseUrl: 'http://server', username: 'u', password: 'p');
+  final offsets = <int>[];
+  @override
+  Future<SearchResults> search(
+    String query, {
+    int count = 40,
+    int offset = 0,
+  }) async {
+    offsets.add(offset);
+    return SearchResults(
+      songs: [
+        for (var i = offset; i < offset + count && i < 80; i++)
+          Song(
+            id: '$i',
+            title: 'Match $i',
+            artist: 'X',
+            album: 'A',
+            durationSeconds: 1,
+          ),
+      ],
+    );
+  }
+}
+
+class _PagedSession extends FakeSession {
+  _PagedSession(this.paged);
+  final _PagedClient paged;
+  @override
+  SubsonicClient get client => paged;
 }
 
 void main() {
@@ -101,6 +138,55 @@ void main() {
       ),
     ],
     child: const Material(child: SearchPage()),
+  );
+
+  testWidgets(
+    'server paging counts server rows separately from local matches',
+    (tester) async {
+      final client = _PagedClient();
+      final unloaded = CatalogController(
+        directory: Directory('${dir.path}/unloaded'),
+      );
+      const local = Song(
+        id: '79',
+        title: 'Match 79',
+        artist: 'X',
+        album: 'A',
+        durationSeconds: 1,
+      );
+      await pumpScreen(
+        tester,
+        const Material(child: SearchPage()),
+        size: const Size(800, 2400),
+        extraProviders: [
+          ChangeNotifierProvider<SessionController>.value(
+            value: _PagedSession(client),
+          ),
+          ChangeNotifierProvider<CatalogController>.value(value: unloaded),
+          ChangeNotifierProvider<HomeController>.value(
+            value: _Home([
+              const HomeShelf(ShelfKind.jumpBack, 'Local', [local]),
+            ]),
+          ),
+          ChangeNotifierProvider<AiController>.value(
+            value: AiController(file: File('${dir.path}/labels.json')),
+          ),
+        ],
+      );
+      await tester.enterText(find.byType(TextField).first, 'Match');
+      await tester.pump(const Duration(milliseconds: 400));
+      await settleScreen(tester);
+      final more = find.text('Show more songs');
+      await tester.scrollUntilVisible(
+        more,
+        800,
+        scrollable: find.byType(Scrollable).first,
+      );
+      await tester.tap(more);
+      await settleScreen(tester);
+      expect(client.offsets, [0, 40]);
+      expect(find.text('Match 40'), findsOneWidget);
+    },
   );
 
   testWidgets('a typo finds the song straight away, with no server search', (

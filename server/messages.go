@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -390,13 +391,61 @@ func (m *MessageStore) saveImage(user, path string, image []byte, mark func(*Pro
 	return m.saveStateLocked()
 }
 
+// DeleteImage removes the authenticated user's picture and its public metadata.
+func (m *MessageStore) DeleteImage(user string, banner bool) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	path := m.avatarFile(user)
+	if banner {
+		path = m.bannerFile(user)
+	}
+	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	profile := m.state.Profiles[user]
+	profile.User = user
+	if banner {
+		profile.HasBanner = false
+		profile.BannerVersion = 0
+	} else {
+		profile.HasAvatar = false
+		profile.AvatarVersion = 0
+	}
+	m.state.Profiles[user] = profile
+	return m.saveStateLocked()
+}
+
+func (s *Server) handleDeleteAvatar(w http.ResponseWriter, r *http.Request) {
+	s.deleteProfileImage(w, r, false)
+}
+func (s *Server) handleDeleteBanner(w http.ResponseWriter, r *http.Request) {
+	s.deleteProfileImage(w, r, true)
+}
+func (s *Server) deleteProfileImage(w http.ResponseWriter, r *http.Request, banner bool) {
+	user, ok := s.socialUser(w, r)
+	if !ok {
+		return
+	}
+	if err := s.Messages.DeleteImage(user, banner); err != nil {
+		writeError(w, 500, "could not remove the picture")
+		return
+	}
+	writeJSON(w, 200, map[string]string{"status": "ok"})
+}
+
 // AddDevice remembers where to push for a user, dropping their oldest beyond the limit.
 func (m *MessageStore) AddDevice(user, token string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	// A physical device belongs to the currently signed-in account.
+	for owner, tokens := range m.state.Devices {
+		if owner != user {
+			m.state.Devices[owner] = slices.DeleteFunc(tokens, func(existing string) bool { return sameDeviceToken(existing, token) })
+		}
+	}
 	kept := make([]string, 0, maxDeviceTokens)
 	for _, existing := range m.state.Devices[user] {
-		if existing != token {
+		if !sameDeviceToken(existing, token) {
 			kept = append(kept, existing)
 		}
 	}
@@ -406,6 +455,12 @@ func (m *MessageStore) AddDevice(user, token string) error {
 	}
 	m.state.Devices[user] = kept
 	return m.saveStateLocked()
+}
+
+func sameDeviceToken(a, b string) bool {
+	ak, av := splitToken(a)
+	bk, bv := splitToken(b)
+	return ak == bk && av == bv
 }
 
 // RemoveDevices forgets tokens the push service says are dead.
@@ -418,7 +473,16 @@ func (m *MessageStore) RemoveDevices(user string, dead []string) error {
 	}
 	kept := make([]string, 0)
 	for _, token := range m.state.Devices[user] {
-		if !gone[token] {
+		remove := gone[token]
+		if !remove {
+			for candidate := range gone {
+				if sameDeviceToken(token, candidate) {
+					remove = true
+					break
+				}
+			}
+		}
+		if !remove {
 			kept = append(kept, token)
 		}
 	}
@@ -822,4 +886,36 @@ func (s *Server) handleRegisterDevice(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+func (s *Server) handleUnregisterDevice(w http.ResponseWriter, r *http.Request) {
+	user, ok := s.socialUser(w, r)
+	if !ok {
+		return
+	}
+	var request struct {
+		Token string `json:"token"`
+		Kind  string `json:"kind"`
+	}
+	if !decodeBody(w, r, &request) {
+		return
+	}
+	token := strings.TrimSpace(request.Token)
+	if token == "" || len(token) > maxTokenBytes {
+		writeError(w, 400, "send a device token")
+		return
+	}
+	switch request.Kind {
+	case "", "fcm":
+	case tokenKindAPNs, tokenKindAPNsSandbox:
+		token = request.Kind + ":" + token
+	default:
+		writeError(w, 400, "unknown push service")
+		return
+	}
+	if err := s.Messages.RemoveDevices(user, []string{token}); err != nil {
+		writeError(w, 500, "could not remove the device")
+		return
+	}
+	writeJSON(w, 200, map[string]string{"status": "ok"})
 }

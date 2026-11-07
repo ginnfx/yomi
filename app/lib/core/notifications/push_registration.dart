@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 typedef DeviceRegistrar = Future<bool> Function({
   required String token,
@@ -15,12 +16,21 @@ typedef DeviceRegistrar = Future<bool> Function({
 class PushRegistration {
   PushRegistration({
     required this.register,
+    required this.unregister,
+    this.isEnabled = true,
+    SharedPreferences? prefs,
     MethodChannel? channel,
     bool? isSupported,
-  }) : _channel = channel ?? const MethodChannel('yomi/push'),
+  }) : _prefs = prefs,
+       _channel = channel ?? const MethodChannel('yomi/push'),
        isSupported = isSupported ?? (Platform.isIOS || Platform.isAndroid);
 
+  final SharedPreferences? _prefs;
   final DeviceRegistrar register;
+  final DeviceRegistrar unregister;
+  bool isEnabled;
+  Future<void> _pending = Future.value();
+  ({String token, String kind})? _registeredDevice;
   final MethodChannel _channel;
   final bool isSupported;
 
@@ -33,6 +43,15 @@ class PushRegistration {
 
   void start() {
     if (!isSupported) return;
+    final savedToken = _prefs?.getString('pushDeviceToken');
+    final savedKind = _prefs?.getString('pushDeviceKind');
+    if (savedToken != null && savedKind != null) {
+      _device = (token: savedToken, kind: savedKind);
+      _registeredDevice = (
+        token: _prefs?.getString('pushRegisteredToken') ?? savedToken,
+        kind: _prefs?.getString('pushRegisteredKind') ?? savedKind,
+      );
+    }
     _channel.setMethodCallHandler((call) async {
       if (call.method != 'token') return;
       final arguments = call.arguments;
@@ -48,6 +67,8 @@ class PushRegistration {
           _ => 'apns',
         },
       );
+      await _prefs?.setString('pushDeviceToken', _device!.token);
+      await _prefs?.setString('pushDeviceKind', _device!.kind);
       _sentToken = null;
       await _send();
     });
@@ -56,7 +77,7 @@ class PushRegistration {
   /// Call once notifications are allowed. Registers with Apple, and with the
   /// server whenever it is reachable.
   Future<void> activate() async {
-    if (!isSupported) return;
+    if (!isSupported || !isEnabled) return;
     try {
       await _channel.invokeMethod<void>('register');
     } on PlatformException catch (error) {
@@ -75,10 +96,54 @@ class PushRegistration {
     _canRegister = false;
   }
 
-  Future<void> _send() async {
+  /// Applies the user's preference and removes any server registration before returning.
+  Future<void> setEnabled(bool enabled) {
+    isEnabled = enabled;
+    return _send();
+  }
+
+  Future<void> deactivate() => setEnabled(false);
+
+  Future<void> _send() {
+    final next = _pending.then((_) => _reconcile());
+    _pending = next.then<void>(
+      (_) {},
+      onError: (Object error) {
+        debugPrint('Could not update push registration: $error');
+      },
+    );
+    return _pending;
+  }
+
+  Future<void> _reconcile() async {
+    if (!isEnabled) {
+      final registered = _registeredDevice ?? _device;
+      if (registered != null &&
+          _canRegister &&
+          await unregister(token: registered.token, kind: registered.kind)) {
+        _registeredDevice = null;
+        await _prefs?.remove('pushRegisteredToken');
+        await _prefs?.remove('pushRegisteredKind');
+        _sentToken = null;
+      }
+      return;
+    }
     final device = _device;
+    final old = _registeredDevice;
+    if (old != null && device != null && old != device && _canRegister) {
+      if (!await unregister(token: old.token, kind: old.kind)) return;
+      _registeredDevice = null;
+      await _prefs?.remove('pushRegisteredToken');
+      await _prefs?.remove('pushRegisteredKind');
+      _sentToken = null;
+    }
     if (device == null || !_canRegister || _sentToken == device.token) return;
     final isDone = await register(token: device.token, kind: device.kind);
-    if (isDone) _sentToken = device.token;
+    if (isDone) {
+      _sentToken = device.token;
+      _registeredDevice = device;
+      await _prefs?.setString('pushRegisteredToken', device.token);
+      await _prefs?.setString('pushRegisteredKind', device.kind);
+    }
   }
 }

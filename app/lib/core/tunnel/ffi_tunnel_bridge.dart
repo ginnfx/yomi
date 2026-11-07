@@ -86,12 +86,18 @@ class FfiTunnelBridge implements TunnelBridge {
 
   @override
   Future<String> state() async {
-    final library = _Library(libraryPath);
-    return library.takeText(library.state()) ?? 'NoState';
+    final path = libraryPath;
+    return Isolate.run(() {
+      final library = _Library(path);
+      return library.takeText(library.state()) ?? 'NoState';
+    });
   }
 
   @override
-  Future<void> networkChanged() async => _Library(libraryPath).networkChanged();
+  Future<void> networkChanged() async {
+    final path = libraryPath;
+    await Isolate.run(() => _Library(path).networkChanged());
+  }
 
   @override
   Future<void> stop() async {

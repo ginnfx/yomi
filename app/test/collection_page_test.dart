@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -12,6 +13,8 @@ import 'package:yomi/state/home_controller.dart';
 import 'package:yomi/state/offline_keeper.dart';
 import 'package:yomi/state/playlist_covers_controller.dart';
 import 'package:yomi/core/models.dart';
+import 'package:yomi/core/subsonic_client.dart';
+import 'package:yomi/state/session.dart';
 import 'package:yomi/state/messages_controller.dart';
 import 'package:yomi/ui/pages/collection_page.dart';
 import 'package:yomi/ui/widgets/song_tile.dart';
@@ -73,6 +76,25 @@ class _FakeAi extends ChangeNotifier implements AiController {
   SongTag? tagFor(Song song) => null;
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
+
+class _RemovalClient extends SubsonicClient {
+  _RemovalClient()
+    : super(baseUrl: 'http://server', username: 'u', password: 'p');
+  final gate = Completer<void>();
+  @override
+  Future<void> removeSongFromPlaylist(
+    String playlistId,
+    Song song,
+    int shownIndex,
+  ) => gate.future;
+}
+
+class _RemovalSession extends FakeSession {
+  _RemovalSession(this.removalClient);
+  final _RemovalClient removalClient;
+  @override
+  SubsonicClient get client => removalClient;
 }
 
 Widget _album() => CollectionPage(
@@ -152,6 +174,54 @@ void main() {
     expect(find.text('Add to Road trip'), findsOneWidget);
     expect(find.byTooltip('Close'), findsOneWidget);
   });
+
+  testWidgets(
+    'swipe waits for removal and removes the dismissed row synchronously',
+    (tester) async {
+      final client = _RemovalClient();
+      await pumpScreen(
+        tester,
+        CollectionPage(
+          title: 'Road trip',
+          subtitle: '',
+          playlist: const Playlist(
+            id: 'p1',
+            name: 'Road trip',
+            songCount: 6,
+            durationSeconds: 1000,
+          ),
+          savedSongs: _songs,
+          loadSongs: () async => _songs,
+        ),
+        size: _phone,
+        extraProviders: [
+          ChangeNotifierProvider<SessionController>.value(
+            value: _RemovalSession(client),
+          ),
+          ChangeNotifierProvider<OfflineKeeper>.value(value: _FakeKeeper()),
+          ChangeNotifierProvider<PlaylistCoversController>.value(
+            value: _FakeCovers(),
+          ),
+          ChangeNotifierProvider<CatalogController>.value(
+            value: _FakeCatalog(),
+          ),
+          ChangeNotifierProvider<HomeController>.value(value: _FakeHome()),
+          ChangeNotifierProvider<AiController>.value(value: _FakeAi()),
+        ],
+      );
+      final first = find.byType(Dismissible).first;
+      await tester.ensureVisible(first);
+      await tester.drag(first, const Offset(-500, 0));
+      await tester.pump(const Duration(seconds: 1));
+      expect(tester.takeException(), isNull);
+      client.gate.complete();
+      await tester.pump();
+      await tester.pump(const Duration(seconds: 1));
+      await tester.pump();
+      expect(tester.takeException(), isNull);
+      expect(find.text('Track 1'), findsNothing);
+    },
+  );
 
   // These reference images were rendered on macOS, like the other screen goldens.
   testWidgets('screenshot', (tester) async {

@@ -176,6 +176,7 @@ func TestOnlyAdminsResolveOrDismiss(t *testing.T) {
 
 func TestAnyoneCanMarkAMissingSongAdded(t *testing.T) {
 	env := newReportsEnv(t)
+	env.songPath["new1"] = "new.mp3"
 	_, data := env.call(t, http.MethodPost, "/v1/reports", "alice", map[string]any{"kind": "missing_song", "artist": "A", "title": "T"})
 	var created Report
 	_ = json.Unmarshal(data, &created)

@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:io' show File;
 
 import 'messages_controller.dart';
 import 'profile_controller.dart';
@@ -22,6 +21,8 @@ class ProfileSync {
   String? _publishedAvatar;
   String? _publishedBanner;
   bool _isRestoring = false;
+  int _generation = 0;
+  Future<void> _pending = Future.value();
 
   void start() {
     messages.addListener(_restoreOnce);
@@ -35,25 +36,41 @@ class ProfileSync {
 
   /// Pictures are only uploaded when they changed, not on every edit of the bio.
   void publish() {
-    if (_isRestoring || !profile.hasContent) return;
-    final avatar = profile.avatarFile;
-    final banner = profile.bannerFile;
-    final avatarChanged = avatar != null && avatar.path != _publishedAvatar;
-    final bannerChanged = banner != null && banner.path != _publishedBanner;
-    unawaited(
-      _send(avatarChanged ? avatar : null, bannerChanged ? banner : null),
-    );
+    if (_isRestoring ||
+        (!profile.hasContent &&
+            !profile.avatarRemovalPending &&
+            !profile.bannerRemovalPending))
+      return;
+    final generation = _generation;
+    _pending = _pending.then((_) => _send(generation)).catchError((
+      Object error,
+    ) {
+      // Keep pending edits for the next connection or profile change.
+    });
   }
 
-  Future<void> _send(File? avatar, File? banner) async {
+  Future<void> _send(int generation) async {
+    if (generation != _generation) return;
+    final avatarFile = profile.avatarFile;
+    final bannerFile = profile.bannerFile;
+    final avatar = avatarFile?.path != _publishedAvatar ? avatarFile : null;
+    final banner = bannerFile?.path != _publishedBanner ? bannerFile : null;
+    final removeAvatar = profile.avatarRemovalPending;
+    final removeBanner = profile.bannerRemovalPending;
     final isDone = await messages.publishProfile(
       displayName: profile.nickname,
       bio: profile.bio,
       avatar: avatar,
       banner: banner,
+      removeAvatar: removeAvatar,
+      removeBanner: removeBanner,
     );
     // A failed upload is tried again with the next edit.
-    if (!isDone) return;
+    if (!isDone || generation != _generation) return;
+    await profile.acknowledgeImageRemovals(
+      avatar: removeAvatar,
+      banner: removeBanner,
+    );
     if (avatar != null) _publishedAvatar = avatar.path;
     if (banner != null) _publishedBanner = banner.path;
   }
@@ -65,35 +82,43 @@ class ProfileSync {
   }
 
   Future<void> _restore() async {
+    final generation = _generation;
     final mine = messages.profileOf(username());
     _isRestoring = true;
     try {
-      if (profile.hasContent) return;
+      if (generation != _generation || profile.hasContent) return;
       if (mine.displayName.isNotEmpty) {
         await profile.setNickname(mine.displayName);
       }
+      if (generation != _generation) return;
       if (mine.bio.isNotEmpty) await profile.setBio(mine.bio);
-      if (mine.hasAvatar) {
+      if (generation != _generation) return;
+      if (mine.hasAvatar && !profile.avatarRemovalPending) {
         final bytes = await messages.fetchPersonImage(mine, isBanner: false);
+        if (generation != _generation) return;
         if (bytes != null && profile.avatarFile == null) {
           await profile.restoreAvatar(bytes);
           _publishedAvatar = profile.avatarFile?.path;
         }
       }
-      if (mine.hasBanner) {
+      if (generation != _generation) return;
+      if (mine.hasBanner && !profile.bannerRemovalPending) {
         final bytes = await messages.fetchPersonImage(mine, isBanner: true);
+        if (generation != _generation) return;
         if (bytes != null && profile.bannerFile == null) {
           await profile.restoreBanner(bytes);
           _publishedBanner = profile.bannerFile?.path;
         }
       }
     } finally {
-      _isRestoring = false;
+      if (generation == _generation) _isRestoring = false;
     }
   }
 
   /// Forgets what was uploaded, for the next person to sign in.
   void reset() {
+    _generation++;
+    _isRestoring = false;
     _needsRestore = true;
     _publishedAvatar = null;
     _publishedBanner = null;

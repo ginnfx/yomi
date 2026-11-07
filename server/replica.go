@@ -53,6 +53,7 @@ func (s *Server) handleReplicaIndex(w http.ResponseWriter, r *http.Request) {
 	if !s.requireAdmin(w, r) {
 		return
 	}
+	s.Index.Seed()
 	entries := s.Index.Entries()
 	sort.Slice(entries, func(a, b int) bool { return entries[a].Path < entries[b].Path })
 	writeJSON(w, http.StatusOK, map[string]any{"entries": entries, "seeding": s.Index.Seeding()})
@@ -238,7 +239,7 @@ func (r *ReplicaSync) Sync(ctx context.Context) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		if _, have := r.Index.Lookup(entry.SHA256); have {
+		if local, have := r.Index.LookupPath(entry.Path); have && local.SHA256 == entry.SHA256 {
 			continue
 		}
 		// One bad file must not hold back the rest.

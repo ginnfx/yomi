@@ -27,6 +27,7 @@ jobs:
       - run: flutter pub get
       - run: flutter analyze --no-fatal-infos
       - run: flutter test --coverage
+      - run: python3 -m unittest discover -s scripts -p 'test_*.py'
 
   server:
     runs-on: ubuntu-latest

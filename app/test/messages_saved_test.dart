@@ -6,6 +6,16 @@ import 'package:yomi/state/messages_controller.dart';
 
 class _Server implements MessagingTransport {
   @override
+  Future<void> deleteAvatar() async {}
+  @override
+  Future<void> deleteBanner() async {}
+  @override
+  Future<void> unregisterDevice({
+    required String token,
+    required String kind,
+  }) async {}
+
+  @override
   Future<void> saveTaste({
     required List<String> topArtists,
     required List<String> topMoods,

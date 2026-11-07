@@ -6,6 +6,8 @@
 set -eu
 
 APP_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+. "$APP_DIR/scripts/push_setup_common.sh"
+SCRIPT_DIR="$APP_DIR/scripts"
 PACKAGE=${YOMI_ANDROID_PACKAGE:-com.yomi.yomi}
 PROJECT=${YOMI_FIREBASE_PROJECT:-}
 STATE_FILE="$HOME/.yomi-signing/firebase-project"
@@ -83,12 +85,8 @@ gcloud iam service-accounts keys create "$WORK/fcm-service-account.json" \
 echo "Giving the server its key"
 scp -O "$WORK/fcm-service-account.json" "homelab:$REMOTE_DIR/fcm-service-account.json"
 ssh homelab "chmod 600 $REMOTE_DIR/fcm-service-account.json"
-scp -O "homelab:$REMOTE_DIR/push.env" "$WORK/push.env"
-if ! grep -q YOMI_FCM_SERVICE_ACCOUNT "$WORK/push.env"; then
-  printf 'export YOMI_FCM_SERVICE_ACCOUNT=%s/fcm-service-account.json\n' "$REMOTE_DIR" >> "$WORK/push.env"
-  scp -O "$WORK/push.env" "homelab:$REMOTE_DIR/push.env.new"
-  ssh homelab "chmod 600 $REMOTE_DIR/push.env.new && mv $REMOTE_DIR/push.env.new $REMOTE_DIR/push.env"
-fi
+sync_push_settings "$WORK" \
+  "YOMI_FCM_SERVICE_ACCOUNT=$REMOTE_DIR/fcm-service-account.json"
 
 ssh homelab "/data/local/tmp/busybox pkill -f '^./yomi-upload\$'" || true
 for _ in $(seq 1 30); do

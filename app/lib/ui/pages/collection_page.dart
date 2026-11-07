@@ -100,6 +100,7 @@ class _CollectionPageState extends State<CollectionPage> {
   late Future<List<Song>> _songs = widget.loadSongs();
   late List<Song>? _lastSongs = widget.savedSongs;
   late String _title = widget.title;
+  int _dismissalEpoch = 0;
 
   StreamSubscription<String>? _updates;
   Timer? _reloadTimer;
@@ -260,13 +261,32 @@ class _CollectionPageState extends State<CollectionPage> {
     await player.playQueue(songs);
   }
 
-  Future<void> _removeAt(List<Song> songs, int index) async {
-    await context.read<SessionController>().client.removeSongFromPlaylist(
-      widget.playlist!.id,
-      songs[index],
-      index,
-    );
-    _reload();
+  Future<bool> _removeAt(List<Song> songs, int index) async {
+    try {
+      await context.read<SessionController>().client.removeSongFromPlaylist(
+        widget.playlist!.id,
+        songs[index],
+        index,
+      );
+      return true;
+    } on Exception catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(failureMessage(context, error))));
+      }
+      return false;
+    }
+  }
+
+  void _hideRemoved(List<Song> songs, int index) {
+    if (!mounted) return;
+    final remaining = [...songs]..removeAt(index);
+    setState(() {
+      _dismissalEpoch++;
+      _lastSongs = remaining;
+      _songs = Future.value(remaining);
+    });
   }
 
   void _openPlaylistMenu(List<Song> songs, String? pictureUrl) {
@@ -344,7 +364,9 @@ class _CollectionPageState extends State<CollectionPage> {
     return FutureBuilder<List<Song>>(
       future: _songs,
       builder: (context, snapshot) {
-        final loaded = snapshot.data;
+        final loaded = snapshot.connectionState == ConnectionState.done
+            ? snapshot.data
+            : null;
         if (loaded != null) _lastSongs = loaded;
         final known = _lastSongs;
         final songs = known ?? const <Song>[];
@@ -652,11 +674,15 @@ class _CollectionPageState extends State<CollectionPage> {
         final tile = SongTile(
           song: songs[i],
           onTap: () => player.playQueue(songs, startIndex: i),
-          onRemoveFromPlaylist: isEditable ? () => _removeAt(songs, i) : null,
+          onRemoveFromPlaylist: isEditable
+              ? () async {
+                  if (await _removeAt(songs, i)) _hideRemoved(songs, i);
+                }
+              : null,
         );
         if (!isEditable) return tile;
         return Dismissible(
-          key: ValueKey('${songs[i].id}-$i'),
+          key: ValueKey('$_dismissalEpoch-${songs[i].id}-$i'),
           direction: DismissDirection.endToStart,
           background: Container(
             margin: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
@@ -668,7 +694,8 @@ class _CollectionPageState extends State<CollectionPage> {
             padding: const EdgeInsets.only(right: 24),
             child: const Icon(Icons.remove_circle_outline_rounded),
           ),
-          onDismissed: (_) => _removeAt(songs, i),
+          confirmDismiss: (_) => _removeAt(songs, i),
+          onDismissed: (_) => _hideRemoved(songs, i),
           child: tile,
         );
       },
