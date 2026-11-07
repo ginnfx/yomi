@@ -129,7 +129,7 @@ class _DesktopPlayerState extends State<DesktopPlayer> {
                           : 'Play',
                       style: IconButton.styleFrom(
                         backgroundColor: context.accent,
-                        foregroundColor: Colors.black,
+                        foregroundColor: context.onAccent,
                       ),
                       onPressed: !canPlay || sync.isTakingOver && remote != null
                           ? null
@@ -141,12 +141,12 @@ class _DesktopPlayerState extends State<DesktopPlayer> {
                               }
                             },
                       icon: player.isBuffering
-                          ? const SizedBox(
+                          ? SizedBox(
                               width: 20,
                               height: 20,
                               child: CircularProgressIndicator(
                                 strokeWidth: 2,
-                                color: Colors.black,
+                                color: context.onAccent,
                               ),
                             )
                           : Icon(

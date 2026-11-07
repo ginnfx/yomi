@@ -74,9 +74,24 @@ class SettingsPage extends StatelessWidget {
               subtitle: 'Connection, invites and syncing between devices',
               page: const Column(
                 children: [
-                  ConnectionSection(),
-                  InviteSection(),
-                  ListeningSyncSection(),
+                  _SettingsRow(
+                    icon: Icons.wifi_rounded,
+                    title: 'Connection',
+                    subtitle: 'Server addresses and how Yomi reaches them',
+                    page: ConnectionSection(),
+                  ),
+                  _SettingsRow(
+                    icon: Icons.group_add_rounded,
+                    title: 'Invite friends',
+                    subtitle: 'Codes that let a friend join your server',
+                    page: InviteSection(),
+                  ),
+                  _SettingsRow(
+                    icon: Icons.devices_rounded,
+                    title: 'Listening sync',
+                    subtitle: 'Pick up where you left off on another device',
+                    page: ListeningSyncSection(),
+                  ),
                 ],
               ),
             ),

@@ -70,7 +70,7 @@ class _ConnectionSectionState extends State<ConnectionSection> {
               showSelectedIcon: false,
               style: SegmentedButton.styleFrom(
                 selectedBackgroundColor: context.accent,
-                selectedForegroundColor: Colors.black,
+                selectedForegroundColor: context.onAccent,
                 textStyle: yomiText(13, weight: FontWeight.w700),
               ),
               segments: const [
@@ -135,12 +135,12 @@ class _ConnectionSectionState extends State<ConnectionSection> {
             child: FilledButton(
               onPressed: _isSaving ? null : _save,
               child: _isSaving
-                  ? const SizedBox(
+                  ? SizedBox(
                       width: 18,
                       height: 18,
                       child: CircularProgressIndicator(
                         strokeWidth: 2,
-                        color: Colors.black,
+                        color: context.onAccent,
                       ),
                     )
                   : const Text('Save addresses'),

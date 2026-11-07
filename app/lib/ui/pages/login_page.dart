@@ -205,12 +205,12 @@ class _LoginPageState extends State<LoginPage> {
                       ),
                       onPressed: _isBusy ? null : _submit,
                       child: _isBusy
-                          ? const SizedBox(
+                          ? SizedBox(
                               width: 20,
                               height: 20,
                               child: CircularProgressIndicator(
                                 strokeWidth: 2,
-                                color: Colors.black,
+                                color: context.onAccent,
                               ),
                             )
                           : Text(
@@ -218,7 +218,7 @@ class _LoginPageState extends State<LoginPage> {
                               style: yomiText(
                                 16,
                                 weight: FontWeight.w800,
-                                color: Colors.black,
+                                color: context.onAccent,
                               ),
                             ),
                     ),

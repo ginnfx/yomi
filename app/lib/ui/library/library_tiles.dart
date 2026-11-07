@@ -11,7 +11,6 @@ import 'library_items.dart';
 
 const double _rowCover = 64;
 const double _coverRadius = 4;
-const Color _downloadsTile = Color(0xFF0D6B4E);
 
 /// A row of the library list, Spotify style: big cover, title, and "Playlist · ginnfx".
 class LibraryRow extends StatelessWidget {
@@ -162,7 +161,7 @@ class LibraryCover extends StatelessWidget {
     DownloadedSongsItem() => _IconTile(
       size: size,
       icon: Icons.arrow_downward_rounded,
-      colors: const [_downloadsTile, _downloadsTile],
+      colors: [context.accentDeep, context.accentDeep],
     ),
     PlaylistItem(:final playlist) => PlaylistCover(
       playlistId: playlist.id,

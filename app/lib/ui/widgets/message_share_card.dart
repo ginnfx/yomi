@@ -62,7 +62,7 @@ class _MessageShareCardState extends State<MessageShareCard> {
     final message = widget.message;
     final kind = shareKindOf(message) ?? ShareKind.song;
     final onAccent = widget.isMine;
-    final foreground = onAccent ? Colors.black : YomiColors.textPrimary;
+    final foreground = onAccent ? context.onAccent : YomiColors.textPrimary;
     final secondary = foreground.withValues(alpha: 0.7);
     return FutureBuilder<ShareInfo?>(
       future: _info,

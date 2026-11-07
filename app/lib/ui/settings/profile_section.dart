@@ -41,7 +41,7 @@ class ProfileAvatar extends StatelessWidget {
                 style: yomiText(
                   size * 0.4,
                   weight: FontWeight.w800,
-                  color: Colors.black,
+                  color: context.onAccent,
                 ),
               ),
             )
@@ -50,7 +50,7 @@ class ProfileAvatar extends StatelessWidget {
               style: yomiText(
                 size * 0.4,
                 weight: FontWeight.w800,
-                color: Colors.black,
+                color: context.onAccent,
               ),
             ),
     );

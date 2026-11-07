@@ -84,7 +84,7 @@ class SettingsSwitch extends StatelessWidget {
       contentPadding: EdgeInsets.zero,
       value: value,
       onChanged: onChanged,
-      activeThumbColor: Colors.black,
+      activeThumbColor: context.onAccent,
       activeTrackColor: context.accent,
       title: Text(title, style: yomiText(15, weight: FontWeight.w700)),
       subtitle: subtitle == null
@@ -178,7 +178,9 @@ class ChoicePills<T> extends StatelessWidget {
             labelStyle: yomiText(
               13,
               weight: FontWeight.w700,
-              color: selected == value ? Colors.black : YomiColors.textPrimary,
+              color: selected == value
+                  ? context.onAccent
+                  : YomiColors.textPrimary,
             ),
             onSelected: (_) => onSelected(value),
           ),

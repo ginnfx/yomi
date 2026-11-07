@@ -252,7 +252,7 @@ class _ConversationTile extends StatelessWidget {
                   style: yomiText(
                     12,
                     weight: FontWeight.w800,
-                    color: Colors.black,
+                    color: context.onAccent,
                   ),
                 ),
               ),
@@ -583,7 +583,7 @@ class _Bubble extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final foreground = isMine ? Colors.black : YomiColors.textPrimary;
+    final foreground = isMine ? context.onAccent : YomiColors.textPrimary;
     final hasShare = message.isShare;
     final quoted = repliedTo;
     return Align(

@@ -130,7 +130,7 @@ class PlayButton extends StatelessWidget {
           ),
           child: Icon(
             isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded,
-            color: Colors.black,
+            color: context.onAccent,
             size: 34,
           ),
         ),

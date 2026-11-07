@@ -415,7 +415,7 @@ class _MessagesButton extends StatelessWidget {
       icon: Badge(
         isLabelVisible: unread > 0,
         backgroundColor: context.accent,
-        textColor: Colors.black,
+        textColor: context.onAccent,
         label: Text('$unread'),
         child: const Icon(Icons.chat_bubble_outline_rounded),
       ),

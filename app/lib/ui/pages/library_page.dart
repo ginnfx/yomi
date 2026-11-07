@@ -355,7 +355,7 @@ class _Pill extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final foreground = isSelected ? Colors.black : YomiColors.textPrimary;
+    final foreground = isSelected ? context.onAccent : YomiColors.textPrimary;
     return Semantics(
       button: true,
       selected: isSelected,

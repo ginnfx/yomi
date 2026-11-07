@@ -275,7 +275,7 @@ class _Question extends StatelessWidget {
       ),
       child: Text(
         text,
-        style: yomiText(15, weight: FontWeight.w600, color: Colors.black),
+        style: yomiText(15, weight: FontWeight.w600, color: context.onAccent),
       ),
     ),
   );

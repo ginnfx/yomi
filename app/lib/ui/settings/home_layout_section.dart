@@ -134,7 +134,7 @@ class HomeLayoutSection extends StatelessWidget {
                   children: [
                     Switch(
                       value: !hidden.contains(order[i]),
-                      activeThumbColor: Colors.black,
+                      activeThumbColor: context.onAccent,
                       activeTrackColor: context.accent,
                       onChanged: (visible) {
                         final nextHidden = {...hidden};

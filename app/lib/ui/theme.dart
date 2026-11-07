@@ -129,6 +129,13 @@ class AccentPalette {
   final Color deep;
   final Color secondary;
 
+  /// Text and icons that sit on the accent: dark on light accents, white on dark
+  /// ones, so every colour stays readable and not just the green.
+  Color get onAccent =>
+      ThemeData.estimateBrightnessForColor(accent) == Brightness.light
+      ? Colors.black
+      : Colors.white;
+
   @override
   bool operator ==(Object other) =>
       other is AccentPalette && other.id == id && other.accent == accent;
@@ -223,6 +230,7 @@ extension YomiContext on BuildContext {
   Color get accent => YomiTheme.of(this).palette.accent;
   Color get accentDeep => YomiTheme.of(this).palette.deep;
   Color get accentSecondary => YomiTheme.of(this).palette.secondary;
+  Color get onAccent => YomiTheme.of(this).palette.onAccent;
 
   /// A calmer mid-tone between the deep and bright accent; used for large surfaces like the hero card.
   Color get accentSoft => Color.lerp(
@@ -269,11 +277,31 @@ ThemeData buildYomiTheme(
   final colors = YomiNeutrals.of(brightness);
   final isDark = brightness == Brightness.dark;
   final page = trueBlack && isDark ? YomiColors.trueBlack : colors.background;
-  final scheme = ColorScheme.fromSeed(
-    seedColor: palette.accent,
-    brightness: brightness,
-    surface: page,
-  ).copyWith(primary: palette.accent, onPrimary: Colors.black);
+  final scheme =
+      ColorScheme.fromSeed(
+        seedColor: palette.accent,
+        brightness: brightness,
+        surface: page,
+      ).copyWith(
+        primary: palette.accent,
+        onPrimary: palette.onAccent,
+        primaryContainer: palette.deep,
+        onPrimaryContainer: Color.lerp(palette.accent, Colors.white, 0.55),
+        secondary: palette.secondary,
+        onSecondary:
+            ThemeData.estimateBrightnessForColor(palette.secondary) ==
+                Brightness.light
+            ? Colors.black
+            : Colors.white,
+        // Tonal buttons and chips take the accent's hue, whichever accent it is.
+        secondaryContainer: Color.alphaBlend(
+          palette.accent.withValues(alpha: isDark ? 0.24 : 0.2),
+          colors.surfaceHigh,
+        ),
+        onSecondaryContainer: colors.textPrimary,
+        tertiary: palette.secondary,
+        surfaceTint: Colors.transparent,
+      );
   final base =
       (isDark ? Typography.whiteMountainView : Typography.blackMountainView)
           .apply(
@@ -332,6 +360,39 @@ ThemeData buildYomiTheme(
         borderSide: BorderSide(color: palette.accent, width: 1.5),
       ),
       hintStyle: TextStyle(color: colors.textSecondary),
+    ),
+    switchTheme: SwitchThemeData(
+      thumbColor: WidgetStateProperty.resolveWith(
+        (states) => states.contains(WidgetState.selected)
+            ? palette.onAccent
+            : colors.textSecondary,
+      ),
+      trackColor: WidgetStateProperty.resolveWith(
+        (states) => states.contains(WidgetState.selected)
+            ? palette.accent
+            : colors.surfaceHigh,
+      ),
+      trackOutlineColor: const WidgetStatePropertyAll(Colors.transparent),
+    ),
+    checkboxTheme: CheckboxThemeData(
+      fillColor: WidgetStateProperty.resolveWith(
+        (states) =>
+            states.contains(WidgetState.selected) ? palette.accent : null,
+      ),
+      checkColor: WidgetStatePropertyAll(palette.onAccent),
+    ),
+    progressIndicatorTheme: ProgressIndicatorThemeData(
+      color: palette.accent,
+      linearTrackColor: colors.surfaceHigh,
+    ),
+    textSelectionTheme: TextSelectionThemeData(
+      cursorColor: palette.accent,
+      selectionHandleColor: palette.accent,
+      selectionColor: palette.accent.withValues(alpha: 0.35),
+    ),
+    floatingActionButtonTheme: FloatingActionButtonThemeData(
+      backgroundColor: palette.accent,
+      foregroundColor: palette.onAccent,
     ),
     snackBarTheme: SnackBarThemeData(
       behavior: SnackBarBehavior.floating,

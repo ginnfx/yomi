@@ -178,11 +178,7 @@ class _Swatch extends StatelessWidget {
                 ),
               ),
               child: isSelected
-                  ? const Icon(
-                      Icons.check_rounded,
-                      color: Colors.black,
-                      size: 22,
-                    )
+                  ? Icon(Icons.check_rounded, color: palette.onAccent, size: 22)
                   : null,
             ),
           ),
