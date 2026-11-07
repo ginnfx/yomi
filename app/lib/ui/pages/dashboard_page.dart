@@ -7,6 +7,7 @@ import '../../state/reports_controller.dart';
 import '../../state/session.dart';
 import '../theme.dart';
 import '../widgets/reports_section.dart';
+import '../widgets/yomi_refresh.dart';
 
 void openDashboard(BuildContext context) {
   final session = context.read<SessionController>();
@@ -75,8 +76,7 @@ class DashboardPage extends StatelessWidget {
           style: yomiText(20, weight: FontWeight.w800),
         ),
       ),
-      body: RefreshIndicator(
-        color: context.accent,
+      body: YomiRefresh(
         onRefresh: dashboard.refresh,
         child: ListView(
           padding: EdgeInsets.fromLTRB(

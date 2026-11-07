@@ -29,12 +29,16 @@ import '../widgets/shimmer.dart';
 import '../widgets/profile_panel.dart';
 import 'collection_page.dart';
 import 'messages_page.dart';
+import '../widgets/yomi_refresh.dart';
 
 const int _shuffleBatch = 60;
 const int _quickPlaylistCount = 3;
 
 class HomePage extends StatefulWidget {
-  const HomePage({super.key, this.greetingTime});
+  const HomePage({super.key, this.greetingTime, this.scrollController});
+
+  /// Lets the shell scroll Home back to the top when its tab is tapped again.
+  final ScrollController? scrollController;
 
   /// Fixes the greeting's time, for screenshots that shouldn't change by the hour.
   final DateTime? greetingTime;
@@ -65,9 +69,7 @@ class _HomePageState extends State<HomePage> {
     final home = context.watch<HomeController>();
     return SafeArea(
       bottom: false,
-      child: RefreshIndicator(
-        color: context.accent,
-        backgroundColor: YomiColors.surfaceHigh,
+      child: YomiRefresh(
         onRefresh: () async {
           await context.read<HomeController>().refresh();
         },
@@ -130,6 +132,7 @@ class _HomePageState extends State<HomePage> {
 
   /// Only what's near the screen is built, so a long Home stays quick.
   Widget _lazyList(List<Widget Function()> items) => ListView.builder(
+    controller: widget.scrollController,
     itemCount: items.length,
     itemBuilder: (_, i) => items[i](),
   );

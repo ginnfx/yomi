@@ -12,6 +12,7 @@ import '../widgets/person_avatar.dart';
 import '../widgets/song_picker_sheet.dart';
 import 'collection_page.dart';
 import 'friend_profile_page.dart';
+import '../widgets/yomi_refresh.dart';
 
 void openMessages(BuildContext context) {
   Navigator.of(
@@ -42,8 +43,7 @@ class MessagesPage extends StatelessWidget {
       ),
       body: !messages.isAvailable
           ? const _Unavailable()
-          : RefreshIndicator(
-              color: context.accent,
+          : YomiRefresh(
               onRefresh: messages.refresh,
               child: ListView(
                 padding: EdgeInsets.only(

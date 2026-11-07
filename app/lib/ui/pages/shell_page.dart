@@ -78,7 +78,13 @@ class _ShellPageState extends State<ShellPage>
     ),
     NavItem(Icons.add_circle_outline_rounded, Icons.add_circle_rounded, 'Add'),
   ];
-  static const _pages = [HomePage(), SearchPage(), LibraryPage(), UploadPage()];
+  final ScrollController _homeScroll = ScrollController();
+  late final List<Widget> _pages = [
+    HomePage(scrollController: _homeScroll),
+    const SearchPage(),
+    const LibraryPage(),
+    const UploadPage(),
+  ];
 
   late int _index = devInitialTab.clamp(0, _pages.length - 1);
   late final AnimationController _fade = AnimationController(
@@ -107,13 +113,32 @@ class _ShellPageState extends State<ShellPage>
   @override
   void dispose() {
     _fade.dispose();
+    _homeScroll.dispose();
     super.dispose();
   }
 
   void _select(int i) {
-    if (i == _index) return;
+    if (i == _index) {
+      if (i == 0) _scrollHomeToTop();
+      return;
+    }
     setState(() => _index = i);
     _fade.forward(from: 0.35);
+  }
+
+  /// Tapping Home while on Home goes back to the top, like most music apps.
+  void _scrollHomeToTop() {
+    if (!_homeScroll.hasClients || _homeScroll.offset <= 0) return;
+    final reduceMotion = context.motion(YomiMotion.standard) == Duration.zero;
+    if (reduceMotion) {
+      _homeScroll.jumpTo(0);
+      return;
+    }
+    _homeScroll.animateTo(
+      0,
+      duration: YomiMotion.standard,
+      curve: YomiMotion.curve,
+    );
   }
 
   @override

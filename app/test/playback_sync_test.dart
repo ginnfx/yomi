@@ -109,8 +109,9 @@ class _Server {
           'current': params['current']!.single,
           'position': int.parse(params['position']!.single),
           'changedBy': params['c']!.single,
-          'changed': DateTime.utc(2026)
-              .add(Duration(seconds: writes))
+          'changed': DateTime.now()
+              .toUtc()
+              .add(Duration(microseconds: writes))
               .toIso8601String(),
           'entry': params['id']!
               .map((id) => songs.firstWhere((s) => s.id == id).toJson())
@@ -169,6 +170,31 @@ void main() {
     phonePlayer.dispose();
     settings.dispose();
   });
+
+  test(
+    'offers only another kind of device, never this one or a reinstall',
+    () async {
+      await macPlayer.playQueue(songs);
+      await mac.saveNow();
+      await phone.refresh();
+      expect(phone.offer?.deviceLabel, 'Mac');
+      expect(mac.offer, isNull, reason: 'its own queue is not an offer');
+
+      final reinstalled = PlaybackSyncController(
+        player: phonePlayer,
+        settings: settings,
+        deviceId: 'Yomi/macOS/other-install',
+        pollInterval: const Duration(days: 1),
+      )..attach(server.client());
+      addTearDown(reinstalled.dispose);
+      await reinstalled.refresh();
+      expect(
+        reinstalled.offer,
+        isNull,
+        reason: 'a Mac with a new id is still the Mac that was playing',
+      );
+    },
+  );
 
   test('Mac to iPhone handoff preserves queue, current song and position, then pauses the Mac', () async {
     await macPlayer.playQueue(

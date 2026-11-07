@@ -26,7 +26,7 @@ class _DesktopPlayerState extends State<DesktopPlayer> {
     final sync = context.watch<PlaybackSyncController>();
     final song = player.current;
     final canPlay = song != null;
-    final remote = sync.remote;
+    final remote = sync.offer;
     return Material(
       color: YomiColors.surface,
       child: Container(

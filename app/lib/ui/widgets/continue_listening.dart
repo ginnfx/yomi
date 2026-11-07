@@ -18,8 +18,8 @@ class ContinueListening extends StatelessWidget {
 
   Widget _content(BuildContext context) {
     final sync = context.watch<PlaybackSyncController>();
-    final remote = sync.remote;
-    if (!sync.enabled || remote == null) return const SizedBox.shrink();
+    final remote = sync.offer;
+    if (remote == null) return const SizedBox.shrink();
     if (context.isWideLayout) {
       return Padding(
         padding: const EdgeInsets.fromLTRB(kPagePadding, 18, kPagePadding, 0),

@@ -46,6 +46,32 @@ class PlaybackSyncController extends ChangeNotifier
   List<Object?> _observed = const [];
 
   SavedPlayQueue? get remote => _remote;
+
+  /// How recent another device's listening must be to be worth offering.
+  static const Duration offerFreshness = Duration(hours: 3);
+
+  /// What to suggest on Home: another kind of device that was playing lately.
+  /// Never this device's own queue, nor a reinstall of this same kind of device
+  /// (it gets a new id), and nothing while music is already playing here.
+  SavedPlayQueue? get offer {
+    final remote = _remote;
+    if (remote == null || !enabled || player.isPlaying) return null;
+    if (remote.changedBy == deviceId) return null;
+    if (_platformOf(remote.changedBy) == _platformOf(deviceId)) return null;
+    final changed = remote.changed;
+    if (changed != null &&
+        DateTime.now().difference(changed) > offerFreshness) {
+      return null;
+    }
+    return remote;
+  }
+
+  /// "Yomi/ios/abc" -> "ios". Empty for clients that aren't Yomi.
+  static String _platformOf(String id) {
+    final parts = id.toLowerCase().split('/');
+    return parts.length >= 3 && parts[0] == 'yomi' ? parts[1] : '';
+  }
+
   String? get error => _error;
   DateTime? get lastSaved => _lastSaved;
   bool get isTakingOver => _takingOver;

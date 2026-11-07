@@ -25,6 +25,7 @@ import '../widgets/playlist_sheet.dart';
 import '../widgets/profile_panel.dart';
 import '../widgets/shimmer.dart';
 import 'collection_page.dart';
+import '../widgets/yomi_refresh.dart';
 
 enum _NewKind { empty, spotify }
 
@@ -282,7 +283,7 @@ class _LibraryPageState extends State<LibraryPage> {
         _query.isEmpty &&
         _filter != LibraryFilter.artists &&
         !settings.libraryIsGrid;
-    return RefreshIndicator(
+    return YomiRefresh(
       onRefresh: client.refreshPlaylists,
       child: LibraryList(
         items: items,
