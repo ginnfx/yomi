@@ -233,6 +233,51 @@ void main() {
       session.dispose();
     });
 
+    test('a tunnel that stopped answering is restarted at once', () async {
+      FlutterSecureStorage.setMockInitialValues({
+        'server_url': away,
+        'username': 'u',
+        'password': 'p',
+      });
+      const restarted = 'http://127.0.0.1:40003';
+      var working = {tunnelUrl};
+      var connects = 0;
+      var restarts = 0;
+      final session = SessionController(
+        tunnelConnect: () async {
+          connects++;
+          return tunnelUrl;
+        },
+        tunnelReconnect: () async {
+          restarts++;
+          return restarted;
+        },
+        urlProbe: (url, user, password) async => ProbeResult(
+          url: url,
+          isOk: working.contains(url),
+          elapsed: Duration.zero,
+        ),
+      );
+      await session.restoreSaved();
+      await session.checkServer();
+      expect(session.isOnTunnel, isTrue);
+      expect(connects, 1);
+
+      // The phone suspended the node: the old address is dead, a restart works.
+      working = {restarted};
+      await session.checkServer();
+
+      expect(restarts, 1, reason: 'restarted, not just asked if it is running');
+      expect(
+        connects,
+        1,
+        reason: 'no second trip through the "is it running" path',
+      );
+      expect(session.serverUrl, restarted);
+      expect(session.isServerReachable, isTrue);
+      session.dispose();
+    });
+
     test('a recovery error releases the checking guard', () async {
       FlutterSecureStorage.setMockInitialValues({
         'server_url': away,

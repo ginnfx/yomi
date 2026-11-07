@@ -91,6 +91,10 @@ Future<bool> _pingProbe(String url, String user, String password) async {
 
 const _tunnelTimeout = Duration(seconds: 20);
 
+/// A tunnel that was working a moment ago answers quickly or not at all, so checking
+/// it doesn't need the long wait a freshly started one does.
+const Duration _tunnelHealthTimeout = Duration(seconds: 6);
+
 Future<ProbeResult> _probeTunnel(String url, String user, String password) =>
     probeUrl(url, user, password, timeout: _tunnelTimeout);
 
@@ -442,7 +446,9 @@ class SessionController extends ChangeNotifier with WidgetsBindingObserver {
     notifyListeners();
     var reachable = false;
     try {
-      await client.ping(timeout: _isOnTunnel ? _tunnelTimeout : _reachTimeout);
+      await client.ping(
+        timeout: _isOnTunnel ? _tunnelHealthTimeout : _reachTimeout,
+      );
       reachable = true;
     } on Exception {
       if (!_valid(epoch)) return;
@@ -489,10 +495,16 @@ class SessionController extends ChangeNotifier with WidgetsBindingObserver {
   /// server by LAN or the Tailscale app never pays for a second network stack.
   Future<bool> _connectThroughTunnel() async {
     final epoch = _epoch;
-    var url = await tunnelConnect?.call();
+    // Already on the tunnel and it stopped answering: start it over right away. The
+    // node may still claim to be running after the phone suspended it.
+    final wasOnTunnel = _isOnTunnel;
+    var url = wasOnTunnel
+        ? await tunnelReconnect?.call()
+        : await tunnelConnect?.call();
     if (url == null || !_valid(epoch)) return false;
     var result = await _tunnelProbe(url, _user, _password);
     if (!_valid(epoch)) return false;
+    if (!result.isOk && wasOnTunnel) return false;
     if (!result.isOk) {
       // Running only describes the backend, not whether its peer path works.
       url = await tunnelReconnect?.call();
@@ -625,9 +637,14 @@ class SessionController extends ChangeNotifier with WidgetsBindingObserver {
     final epoch = _epoch;
     final client = _client;
     if (client == null) return;
-    for (var attempt = 0; attempt < _routineAttempts; attempt++) {
+    // A suspended tunnel won't wake by waiting, so it gets one quick look, then the
+    // full check restarts it.
+    final attempts = _isOnTunnel ? 1 : _routineAttempts;
+    for (var attempt = 0; attempt < attempts; attempt++) {
       try {
-        await client.ping(timeout: _isOnTunnel ? _tunnelTimeout : _wakeTimeout);
+        await client.ping(
+          timeout: _isOnTunnel ? _tunnelHealthTimeout : _wakeTimeout,
+        );
         if (!_valid(epoch)) return;
         if (!_isServerReachable) {
           _reachRetry?.cancel();

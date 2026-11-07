@@ -18,12 +18,17 @@ class StatusBanner extends StatelessWidget {
     final isServerDown = context.select<SessionController, bool>(
       (s) => s.isSignedIn && !s.isServerReachable,
     );
+    final isReconnecting = context.select<SessionController, bool>(
+      (s) => s.isSignedIn && !s.isServerReachable && s.isChecking,
+    );
     final waiting = context.select<DownloadManager, String?>(
       (d) => d.pausedReason,
     );
     final isCutOff = isOffline || isServerDown;
     final message = isOffline
         ? "You're offline · saved music still plays"
+        : isReconnecting
+        ? 'Reconnecting to your server · saved music still plays'
         : isServerDown
         ? "Can't reach your server · saved music still plays"
         : waiting;
@@ -44,7 +49,9 @@ class StatusBanner extends StatelessWidget {
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   Icon(
-                    isCutOff
+                    isReconnecting && !isOffline
+                        ? Icons.sync_rounded
+                        : isCutOff
                         ? Icons.cloud_off_rounded
                         : Icons.hourglass_bottom_rounded,
                     size: 16,
