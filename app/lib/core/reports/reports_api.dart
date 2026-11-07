@@ -141,6 +141,7 @@ typedef ReportsPage = ({List<SongReport> reports, bool isAdmin});
 @immutable
 class WantedSong {
   const WantedSong({
+    this.id = '',
     required this.artist,
     required this.title,
     required this.count,
@@ -153,12 +154,16 @@ class WantedSong {
     final title = json['title'];
     if (artist is! String || title is! String) return null;
     return WantedSong(
+      id: json['id'] is String ? json['id'] as String : '',
       artist: artist,
       title: title,
       count: (json['count'] as num?)?.toInt() ?? 1,
     );
   }
 
+  /// The request's id, so it can be closed once the song is in the library. Empty from
+  /// an older server.
+  final String id;
   final String artist;
   final String title;
   final int count;

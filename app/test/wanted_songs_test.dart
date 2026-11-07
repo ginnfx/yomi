@@ -13,6 +13,8 @@ import 'package:yomi/core/export/wanted_export.dart';
 import 'package:yomi/core/reports/reports_api.dart';
 import 'package:yomi/core/spotify/imported_playlist.dart';
 import 'package:yomi/core/subsonic_client.dart';
+import 'package:yomi/core/models.dart';
+import 'package:yomi/state/catalog_controller.dart';
 import 'package:yomi/state/imports_controller.dart';
 import 'package:yomi/state/reports_controller.dart';
 import 'package:yomi/ui/theme.dart';
@@ -107,6 +109,63 @@ void main() {
     });
   });
 
+  group('closeWantedFoundIn', () {
+    const blueHour = Song(
+      id: 's1',
+      title: 'Blue Hour',
+      artist: 'Mira',
+      album: 'A',
+      durationSeconds: 200,
+    );
+
+    test(
+      'drops songs now in the library and closes them on the server',
+      () async {
+        final sent = <String>[];
+        final api = ReportsApi(
+          serverUrl: 'http://s',
+          auth: SubsonicClient(
+            baseUrl: 'http://s',
+            username: 'u',
+            password: 'p',
+          ),
+          port: 4534,
+          httpClient: MockClient((request) async {
+            if (request.method == 'POST') {
+              sent.add(request.url.path);
+              return http.Response('{}', 200);
+            }
+            return http.Response(
+              jsonEncode({
+                'songs': [
+                  {'id': 'r1', ..._song('Blue Hour', 2)},
+                  {'id': 'r2', ..._song('Green Room', 1)},
+                ],
+              }),
+              200,
+            );
+          }),
+        );
+        final controller = await _controller(api);
+        await controller.refreshWanted();
+
+        await controller.closeWantedFoundIn([blueHour]);
+
+        expect(controller.wanted.map((s) => s.title), ['Green Room']);
+        expect(sent, ['/v1/reports/r1/added']);
+      },
+    );
+
+    test('keeps the list when nothing matches', () async {
+      final controller = await _controller(_api([_song('Green Room', 1)]));
+      await controller.refreshWanted();
+
+      await controller.closeWantedFoundIn([blueHour]);
+
+      expect(controller.wanted, hasLength(1));
+    });
+  });
+
   group('WantedSongsSection', () {
     Future<void> pumpSection(
       WidgetTester tester,
@@ -117,6 +176,9 @@ void main() {
       MultiProvider(
         providers: [
           ChangeNotifierProvider<ReportsController>.value(value: controller),
+          ChangeNotifierProvider<CatalogController>.value(
+            value: CatalogController(directory: Directory.systemTemp),
+          ),
           ChangeNotifierProvider<ImportsController>.value(
             value:
                 imports ??

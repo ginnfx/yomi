@@ -8,6 +8,7 @@ import (
 // WantedSong is a song people have asked for that the library doesn't have. It says how
 // many people want it, never who or why, so everyone can see it without exposing anyone.
 type WantedSong struct {
+	ID        string `json:"id"`
 	Artist    string `json:"artist"`
 	Title     string `json:"title"`
 	Count     int    `json:"count"`
@@ -25,6 +26,7 @@ func (s *ReportStore) Wanted() []WantedSong {
 			continue
 		}
 		songs = append(songs, WantedSong{
+			ID:        report.ID,
 			Artist:    report.Artist,
 			Title:     report.Title,
 			Count:     len(report.Reporters),

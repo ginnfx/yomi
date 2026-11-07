@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 import '../../core/export/wanted_export.dart';
 import '../../core/reports/reports_api.dart';
 import '../../core/spotify/missing_songs.dart';
+import '../../state/catalog_controller.dart';
 import '../../state/imports_controller.dart';
 import '../../state/reports_controller.dart';
 import '../theme.dart';
@@ -75,6 +76,12 @@ class _WantedSongsSectionState extends State<WantedSongsSection> {
   Widget build(BuildContext context) {
     final reports = context.watch<ReportsController>();
     _askIfNeeded(reports);
+    final library = context.watch<CatalogController>().songs;
+    if (reports.isWantedLoaded && library.isNotEmpty) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) reports.closeWantedFoundIn(library);
+      });
+    }
     final wanted = reports.wanted;
     // What gets exported: everyone's wants plus any only this device has so far.
     final everyone = mergeWanted(

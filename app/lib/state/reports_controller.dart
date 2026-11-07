@@ -6,8 +6,11 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:http/http.dart' as http;
 
 import '../core/reports/reports_api.dart';
+import '../core/models.dart';
 import '../core/search_index.dart';
 import '../core/spotify/missing_songs.dart';
+import '../core/spotify/spotify_export.dart';
+import '../core/spotify/track_matcher.dart';
 
 const String _requestedKey = 'reports.requestedMissing';
 
@@ -84,6 +87,39 @@ class ReportsController extends ChangeNotifier {
         _isWantedLoading = false;
         notifyListeners();
       }
+    }
+  }
+
+  /// Drops wanted songs that are now in [library] and tells the server, so the list
+  /// clears however the song got there: this phone, another one, or the server itself.
+  Future<void> closeWantedFoundIn(List<Song> library) async {
+    final api = _api;
+    if (api == null || _wanted.isEmpty || library.isEmpty) return;
+    final matcher = TrackMatcher(library);
+    final found = [
+      for (final song in _wanted)
+        if (matcher
+                .match(ExportTrack(title: song.title, artist: song.artist))
+                .status ==
+            MatchStatus.matched)
+          song,
+    ];
+    if (found.isEmpty) return;
+    final generation = _generation;
+    _wanted = [
+      for (final song in _wanted)
+        if (!found.contains(song)) song,
+    ];
+    notifyListeners();
+    for (final song in found) {
+      if (song.id.isEmpty) continue;
+      try {
+        await api.markAdded(song.id, '');
+      } on Exception catch (error) {
+        // Already closed by someone else, or offline; the next load sorts it out.
+        debugPrint('Could not close a wanted song: $error');
+      }
+      if (generation != _generation) return;
     }
   }
 
