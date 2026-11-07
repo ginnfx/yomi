@@ -587,7 +587,7 @@ func (s *Server) handleSend(w http.ResponseWriter, r *http.Request) {
 // Each device goes through the service for its kind: Apple directly for iPhones, the
 // relay (Firebase) for the rest.
 func (s *Server) pushNewMessage(to, from string) {
-	if s.Relay == nil && s.APNs == nil {
+	if s.Relay == nil && s.APNs == nil && s.FCM == nil {
 		return
 	}
 	stored := s.Messages.Devices(to)
@@ -612,14 +612,21 @@ func (s *Server) pushNewMessage(to, from string) {
 		}
 		dead = append(dead, gone...)
 	}
-	if len(other) > 0 && s.Relay != nil {
+	if len(other) > 0 && (s.FCM != nil || s.Relay != nil) {
 		raw := make([]string, len(other))
 		for i, entry := range other {
 			_, raw[i] = splitToken(entry)
 		}
-		gone, err := s.Relay.Notify(ctx, raw, from)
+		// Straight to Google when this server has the service account, else the relay.
+		var gone []string
+		var err error
+		if s.FCM != nil {
+			gone, err = s.FCM.Notify(ctx, raw, from)
+		} else {
+			gone, err = s.Relay.Notify(ctx, raw, from)
+		}
 		if err != nil {
-			log.Printf("push: relay: %v", err)
+			log.Printf("push: fcm: %v", err)
 		}
 		dead = append(dead, gone...)
 	}

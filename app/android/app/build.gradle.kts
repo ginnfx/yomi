@@ -6,6 +6,12 @@ plugins {
     id("dev.flutter.flutter-gradle-plugin")
 }
 
+// Firebase is only wired in once google-services.json exists (scripts/setup_fcm.sh
+// creates it), so a checkout without it still builds, just without Android push.
+if (file("google-services.json").exists()) {
+    apply(plugin = "com.google.gms.google-services")
+}
+
 // Installed copies only accept updates signed with this same key, so a release
 // build must never fall back to the debug key. See app/README.md, "Releasing".
 val keyProperties = Properties().apply {
@@ -85,6 +91,9 @@ flutter {
 
 dependencies {
     implementation("androidx.core:core:1.16.0")
+    // Android push tokens. Does nothing until google-services.json adds a project.
+    implementation(platform("com.google.firebase:firebase-bom:33.7.0"))
+    implementation("com.google.firebase:firebase-messaging")
     // yt-dlp with its own Python, for playing and saving songs from YouTube.
     implementation("io.github.junkfood02.youtubedl-android:library:0.18.1")
     // Built by tailscale_bridge/build.sh; not committed because of its size.

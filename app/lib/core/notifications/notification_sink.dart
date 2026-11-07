@@ -56,6 +56,19 @@ class SystemNotificationSink implements NotificationSink {
         },
       );
       _isReady = true;
+      // Firebase pushes name this channel, so it has to exist before one arrives.
+      await _plugin
+          .resolvePlatformSpecificImplementation<
+            AndroidFlutterLocalNotificationsPlugin
+          >()
+          ?.createNotificationChannel(
+            const AndroidNotificationChannel(
+              _channelId,
+              _channelName,
+              description: 'New messages from friends',
+              importance: Importance.high,
+            ),
+          );
       // Opened from a notification while the app was closed.
       final launch = await _plugin.getNotificationAppLaunchDetails();
       final payload = launch?.notificationResponse?.payload;

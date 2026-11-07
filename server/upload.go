@@ -31,6 +31,7 @@ type Server struct {
 	Messages    *MessageStore
 	Relay       *PushRelay
 	APNs        *APNsSender
+	FCM         *FCMSender
 	History     *HistoryStore
 	Tags        *TagStore
 	LLM         *LLMClient

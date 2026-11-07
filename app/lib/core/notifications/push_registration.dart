@@ -10,14 +10,15 @@ typedef DeviceRegistrar = Future<bool> Function({
 });
 
 /// Asks the phone for its Apple push token and passes it to the Yomi server, so
-/// messages reach the phone even when Yomi is closed. iPhone only for now.
+/// messages reach the phone even when Yomi is closed (Apple on iPhone, Firebase on
+/// Android).
 class PushRegistration {
   PushRegistration({
     required this.register,
     MethodChannel? channel,
     bool? isSupported,
   }) : _channel = channel ?? const MethodChannel('yomi/push'),
-       isSupported = isSupported ?? Platform.isIOS;
+       isSupported = isSupported ?? (Platform.isIOS || Platform.isAndroid);
 
   final DeviceRegistrar register;
   final MethodChannel _channel;
@@ -26,6 +27,9 @@ class PushRegistration {
   ({String token, String kind})? _device;
   bool _canRegister = false;
   String? _sentToken;
+
+  /// Whether the server has this phone's token, so it will push by itself.
+  bool get isRegistered => _sentToken != null;
 
   void start() {
     if (!isSupported) return;
@@ -38,7 +42,11 @@ class PushRegistration {
       if (token is! String || token.isEmpty) return;
       _device = (
         token: token,
-        kind: environment == 'sandbox' ? 'apns-sandbox' : 'apns',
+        kind: switch (environment) {
+          'sandbox' => 'apns-sandbox',
+          'android' => 'fcm',
+          _ => 'apns',
+        },
       );
       _sentToken = null;
       await _send();

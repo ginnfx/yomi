@@ -18,6 +18,7 @@ class MainActivity : AudioServiceActivity() {
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, INSTALLER_CHANNEL)
             .setMethodCallHandler(::handleInstallerCall)
         TunnelChannel(flutterEngine.dartExecutor.binaryMessenger)
+        PushChannel(flutterEngine.dartExecutor.binaryMessenger)
         YtDlpChannel(flutterEngine.dartExecutor.binaryMessenger, this)
     }
 

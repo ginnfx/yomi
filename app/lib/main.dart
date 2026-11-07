@@ -383,11 +383,18 @@ Future<void> main() async {
   home.addListener(shareTaste);
   settings.addListener(shareTaste);
   String? messagingUrl;
+  final pushRegistration = PushRegistration(
+    register: ({required token, required kind}) =>
+        messages.registerDevice(token: token, kind: kind),
+  )..start();
   final notifications = SystemNotificationSink();
   final messageNotifier = MessageNotifier(
     messages: messages,
     sink: notifications,
-    isEnabled: () => settings.areMessageNotificationsOn,
+    // Once the server can push to this phone, the system shows the banner, and a
+    // second one from the app would only repeat it.
+    isEnabled: () =>
+        settings.areMessageNotificationsOn && !pushRegistration.isRegistered,
     nameOf: (user) => messages.profileOf(user).name,
   )..start();
   unawaited(
@@ -397,10 +404,6 @@ Future<void> main() async {
       ),
     ),
   );
-  final pushRegistration = PushRegistration(
-    register: ({required token, required kind}) =>
-        messages.registerDevice(token: token, kind: kind),
-  )..start();
   // Asked once someone is signed in with notifications on, not at first launch.
   var hasAskedForNotifications = false;
   void askForNotificationsOnce() {

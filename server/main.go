@@ -54,6 +54,7 @@ func main() {
 		server.Messages = messages
 		server.Relay = newPushRelay(cfg)
 		server.APNs = newAPNsSender(cfg)
+		server.FCM = newFCMSender(cfg)
 	}
 	if cfg.Role == roleReplica {
 		if cfg.PrimaryURL == "" || cfg.ReplicaUser == "" || cfg.ReplicaPassword == "" || cfg.ReplicaDatabase == "" {
