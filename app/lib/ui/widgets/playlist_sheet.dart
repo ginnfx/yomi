@@ -10,6 +10,7 @@ import '../theme.dart';
 import 'async_section.dart';
 import 'playlist_cover.dart';
 import 'shimmer.dart';
+import 'error_view.dart';
 
 /// How much of the screen the sheet takes.
 const double _sheetHeight = 0.7;
@@ -79,7 +80,11 @@ class _PlaylistPicker extends StatelessWidget {
       await action();
       messenger.showSnackBar(SnackBar(content: Text(doneMessage)));
     } on Exception catch (error) {
-      messenger.showSnackBar(SnackBar(content: Text('$error')));
+      if (parentContext.mounted) {
+        messenger.showSnackBar(
+          SnackBar(content: Text(failureMessage(parentContext, error))),
+        );
+      }
     }
   }
 

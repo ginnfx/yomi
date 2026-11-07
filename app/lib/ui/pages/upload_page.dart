@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:provider/provider.dart';
 
+import '../../core/time_left.dart';
 import '../../state/upload_queue.dart';
 import '../theme.dart';
 import '../widgets/missing_songs_section.dart';
@@ -239,7 +240,11 @@ class _Summary extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          '$handled of ${queue.total} handled',
+          [
+            '$handled of ${queue.total} handled',
+            if (describeTimeLeft(queue.timeLeft).isNotEmpty)
+              describeTimeLeft(queue.timeLeft),
+          ].join(' · '),
           style: yomiText(16, weight: FontWeight.w800),
         ),
         const SizedBox(height: YomiSpace.s),

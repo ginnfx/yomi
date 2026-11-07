@@ -125,7 +125,7 @@ class _AddSongsSheetState extends State<AddSongsSheet> {
     } on Exception catch (error) {
       if (!mounted) return;
       messenger.showSnackBar(
-        SnackBar(content: Text(describeFailure(context, error).title)),
+        SnackBar(content: Text(failureMessage(context, error))),
       );
     } finally {
       if (mounted) setState(() => _adding.remove(song.id));

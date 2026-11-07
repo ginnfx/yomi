@@ -72,7 +72,7 @@ class _PlaylistPreviewPageState extends State<PlaylistPreviewPage> {
     } on Exception catch (error) {
       if (!mounted) return;
       messenger.showSnackBar(
-        SnackBar(content: Text(describeFailure(context, error).title)),
+        SnackBar(content: Text(failureMessage(context, error))),
       );
     } finally {
       if (mounted) setState(() => _isSaving = false);

@@ -4,6 +4,7 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 
+import '../core/time_left.dart';
 import '../core/subsonic_client.dart';
 import '../core/upload/bulk_upload_api.dart';
 import '../core/upload/file_inspector.dart';
@@ -163,6 +164,29 @@ class UploadQueue extends ChangeNotifier {
       _items.values.where((item) => item.state == state).length;
   int get total => _items.length;
 
+  DateTime? _runStarted;
+  int _handledAtRunStart = 0;
+
+  int get _handledCount => _items.values
+      .where(
+        (item) =>
+            item.state == UploadState.done ||
+            item.state == UploadState.duplicate ||
+            item.state == UploadState.failed,
+      )
+      .length;
+
+  /// A fair guess at how long the running batch still needs, or null.
+  Duration? get timeLeft {
+    final started = _runStarted;
+    if (!_isRunning || started == null) return null;
+    return estimateTimeLeft(
+      done: _handledCount - _handledAtRunStart,
+      remaining: remaining,
+      elapsed: DateTime.now().difference(started),
+    );
+  }
+
   /// Files still to be dealt with automatically.
   int get remaining =>
       count(UploadState.queued) +
@@ -299,6 +323,8 @@ class UploadQueue extends ChangeNotifier {
 
   Future<void> _run() async {
     _isRunning = true;
+    _runStarted = DateTime.now();
+    _handledAtRunStart = _handledCount;
     _changed();
     try {
       await _prepareSnapshot();

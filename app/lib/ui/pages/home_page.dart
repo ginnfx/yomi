@@ -55,9 +55,11 @@ class _HomePageState extends State<HomePage> {
     try {
       await player.playQueue(await client.randomSongs(size: _shuffleBatch));
     } on Exception catch (error) {
-      if (mounted)
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('$error')));
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(failureMessage(context, error))));
+      }
     }
   }
 

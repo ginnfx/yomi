@@ -62,6 +62,8 @@ class _FakeSync extends ChangeNotifier implements PlaybackSyncController {
   bool get enabled => false;
   @override
   Null get remote => null;
+  @override
+  Null get offer => null;
 
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);

@@ -20,6 +20,14 @@ FriendlyError describeFailure(BuildContext context, Object error) {
   );
 }
 
+/// One line for a snackbar: what failed and, where it helps, why.
+String failureMessage(BuildContext context, Object error) {
+  final friendly = describeFailure(context, error);
+  return friendly.hint.isEmpty
+      ? friendly.title
+      : '${friendly.title}. ${friendly.hint}';
+}
+
 /// A calm, explanatory error with the right next step, instead of raw exception text.
 class ErrorView extends StatelessWidget {
   const ErrorView({super.key, required this.error, this.onRetry});

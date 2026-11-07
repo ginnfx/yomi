@@ -163,7 +163,7 @@ class _CollectionPageState extends State<CollectionPage> {
     } on Exception catch (error) {
       if (!mounted) return;
       messenger.showSnackBar(
-        SnackBar(content: Text(describeFailure(context, error).title)),
+        SnackBar(content: Text(failureMessage(context, error))),
       );
     }
   }
@@ -175,7 +175,11 @@ class _CollectionPageState extends State<CollectionPage> {
         widget.playlist!.id,
       );
     } on Object catch (error) {
-      messenger.showSnackBar(SnackBar(content: Text('$error')));
+      if (mounted) {
+        messenger.showSnackBar(
+          SnackBar(content: Text(failureMessage(context, error))),
+        );
+      }
     }
   }
 

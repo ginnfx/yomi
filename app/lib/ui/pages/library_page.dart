@@ -95,9 +95,9 @@ class _LibraryPageState extends State<LibraryPage> {
       await session.client.refreshPlaylists();
     } on Exception catch (error) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(describeFailure(context, error).title)),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(failureMessage(context, error))));
       }
     }
   }
