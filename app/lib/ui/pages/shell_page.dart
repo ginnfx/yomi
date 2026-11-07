@@ -9,6 +9,7 @@ import '../../state/profile_controller.dart';
 import '../../state/session.dart';
 import '../../state/update_controller.dart';
 import '../widgets/release_notes_sheet.dart';
+import '../widgets/window_drag_area.dart';
 import '../theme.dart';
 import '../widgets/mini_player.dart';
 import '../widgets/desktop_player.dart';
@@ -219,96 +220,113 @@ class _ShellPageState extends State<ShellPage>
     return PageBackground(
       child: Scaffold(
         backgroundColor: Colors.transparent,
-        body: Column(
+        body: Stack(
           children: [
-            Expanded(
-              child: Row(
-                children: [
-                  SizedBox(
-                    width: 196,
-                    child: SafeArea(
-                      child: Padding(
-                        padding: const EdgeInsets.fromLTRB(14, 22, 14, 12),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            const _SidebarProfile(),
-                            const SizedBox(height: YomiSpace.xl),
-                            for (var i = 0; i < _items.length; i++)
-                              Padding(
-                                padding: const EdgeInsets.only(bottom: 5),
-                                child: ListTile(
-                                  dense: true,
-                                  selected: _index == i,
-                                  selectedColor: YomiColors.textPrimary,
-                                  selectedTileColor: YomiColors.surfaceHigh,
-                                  shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(
-                                      YomiRadius.card,
-                                    ),
-                                  ),
-                                  leading: Icon(_items[i].icon, size: 21),
-                                  title: Text(
-                                    i == 3 ? 'Upload music' : _items[i].label,
-                                    style: yomiText(
-                                      13,
-                                      weight: FontWeight.w600,
-                                    ),
-                                  ),
-                                  onTap: () => _select(i),
+            _desktopBody(context, media),
+            const Positioned(
+              top: 0,
+              left: 0,
+              right: 0,
+              child: WindowDragArea(),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _desktopBody(BuildContext context, MediaQueryData media) {
+    return Column(
+      children: [
+        Expanded(
+          child: Row(
+            children: [
+              SizedBox(
+                width: 196,
+                child: SafeArea(
+                  child: Padding(
+                    padding: EdgeInsets.fromLTRB(
+                      14,
+                      hasUnifiedMacTitleBar ? kMacTitleBarInset + 8 : 22,
+                      14,
+                      12,
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        const _SidebarProfile(),
+                        const SizedBox(height: YomiSpace.xl),
+                        for (var i = 0; i < _items.length; i++)
+                          Padding(
+                            padding: const EdgeInsets.only(bottom: 5),
+                            child: ListTile(
+                              dense: true,
+                              selected: _index == i,
+                              selectedColor: context.accent,
+                              selectedTileColor: context.accent.withValues(
+                                alpha: 0.12,
+                              ),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(
+                                  YomiRadius.card,
                                 ),
                               ),
-                            const Spacer(),
-                            ListTile(
-                              dense: true,
-                              leading: const Icon(
-                                Icons.settings_outlined,
-                                size: 21,
+                              leading: Icon(_items[i].icon, size: 21),
+                              title: Text(
+                                i == 3 ? 'Upload music' : _items[i].label,
+                                style: yomiText(13, weight: FontWeight.w600),
                               ),
-                              title: const Text('Settings'),
-                              onTap: () => openSettings(context),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-                  VerticalDivider(width: 1, color: YomiColors.hairline),
-                  Expanded(
-                    child: Column(
-                      children: [
-                        const SafeArea(
-                          bottom: false,
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [StatusBanner(), UpdateBanner()],
-                          ),
-                        ),
-                        Expanded(
-                          child: MediaQuery(
-                            data: media.copyWith(padding: EdgeInsets.zero),
-                            child: FadeTransition(
-                              opacity: CurvedAnimation(
-                                parent: _fade,
-                                curve: Curves.easeOut,
-                              ),
-                              child: IndexedStack(
-                                index: _index,
-                                children: _pages,
-                              ),
+                              onTap: () => _select(i),
                             ),
                           ),
+                        const Spacer(),
+                        ListTile(
+                          dense: true,
+                          leading: const Icon(
+                            Icons.settings_outlined,
+                            size: 21,
+                          ),
+                          title: const Text('Settings'),
+                          onTap: () => openSettings(context),
                         ),
                       ],
                     ),
                   ),
-                ],
+                ),
               ),
-            ),
-            const DesktopPlayer(),
-          ],
+              VerticalDivider(width: 1, color: YomiColors.hairline),
+              Expanded(
+                child: Column(
+                  children: [
+                    if (hasUnifiedMacTitleBar)
+                      const SizedBox(height: kMacTitleBarInset),
+                    const SafeArea(
+                      bottom: false,
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [StatusBanner(), UpdateBanner()],
+                      ),
+                    ),
+                    Expanded(
+                      child: MediaQuery(
+                        data: media.copyWith(padding: EdgeInsets.zero),
+                        child: FadeTransition(
+                          opacity: CurvedAnimation(
+                            parent: _fade,
+                            curve: Curves.easeOut,
+                          ),
+                          child: IndexedStack(index: _index, children: _pages),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
         ),
-      ),
+        const DesktopPlayer(),
+      ],
     );
   }
 }
