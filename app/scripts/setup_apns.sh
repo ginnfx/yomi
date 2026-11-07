@@ -30,20 +30,22 @@ esac
 # Fails here, not on the phone, if the file isn't an EC private key.
 openssl pkey -in "$KEY_FILE" -noout
 
-scp -O "$KEY_FILE" "homelab:$REMOTE_DIR/apns.p8"
-ssh homelab "chmod 600 $REMOTE_DIR/apns.p8 && cat > $REMOTE_DIR/push.env <<ENV
+# The phone's shell can't make temporary files, so files are written here and copied.
+WORK=$(mktemp -d)
+trap 'rm -rf "$WORK"' EXIT
+cat > "$WORK/push.env" <<ENV
 export YOMI_APNS_KEY_FILE=$REMOTE_DIR/apns.p8
 export YOMI_APNS_KEY_ID=$KEY_ID
 export YOMI_APNS_TEAM_ID=$TEAM_ID
 export YOMI_APNS_TOPIC=$TOPIC
 ENV
-chmod 600 $REMOTE_DIR/push.env"
+scp -O "$KEY_FILE" "homelab:$REMOTE_DIR/apns.p8"
+scp -O "$WORK/push.env" "homelab:$REMOTE_DIR/push.env"
+ssh homelab "chmod 600 $REMOTE_DIR/apns.p8 $REMOTE_DIR/push.env"
 
 # Make start.sh read push.env, once. Edited here and copied back, so it doesn't
 # depend on the phone's sed.
 if ! ssh homelab "grep -q push.env $REMOTE_DIR/start.sh"; then
-  WORK=$(mktemp -d)
-  trap 'rm -rf "$WORK"' EXIT
   scp -O "homelab:$REMOTE_DIR/start.sh" "$WORK/start.sh"
   python3 - "$WORK/start.sh" <<'PY'
 import sys
