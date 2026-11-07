@@ -545,5 +545,11 @@ class _Chat implements MessagingTransport {
   Future<void> saveBanner(File image) async {}
 
   @override
+  Future<void> registerDevice({
+    required String token,
+    required String kind,
+  }) async {}
+
+  @override
   Future<List<int>?> fetchImage(Uri uri) async => null;
 }

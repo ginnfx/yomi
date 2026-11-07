@@ -44,6 +44,10 @@ type Config struct {
 	MessagesDir     string
 	RelayURL        string
 	RelayKey        string
+	APNsKeyFile     string
+	APNsKeyID       string
+	APNsTeamID      string
+	APNsTopic       string
 	LLMURL          string
 	LLMKey          string
 	LLMModel        string
@@ -78,6 +82,10 @@ func loadConfig() Config {
 		MessagesDir:     envOr("YOMI_MESSAGES_DIR", defaultMessagesDir),
 		RelayURL:        os.Getenv("YOMI_RELAY_URL"),
 		RelayKey:        os.Getenv("YOMI_RELAY_KEY"),
+		APNsKeyFile:     os.Getenv("YOMI_APNS_KEY_FILE"),
+		APNsKeyID:       os.Getenv("YOMI_APNS_KEY_ID"),
+		APNsTeamID:      os.Getenv("YOMI_APNS_TEAM_ID"),
+		APNsTopic:       os.Getenv("YOMI_APNS_TOPIC"),
 		LLMURL:          os.Getenv("YOMI_LLM_URL"),
 		LLMKey:          os.Getenv("YOMI_LLM_KEY"),
 		LLMModel:        os.Getenv("YOMI_LLM_MODEL"),

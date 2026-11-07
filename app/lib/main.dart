@@ -61,6 +61,7 @@ import 'state/messages_controller.dart';
 import 'state/profile_sync.dart';
 import 'core/notifications/message_notifier.dart';
 import 'core/notifications/notification_sink.dart';
+import 'core/notifications/push_registration.dart';
 import 'ui/pages/messages_page.dart';
 import 'state/player_controller.dart';
 import 'state/playlist_covers_controller.dart';
@@ -396,6 +397,10 @@ Future<void> main() async {
       ),
     ),
   );
+  final pushRegistration = PushRegistration(
+    register: ({required token, required kind}) =>
+        messages.registerDevice(token: token, kind: kind),
+  )..start();
   // Asked once someone is signed in with notifications on, not at first launch.
   var hasAskedForNotifications = false;
   void askForNotificationsOnce() {
@@ -405,7 +410,9 @@ Future<void> main() async {
       return;
     }
     hasAskedForNotifications = true;
-    unawaited(notifications.askPermission());
+    unawaited(
+      notifications.askPermission().then((_) => pushRegistration.activate()),
+    );
   }
 
   settings.addListener(askForNotificationsOnce);
@@ -526,10 +533,13 @@ Future<void> main() async {
     wasReachable = isReachable;
     if (client == null) {
       messages.attach(null);
+      pushRegistration.serverGone();
       messagingUrl = null;
     } else if (client.baseUrl != messagingUrl) {
       messagingUrl = client.baseUrl;
       messages.attach(session.messaging);
+      pushRegistration.serverGone();
+      unawaited(pushRegistration.serverReady());
       profileSync.publish();
     }
     uploads.attach(

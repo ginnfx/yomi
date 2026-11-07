@@ -242,6 +242,9 @@ abstract interface class MessagingTransport {
   Future<void> saveAvatar(File image);
   Future<void> saveBanner(File image);
 
+  /// Tells the server where to push this device: [kind] is "apns" or "apns-sandbox".
+  Future<void> registerDevice({required String token, required String kind});
+
   /// Where a person's picture lives. [version] makes the address change with the
   /// picture, so image caches fetch the new one.
   Uri avatarUri(String user, {int version = 0});
@@ -469,6 +472,10 @@ class MessagingApi implements MessagingTransport {
       bytes: await image.readAsBytes(),
     );
   }
+
+  @override
+  Future<void> registerDevice({required String token, required String kind}) =>
+      _call('POST', _uri('/v1/devices'), body: {'token': token, 'kind': kind});
 
   @override
   Future<void> saveBanner(File image) async {

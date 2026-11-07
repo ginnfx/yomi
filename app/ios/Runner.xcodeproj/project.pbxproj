@@ -18,6 +18,7 @@
 		97C147011CF9000F007C117D /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 97C146FF1CF9000F007C117D /* LaunchScreen.storyboard */; };
 		FA73890739F8C333A5B47785 /* TailscaleBridge.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 9BFAD2400C18119D1E5E3799 /* TailscaleBridge.xcframework */; };
 		A0A65A037C0E3B8CAE7DE33D /* TunnelChannel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 649D863CB3A14C32826BF1CD /* TunnelChannel.swift */; };
+		A1B2C3D40000000000000021 /* PushChannel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D40000000000000020 /* PushChannel.swift */; };
 		A1B2C3D40000000000000011 /* YtDlpChannel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D40000000000000001 /* YtDlpChannel.swift */; };
 		A1B2C3D40000000000000012 /* YoutubeSearch.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D40000000000000002 /* YoutubeSearch.swift */; };
 		A1B2C3D40000000000000013 /* YoutubeAudioDownload.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D40000000000000003 /* YoutubeAudioDownload.swift */; };
@@ -67,6 +68,8 @@
 		97C147021CF9000F007C117D /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		9BFAD2400C18119D1E5E3799 /* TailscaleBridge.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = TailscaleBridge.xcframework; path = ../../tailscale_bridge/build/TailscaleBridge.xcframework; sourceTree = SOURCE_ROOT; };
 		649D863CB3A14C32826BF1CD /* TunnelChannel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = TunnelChannel.swift; path = Runner/TunnelChannel.swift; sourceTree = SOURCE_ROOT; };
+		A1B2C3D40000000000000020 /* PushChannel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = PushChannel.swift; path = Runner/PushChannel.swift; sourceTree = SOURCE_ROOT; };
+		A1B2C3D40000000000000022 /* Runner.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; name = Runner.entitlements; path = Runner/Runner.entitlements; sourceTree = SOURCE_ROOT; };
 		A1B2C3D40000000000000001 /* YtDlpChannel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = YtDlpChannel.swift; path = Runner/YtDlpChannel.swift; sourceTree = SOURCE_ROOT; };
 		A1B2C3D40000000000000002 /* YoutubeSearch.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = YoutubeSearch.swift; path = Runner/YoutubeSearch.swift; sourceTree = SOURCE_ROOT; };
 		A1B2C3D40000000000000003 /* YoutubeAudioDownload.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = YoutubeAudioDownload.swift; path = Runner/YoutubeAudioDownload.swift; sourceTree = SOURCE_ROOT; };
@@ -137,6 +140,8 @@
 				74858FAE1ED2DC5600515810 /* AppDelegate.swift */,
 				649D863CB3A14C32826BF1CD /* TunnelChannel.swift */,
 				A1B2C3D40000000000000001 /* YtDlpChannel.swift */,
+				A1B2C3D40000000000000020 /* PushChannel.swift */,
+				A1B2C3D40000000000000022 /* Runner.entitlements */,
 				A1B2C3D40000000000000002 /* YoutubeSearch.swift */,
 				A1B2C3D40000000000000003 /* YoutubeAudioDownload.swift */,
 				9BFAD2400C18119D1E5E3799 /* TailscaleBridge.xcframework */,
@@ -304,6 +309,7 @@
 				74858FAF1ED2DC5600515810 /* AppDelegate.swift in Sources */,
 				A0A65A037C0E3B8CAE7DE33D /* TunnelChannel.swift in Sources */,
 				A1B2C3D40000000000000011 /* YtDlpChannel.swift in Sources */,
+				A1B2C3D40000000000000021 /* PushChannel.swift in Sources */,
 				A1B2C3D40000000000000012 /* YoutubeSearch.swift in Sources */,
 				A1B2C3D40000000000000013 /* YoutubeAudioDownload.swift in Sources */,
 				1498D2341E8E89220040F4C2 /* GeneratedPluginRegistrant.m in Sources */,
@@ -408,6 +414,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
+				CODE_SIGN_ENTITLEMENTS = Runner/Runner.entitlements;
 				PRODUCT_BUNDLE_IDENTIFIER = com.brajanzalta.yomi;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_OBJC_BRIDGING_HEADER = "Runner/Runner-Bridging-Header.h";
@@ -593,6 +600,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
+				CODE_SIGN_ENTITLEMENTS = Runner/Runner.entitlements;
 				PRODUCT_BUNDLE_IDENTIFIER = com.brajanzalta.yomi;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_OBJC_BRIDGING_HEADER = "Runner/Runner-Bridging-Header.h";
@@ -616,6 +624,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
+				CODE_SIGN_ENTITLEMENTS = Runner/Runner.entitlements;
 				PRODUCT_BUNDLE_IDENTIFIER = com.brajanzalta.yomi;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_OBJC_BRIDGING_HEADER = "Runner/Runner-Bridging-Header.h";

@@ -584,20 +584,44 @@ func (s *Server) handleSend(w http.ResponseWriter, r *http.Request) {
 }
 
 // pushNewMessage is best effort: the app also polls, so a failed push only delays a message.
+// Each device goes through the service for its kind: Apple directly for iPhones, the
+// relay (Firebase) for the rest.
 func (s *Server) pushNewMessage(to, from string) {
-	if s.Relay == nil {
+	if s.Relay == nil && s.APNs == nil {
 		return
 	}
-	tokens := s.Messages.Devices(to)
-	if len(tokens) == 0 {
+	stored := s.Messages.Devices(to)
+	if len(stored) == 0 {
 		return
+	}
+	var apple, other []string
+	for _, entry := range stored {
+		if kind, _ := splitToken(entry); kind == tokenKindAPNs || kind == tokenKindAPNsSandbox {
+			apple = append(apple, entry)
+		} else {
+			other = append(other, entry)
+		}
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), relayTimeout)
 	defer cancel()
-	dead, err := s.Relay.Notify(ctx, tokens, from)
-	if err != nil {
-		log.Printf("push: %v", err)
-		return
+	var dead []string
+	if len(apple) > 0 && s.APNs != nil {
+		gone, err := s.APNs.Notify(ctx, apple, from)
+		if err != nil {
+			log.Printf("push: apns: %v", err)
+		}
+		dead = append(dead, gone...)
+	}
+	if len(other) > 0 && s.Relay != nil {
+		raw := make([]string, len(other))
+		for i, entry := range other {
+			_, raw[i] = splitToken(entry)
+		}
+		gone, err := s.Relay.Notify(ctx, raw, from)
+		if err != nil {
+			log.Printf("push: relay: %v", err)
+		}
+		dead = append(dead, gone...)
 	}
 	if len(dead) > 0 {
 		if err := s.Messages.RemoveDevices(to, dead); err != nil {
@@ -765,6 +789,9 @@ func (s *Server) handleRegisterDevice(w http.ResponseWriter, r *http.Request) {
 	}
 	var request struct {
 		Token string `json:"token"`
+		// Kind says which push service the token is for: "apns", "apns-sandbox" or
+		// "fcm". Left out, it is an FCM token from an older app.
+		Kind string `json:"kind"`
 	}
 	if !decodeBody(w, r, &request) {
 		return
@@ -772,6 +799,14 @@ func (s *Server) handleRegisterDevice(w http.ResponseWriter, r *http.Request) {
 	token := strings.TrimSpace(request.Token)
 	if token == "" || len(token) > maxTokenBytes {
 		writeError(w, http.StatusBadRequest, "send a device token")
+		return
+	}
+	switch request.Kind {
+	case "", "fcm":
+	case tokenKindAPNs, tokenKindAPNsSandbox:
+		token = request.Kind + ":" + token
+	default:
+		writeError(w, http.StatusBadRequest, "unknown push service")
 		return
 	}
 	if err := s.Messages.AddDevice(user, token); err != nil {

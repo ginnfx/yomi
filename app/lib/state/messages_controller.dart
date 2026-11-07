@@ -210,6 +210,23 @@ class MessagesController extends ChangeNotifier {
     }
   }
 
+  /// Tells the server where to push this phone. Quiet on failure: it is tried again
+  /// the next time the app signs in or starts.
+  Future<bool> registerDevice({
+    required String token,
+    required String kind,
+  }) async {
+    final transport = _transport;
+    if (transport == null) return false;
+    try {
+      await transport.registerDevice(token: token, kind: kind);
+      return true;
+    } on MessagingException catch (error) {
+      debugPrint('Could not register for push: $error');
+      return false;
+    }
+  }
+
   Future<void> openThread(String user) async {
     _openThread = user;
     _thread = const [];

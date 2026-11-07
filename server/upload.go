@@ -30,6 +30,7 @@ type Server struct {
 	Backups     *BackupSource
 	Messages    *MessageStore
 	Relay       *PushRelay
+	APNs        *APNsSender
 	History     *HistoryStore
 	Tags        *TagStore
 	LLM         *LLMClient

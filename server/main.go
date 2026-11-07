@@ -53,6 +53,7 @@ func main() {
 	} else {
 		server.Messages = messages
 		server.Relay = newPushRelay(cfg)
+		server.APNs = newAPNsSender(cfg)
 	}
 	if cfg.Role == roleReplica {
 		if cfg.PrimaryURL == "" || cfg.ReplicaUser == "" || cfg.ReplicaPassword == "" || cfg.ReplicaDatabase == "" {
