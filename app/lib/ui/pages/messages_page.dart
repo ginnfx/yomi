@@ -8,6 +8,8 @@ import '../../state/messages_controller.dart';
 import '../../state/player_controller.dart';
 import '../../state/session.dart';
 import '../theme.dart';
+import '../widgets/message_entrance.dart';
+import '../widgets/message_share_card.dart';
 import '../widgets/person_avatar.dart';
 import '../widgets/song_picker_sheet.dart';
 import 'collection_page.dart';
@@ -277,6 +279,17 @@ class _ThreadPageState extends State<ThreadPage> {
   bool _isSending = false;
   ChatMessage? _replyingTo;
 
+  /// Messages shown while the chat was loading just appear; later ones animate in.
+  static const Duration _settleTime = Duration(milliseconds: 1500);
+  final DateTime _openedAt = DateTime.now();
+  final Set<int> _known = {};
+
+  bool _isNew(ChatMessage message) {
+    final isSettled = DateTime.now().difference(_openedAt) > _settleTime;
+    final isKnown = !_known.add(message.id);
+    return isSettled && !isKnown;
+  }
+
   @override
   void initState() {
     super.initState();
@@ -417,14 +430,19 @@ class _ThreadPageState extends State<ThreadPage> {
                     );
                   }
                   final message = thread[thread.length - 1 - i];
-                  return _Bubble(
+                  final isMine = message.to == widget.user;
+                  return MessageEntrance(
                     key: ValueKey(message.id),
-                    message: message,
-                    isMine: message.to == widget.user,
-                    repliedTo: thread
-                        .where((other) => other.id == message.replyTo)
-                        .firstOrNull,
-                    onLongPress: () => _showActions(message),
+                    animate: _isNew(message),
+                    isMine: isMine,
+                    child: _Bubble(
+                      message: message,
+                      isMine: isMine,
+                      repliedTo: thread
+                          .where((other) => other.id == message.replyTo)
+                          .firstOrNull,
+                      onLongPress: () => _showActions(message),
+                    ),
                   );
                 },
               ),
@@ -511,7 +529,6 @@ String _preview(ChatMessage message) =>
 
 class _Bubble extends StatelessWidget {
   const _Bubble({
-    super.key,
     required this.message,
     required this.isMine,
     this.repliedTo,
@@ -569,11 +586,6 @@ class _Bubble extends StatelessWidget {
     final foreground = isMine ? Colors.black : YomiColors.textPrimary;
     final hasShare = message.isShare;
     final quoted = repliedTo;
-    final shareIcon = message.songId != null
-        ? Icons.play_circle_rounded
-        : message.albumId != null
-        ? Icons.album_rounded
-        : Icons.queue_music_rounded;
     return Align(
       alignment: isMine ? Alignment.centerRight : Alignment.centerLeft,
       child: ConstrainedBox(
@@ -587,12 +599,11 @@ class _Bubble extends StatelessWidget {
             borderRadius: BorderRadius.circular(YomiRadius.sheet),
             clipBehavior: Clip.antiAlias,
             child: InkWell(
-              onTap: hasShare ? () => _openShare(context) : null,
               onLongPress: onLongPress,
               child: Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: YomiSpace.m,
-                  vertical: YomiSpace.s,
+                padding: EdgeInsets.symmetric(
+                  horizontal: hasShare ? YomiSpace.xs : YomiSpace.m,
+                  vertical: hasShare ? YomiSpace.xs : YomiSpace.s,
                 ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -612,22 +623,15 @@ class _Bubble extends StatelessWidget {
                         ),
                       ),
                     if (hasShare)
-                      Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(shareIcon, size: 20, color: foreground),
-                          const SizedBox(width: YomiSpace.xs),
-                          Flexible(
-                            child: Text(
-                              message.songTitle ?? 'Shared with you',
-                              style: yomiText(
-                                14,
-                                weight: FontWeight.w700,
-                                color: foreground,
-                              ),
-                            ),
-                          ),
-                        ],
+                      Padding(
+                        padding: EdgeInsets.only(
+                          bottom: message.text.isEmpty ? 0 : YomiSpace.xs,
+                        ),
+                        child: MessageShareCard(
+                          message: message,
+                          isMine: isMine,
+                          onOpen: () => _openShare(context),
+                        ),
                       ),
                     if (message.text.isNotEmpty)
                       Text(
