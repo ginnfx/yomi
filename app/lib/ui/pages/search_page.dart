@@ -380,6 +380,7 @@ class _SearchPageState extends State<SearchPage> {
             child: TextField(
               controller: _controller,
               focusNode: _searchFocus,
+              onTapOutside: (_) => _searchFocus.unfocus(),
               onChanged: _onChanged,
               onSubmitted: (_) => _rememberSearch(),
               textInputAction: TextInputAction.search,

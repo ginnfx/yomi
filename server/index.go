@@ -98,7 +98,16 @@ func (i *HashIndex) Lookup(hash string) (indexEntry, bool) {
 	}
 }
 
+// Archived replacements are not part of the playable library, even in older index logs.
+func isArchivedSong(path string) bool {
+	clean := filepath.Clean(filepath.FromSlash(path))
+	return clean == replaceArchiveDir || strings.HasPrefix(clean, replaceArchiveDir+string(filepath.Separator))
+}
+
 func (i *HashIndex) setLocked(entry indexEntry) {
+	if isArchivedSong(entry.Path) {
+		return
+	}
 	if old, ok := i.byPath[entry.Path]; ok && old.SHA256 != entry.SHA256 {
 		delete(i.byHash, old.SHA256)
 		for path, other := range i.byPath {
@@ -169,6 +178,9 @@ func (i *HashIndex) LookupPath(path string) (indexEntry, bool) {
 
 // Add records a stored file and appends it to the index file.
 func (i *HashIndex) Add(entry indexEntry) error {
+	if isArchivedSong(entry.Path) {
+		return nil
+	}
 	if info, err := os.Stat(filepath.Join(i.root, entry.Path)); err == nil && entry.ModNs == 0 {
 		entry.ModNs = info.ModTime().UnixNano()
 	}
@@ -239,6 +251,9 @@ func (i *HashIndex) Seed() {
 			return nil
 		}
 		if entry.IsDir() {
+			if path == filepath.Join(i.root, replaceArchiveDir) {
+				return filepath.SkipDir
+			}
 			return nil
 		}
 		if isTempFile(entry.Name()) {

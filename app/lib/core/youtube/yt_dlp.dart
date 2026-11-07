@@ -5,9 +5,10 @@ import 'package:flutter/foundation.dart';
 
 import '../search_index.dart';
 
-/// m4a first: every platform's player can open it, and no conversion is needed.
+/// Prefer m4a; every fallback must also be accepted by the library uploader.
 const String kAudioFormat =
-    'bestaudio[ext=m4a]/bestaudio[acodec^=mp4a]/bestaudio';
+    'bestaudio[ext=m4a]/bestaudio[ext=aac]/bestaudio[ext=mp3]/'
+    'bestaudio[ext=ogg]/bestaudio[ext=opus]/bestaudio[ext=flac]/bestaudio[ext=wav]';
 
 /// Clients that still hand out full audio files when the default one is blocked.
 const String kExtractorArgs = 'youtube:player_client=default,android,tv';
@@ -222,12 +223,16 @@ List<YoutubeResult> rankResults(
 bool _hasWord(String text, String word) =>
     RegExp('(^| )${RegExp.escape(word)}( |\$)').hasMatch(text);
 
-/// "Title - Artist.m4a": the server keeps the name, and the app reads untagged files
-/// named this way as title and artist.
-String libraryFileName({required String artist, required String title}) {
+/// "Title - Artist.ext": keeps the audio container and lets the app read untagged
+/// files named this way as title and artist.
+String libraryFileName({
+  required String artist,
+  required String title,
+  String extension = 'm4a',
+}) {
   String clean(String text) => text
       .replaceAll(RegExp(r'[\\/:*?"<>|]'), '')
       .replaceAll(RegExp(r'\s+'), ' ')
       .trim();
-  return '${clean(title)} - ${clean(artist)}.m4a';
+  return '${clean(title)} - ${clean(artist)}.$extension';
 }

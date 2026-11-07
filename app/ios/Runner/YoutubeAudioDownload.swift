@@ -45,7 +45,10 @@ enum YoutubeAudioDownload {
       throw YtDlpError.noAudio
     }
     let streams = try await YouTube(url: url, methods: [.local]).streams
-    let audio = streams.filterAudioOnly().filter(\.isNativelyPlayable)
+    let acceptedExtensions: Set<String> = ["m4a", "aac", "mp3", "ogg", "opus", "flac", "wav"]
+    let audio = streams.filterAudioOnly().filter {
+      $0.isNativelyPlayable && acceptedExtensions.contains($0.fileExtension.rawValue)
+    }
     let m4a = audio.filter { $0.fileExtension == .m4a }
     guard let stream = m4a.highestAudioBitrateStream() ?? audio.highestAudioBitrateStream() else {
       throw YtDlpError.noAudio

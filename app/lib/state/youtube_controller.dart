@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 
 import '../core/models.dart';
 import '../core/search_index.dart';
+import '../core/upload/file_inspector.dart';
 import '../core/youtube/youtube_fetcher.dart';
 import '../core/youtube/yt_dlp.dart';
 
@@ -55,13 +56,16 @@ class YoutubeController extends ChangeNotifier {
 
   bool get isAvailable => fetcher.isAvailable;
 
-  YoutubeState? stateFor(String artist, String title) =>
-      _states[_key(artist, title)];
+  YoutubeState? stateFor(
+    String artist,
+    String title, {
+    bool wantExplicit = false,
+  }) => _states[_key(artist, title, wantExplicit: wantExplicit)];
 
   bool isSaved(Song song) => _saved.contains(song.id);
 
-  String _key(String artist, String title) =>
-      '${normalizeForSearch(artist)}|${normalizeForSearch(title)}';
+  String _key(String artist, String title, {bool wantExplicit = false}) =>
+      '${normalizeForSearch(artist)}|${normalizeForSearch(title)}|$wantExplicit';
 
   /// YouTube changes often and the bundled yt-dlp ages, so the first fetch of each
   /// session gets the newest one. A failed update still lets the old one try.
@@ -78,7 +82,7 @@ class YoutubeController extends ChangeNotifier {
     int? durationSeconds,
     bool wantExplicit = false,
   }) async {
-    final key = _key(artist, title);
+    final key = _key(artist, title, wantExplicit: wantExplicit);
     if (_states[key]?.isBusy ?? false) return false;
     // Played before: the file is still here, so skip the search and download.
     final earlier = _played[key];
@@ -143,9 +147,13 @@ class YoutubeController extends ChangeNotifier {
     final file = _files[song.id];
     if (!song.isFromYoutube || file == null || !file.existsSync()) return false;
     try {
+      if (!hasUploadExtension(file.path)) return false;
+      final extension = file.path
+          .substring(file.path.lastIndexOf('.') + 1)
+          .toLowerCase();
       await saveDir.create(recursive: true);
       final target = File(
-        '${saveDir.path}/${libraryFileName(artist: song.artist, title: song.title)}',
+        '${saveDir.path}/${libraryFileName(artist: song.artist, title: song.title, extension: extension)}',
       );
       await file.copy(target.path);
       await upload(target.path);

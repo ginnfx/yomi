@@ -15,6 +15,7 @@ class _FakeYtDlp implements YtDlp {
   final calls = <List<String>>[];
   int updates = 0;
   bool failDownloads = false;
+  String extension = 'm4a';
 
   @override
   bool get isAvailable => true;
@@ -37,7 +38,7 @@ class _FakeYtDlp implements YtDlp {
           'duration': 260,
         }),
         jsonEncode({
-          'id': 'real0000001',
+          'id': args.last.endsWith('explicit') ? 'explicit001' : 'real0000001',
           'title': 'Mira - Blue Hour (Official Audio)',
           'channel': 'Mira',
           'duration': 200,
@@ -46,7 +47,8 @@ class _FakeYtDlp implements YtDlp {
     }
     if (failDownloads) throw const YtDlpException('HTTP Error 403: Forbidden');
     final id = Uri.parse(args.last).queryParameters['v']!;
-    final file = File('${cache.path}/$id.m4a')..writeAsStringSync('audio');
+    final file = File('${cache.path}/$id.$extension')
+      ..writeAsStringSync('audio');
     onLine?.call('download: 50.0%');
     onLine?.call(file.path);
     return file.path;
@@ -181,6 +183,54 @@ void main() {
       // Assert
       expect(isSaved, isFalse);
       expect(uploaded, isEmpty);
+    },
+  );
+  test('an explicit request searches again instead of replaying the ordinary selection', () async {
+    final youtube = controller();
+    await youtube.play(artist: 'Mira', title: 'Blue Hour');
+    final searches = ytDlp.calls
+        .where((args) => args.last.startsWith('ytsearch'))
+        .length;
+    await youtube.play(artist: 'Mira', title: 'Blue Hour', wantExplicit: true);
+    expect(
+      ytDlp.calls.where((args) => args.last.startsWith('ytsearch')).length,
+      searches + 1,
+    );
+    expect(ytDlp.calls.last.last, contains('explicit'));
+    expect(played.last.$1.id, 'yt:explicit001');
+    final calls = ytDlp.calls.length;
+    await youtube.play(artist: 'Mira', title: 'Blue Hour', wantExplicit: true);
+    expect(ytDlp.calls.length, calls);
+    expect(
+      youtube.stateFor('Mira', 'Blue Hour', wantExplicit: true)?.step,
+      YoutubeStep.ready,
+    );
+  });
+
+  for (final extension in ['opus', 'ogg', 'aac', 'mp3', 'flac', 'wav']) {
+    test('saving $extension audio preserves its container and bytes', () async {
+      ytDlp.extension = extension;
+      final youtube = controller();
+      await youtube.play(artist: 'Mira', title: 'Blue Hour');
+      expect(await youtube.save(played.single.$1), isTrue);
+      expect(uploaded.single, endsWith('Blue Hour - Mira.$extension'));
+      expect(
+        File(uploaded.single).readAsBytesSync(),
+        played.single.$2.readAsBytesSync(),
+      );
+    });
+  }
+
+  test(
+    'an old cached unsupported format is never uploaded under an m4a name',
+    () async {
+      ytDlp.extension = 'webm';
+      final youtube = controller();
+      await youtube.play(artist: 'Mira', title: 'Blue Hour');
+      expect(await youtube.save(played.single.$1), isFalse);
+      expect(uploaded, isEmpty);
+      expect(saved, isEmpty);
+      expect(youtube.isSaved(played.single.$1), isFalse);
     },
   );
 }

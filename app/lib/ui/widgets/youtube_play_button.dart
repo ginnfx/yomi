@@ -44,7 +44,7 @@ class YoutubePlayButton extends StatelessWidget {
         onPressed: () => _openSearch(artist, title),
       );
     }
-    final state = youtube.stateFor(artist, title);
+    final state = youtube.stateFor(artist, title, wantExplicit: wantExplicit);
     return AnimatedSwitcher(
       duration: context.motion(YomiMotion.quick),
       child: switch (state?.step) {
@@ -95,7 +95,8 @@ class YoutubePlayButton extends StatelessWidget {
     messenger.showSnackBar(
       SnackBar(
         content: Text(
-          youtube.stateFor(artist, title)?.error ?? "Couldn't play it.",
+          youtube.stateFor(artist, title, wantExplicit: wantExplicit)?.error ??
+              "Couldn't play it.",
         ),
         action: SnackBarAction(
           label: 'Open YouTube',

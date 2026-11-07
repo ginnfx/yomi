@@ -191,7 +191,13 @@ class _ReportRow extends StatelessWidget {
       messenger.showSnackBar(
         SnackBar(
           content: Text(
-            youtube.stateFor(report.artist, report.title)?.error ??
+            youtube
+                    .stateFor(
+                      report.artist,
+                      report.title,
+                      wantExplicit: report.kind == ReportKind.explicitWanted,
+                    )
+                    ?.error ??
                 "Couldn't play it.",
           ),
         ),

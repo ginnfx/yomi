@@ -264,6 +264,7 @@ void main() {
 
     await tester.tap(find.widgetWithText(ActionChip, 'halo'));
     await tester.pump();
+    expect(tester.testTextInput.isVisible, isTrue);
     expect(find.text('Halo'), findsWidgets);
     await tester.pump(const Duration(minutes: 1));
   });
@@ -302,5 +303,20 @@ void main() {
     await tester.pump();
 
     expect(find.text('Nothing for "zzzzzz"'), findsOneWidget);
+  });
+  testWidgets('tapping outside search dismisses the mobile keyboard', (
+    tester,
+  ) async {
+    await pumpScreen(tester, page(), size: phoneSize);
+    await tester.tap(find.byType(TextField));
+    await tester.pump();
+    expect(tester.testTextInput.isVisible, isTrue);
+    await tester.tap(find.text('Search').first);
+    await tester.pump();
+    expect(
+      tester.widget<TextField>(find.byType(TextField)).focusNode!.hasFocus,
+      isFalse,
+    );
+    expect(tester.testTextInput.isVisible, isFalse);
   });
 }
