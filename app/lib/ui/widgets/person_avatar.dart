@@ -22,7 +22,11 @@ class PersonAvatar extends StatelessWidget {
       radius: radius,
       backgroundColor: YomiColors.surfaceHigh,
       foregroundImage: profile.hasAvatar && transport != null
-          ? NetworkImage(transport.avatarUri(profile.user).toString())
+          ? NetworkImage(
+              transport
+                  .avatarUri(profile.user, version: profile.avatarVersion)
+                  .toString(),
+            )
           : null,
       child: Text(
         initial,

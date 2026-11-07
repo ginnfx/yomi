@@ -57,6 +57,7 @@ import 'state/offline_keeper.dart';
 import 'state/listening_controller.dart';
 import 'state/listening_log.dart';
 import 'state/messages_controller.dart';
+import 'state/profile_sync.dart';
 import 'state/player_controller.dart';
 import 'state/playlist_covers_controller.dart';
 import 'state/playback_sync_controller.dart';
@@ -369,30 +370,11 @@ Future<void> main() async {
   home.addListener(shareTaste);
   settings.addListener(shareTaste);
   String? messagingUrl;
-  void publishProfile() {
-    if (!profile.hasContent) return;
-    unawaited(
-      messages.publishProfile(
-        displayName: profile.nickname,
-        bio: profile.bio,
-        avatar: profile.avatarFile,
-      ),
-    );
-  }
-
-  // After signing back in, take the name and bio from the server, as signing out cleared
-  // them here. Only once, and only if nothing's been typed in the meantime.
-  var needsProfileFromServer = !profile.hasContent;
-  messages.addListener(() {
-    if (!needsProfileFromServer || messages.people.isEmpty) return;
-    needsProfileFromServer = false;
-    final mine = messages.profileOf(session.username);
-    if (profile.hasContent) return;
-    if (mine.displayName.isNotEmpty)
-      unawaited(profile.setNickname(mine.displayName));
-    if (mine.bio.isNotEmpty) unawaited(profile.setBio(mine.bio));
-  });
-  profile.addListener(publishProfile);
+  final profileSync = ProfileSync(
+    profile: profile,
+    messages: messages,
+    username: () => session.username,
+  )..start();
   var wasReachable = false;
   String? aiUrl;
   void followSession() {
@@ -409,7 +391,7 @@ Future<void> main() async {
         unawaited(scrobbles.clear());
         unawaited(profile.clear());
         unawaited(settings.clearPersonal());
-        needsProfileFromServer = true;
+        profileSync.reset();
       }
       unawaited(
         account == null
@@ -508,7 +490,7 @@ Future<void> main() async {
     } else if (client.baseUrl != messagingUrl) {
       messagingUrl = client.baseUrl;
       messages.attach(session.messaging);
-      publishProfile();
+      profileSync.publish();
     }
     uploads.attach(
       client == null ? null : session.uploader,

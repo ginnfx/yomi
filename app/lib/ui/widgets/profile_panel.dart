@@ -9,10 +9,9 @@ import '../settings/profile_section.dart';
 import '../stats/stats_page.dart';
 import '../pages/friend_profile_page.dart';
 import '../theme.dart';
+import 'profile_header.dart';
 
 const double _panelWidth = 320;
-const double _bannerHeight = 112;
-const double _avatarSize = 72;
 
 /// Slides the profile panel in from the left, like Spotify's side menu.
 void openProfilePanel(BuildContext context) {
@@ -51,38 +50,15 @@ class _ProfilePanel extends StatelessWidget {
         child: ListView(
           padding: EdgeInsets.zero,
           children: [
-            Stack(
-              clipBehavior: Clip.none,
-              children: [
-                Container(
-                  height: _bannerHeight + topInset,
-                  width: double.infinity,
-                  color: context.accentDeep,
-                  child: banner == null
-                      ? null
-                      : Image.file(
-                          banner,
-                          key: ValueKey(banner.path),
-                          fit: BoxFit.cover,
-                        ),
-                ),
-                Positioned(
-                  left: YomiSpace.l,
-                  bottom: -_avatarSize / 2,
-                  child: DecoratedBox(
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      border: Border.all(color: YomiColors.surface, width: 3),
-                    ),
-                    child: const ProfileAvatar(size: _avatarSize),
-                  ),
-                ),
-              ],
+            ProfileHeader(
+              topInset: topInset,
+              banner: banner == null ? null : FileImage(banner),
+              avatar: const ProfileAvatar(size: kProfileAvatarSize),
             ),
             Padding(
               padding: const EdgeInsets.fromLTRB(
                 YomiSpace.l,
-                _avatarSize / 2 + YomiSpace.m,
+                kProfileAvatarSize / 2 + YomiSpace.m,
                 YomiSpace.l,
                 YomiSpace.l,
               ),

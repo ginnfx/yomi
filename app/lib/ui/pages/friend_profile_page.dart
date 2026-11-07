@@ -14,7 +14,10 @@ import '../../state/messages_controller.dart';
 import '../../state/player_controller.dart';
 import '../../state/session.dart';
 import '../theme.dart';
+import '../../state/profile_controller.dart';
+import '../settings/profile_section.dart';
 import '../widgets/person_avatar.dart';
+import '../widgets/profile_header.dart';
 import 'collection_page.dart';
 import 'messages_page.dart';
 import 'playlist_preview_page.dart';
@@ -27,10 +30,26 @@ Future<void> openProfile(BuildContext context, String user) =>
 /// How many shared artists name a Blend.
 const int _blendNameArtists = 3;
 
-class FriendProfilePage extends StatelessWidget {
+class FriendProfilePage extends StatefulWidget {
   const FriendProfilePage({super.key, required this.user});
 
   final String user;
+
+  @override
+  State<FriendProfilePage> createState() => _FriendProfilePageState();
+}
+
+class _FriendProfilePageState extends State<FriendProfilePage> {
+  String get user => widget.user;
+
+  @override
+  void initState() {
+    super.initState();
+    // Their picture, banner and bio may have changed since the list was fetched.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) context.read<MessagesController>().refresh();
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -65,7 +84,7 @@ class FriendProfilePage extends StatelessWidget {
           kPagePadding,
         ).copyWith(bottom: kPagePadding + MediaQuery.paddingOf(context).bottom),
         children: [
-          Center(child: PersonAvatar(profile: profile, radius: 48)),
+          _header(context, profile, isMe),
           const SizedBox(height: 12),
           Center(
             child: Text(
@@ -204,6 +223,35 @@ class FriendProfilePage extends StatelessWidget {
       description:
           named?.description ?? 'A blend of your taste and ${friend.name}’s',
       songs: songs,
+    );
+  }
+
+  Widget _header(BuildContext context, ChatProfile profile, bool isMe) {
+    final transport = context.read<MessagesController>().transport;
+    final ownBanner = isMe
+        ? context.watch<ProfileController>().bannerFile
+        : null;
+    final ImageProvider? banner = ownBanner != null
+        ? FileImage(ownBanner)
+        : profile.hasBanner && transport != null
+        ? NetworkImage(
+            transport
+                .bannerUri(profile.user, version: profile.bannerVersion)
+                .toString(),
+          )
+        : null;
+    const radius = kProfileAvatarSize / 2;
+    return Column(
+      children: [
+        ProfileHeader(
+          banner: banner,
+          alignment: Alignment.center,
+          avatar: isMe
+              ? const ProfileAvatar(size: kProfileAvatarSize)
+              : PersonAvatar(profile: profile, radius: radius),
+        ),
+        const SizedBox(height: kProfileAvatarSize / 2),
+      ],
     );
   }
 }

@@ -87,6 +87,8 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("GET /v1/profiles", s.handleProfiles)
 	mux.HandleFunc("PUT /v1/profile/avatar", s.handleSaveAvatar)
 	mux.HandleFunc("GET /v1/profiles/{user}/avatar", s.handleAvatar)
+	mux.HandleFunc("PUT /v1/profile/banner", s.handleSaveBanner)
+	mux.HandleFunc("GET /v1/profiles/{user}/banner", s.handleBanner)
 	mux.HandleFunc("POST /v1/devices", s.handleRegisterDevice)
 	mux.HandleFunc("GET /v1/replica/index", s.handleReplicaIndex)
 	mux.HandleFunc("GET /v1/replica/file/{sha256}", s.handleReplicaFile)

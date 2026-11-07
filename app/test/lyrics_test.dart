@@ -146,12 +146,45 @@ void main() {
       final client = clientReturning(transport);
 
       expect(await fresh().forSong(client, song), isNull);
+      final callsPerLookup = calls;
       expect(await fresh().forSong(client, song), isNull);
-      expect(calls, 1);
+      expect(calls, callsPerLookup);
 
       now = now.add(kNoLyricsRetryAfter + const Duration(minutes: 1));
       expect(await fresh().forSong(client, song), isNull);
-      expect(calls, 2);
+      expect(calls, callsPerLookup * 2);
+    });
+
+    test(
+      'falls back to a search and prefers timed lyrics of the right length',
+      () async {
+        final transport = MockClient((request) async {
+          if (request.url.host != 'lrclib.net') return subsonicLyrics(const []);
+          if (request.url.path == '/api/get') return http.Response('', 404);
+          return http.Response(
+            jsonEncode([
+              {'duration': 400, 'syncedLyrics': '[00:01.00] live version'},
+              {'duration': song.durationSeconds, 'plainLyrics': 'plain'},
+              {
+                'duration': song.durationSeconds + 2,
+                'syncedLyrics': '[00:02.00] studio version',
+              },
+            ]),
+            200,
+          );
+        });
+        final service = LyricsService(httpClient: transport);
+        final found = await service.forSong(clientReturning(transport), song);
+        expect(found!.isSynced, isTrue);
+        expect(found.lines.single.text, 'studio version');
+      },
+    );
+
+    test('cleans feat. and remaster noise from titles and artists', () {
+      expect(cleanLyricsTitle('Song (feat. Guest) - 2011 Remaster'), 'Song');
+      expect(cleanLyricsTitle('Song [Deluxe]'), 'Song');
+      expect(primaryLyricsArtist('Main & Other'), 'Main');
+      expect(primaryLyricsArtist('Main feat. Other'), 'Main');
     });
 
     test('a damaged saved file only costs another lookup', () async {

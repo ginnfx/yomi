@@ -166,21 +166,47 @@ class MessagesController extends ChangeNotifier {
 
   /// Publishes this user's name and bio, so friends see them. Also how a user becomes
   /// someone others can message.
-  Future<void> publishProfile({
+  Future<bool> publishProfile({
     required String displayName,
     required String bio,
     File? avatar,
+    File? banner,
   }) async {
     final transport = _transport;
-    if (transport == null) return;
+    if (transport == null) return false;
     try {
       await transport.saveProfile(displayName: displayName, bio: bio);
       if (avatar != null) await transport.saveAvatar(avatar);
+      if (banner != null) await transport.saveBanner(banner);
+      // Friends' lists carry the new picture version only after a refresh.
+      if (avatar != null || banner != null) unawaited(refresh());
+      return true;
     } on MessagingUnavailable {
       _isAvailable = false;
       _changed();
     } on MessagingException catch (error) {
       debugPrint('Could not publish profile: $error');
+    }
+    return false;
+  }
+
+  /// A person's current picture or banner from the server, or null if they have none
+  /// or it can't be reached right now.
+  Future<List<int>?> fetchPersonImage(
+    ChatProfile person, {
+    required bool isBanner,
+  }) async {
+    final transport = _transport;
+    if (transport == null) return null;
+    try {
+      return await transport.fetchImage(
+        isBanner
+            ? transport.bannerUri(person.user, version: person.bannerVersion)
+            : transport.avatarUri(person.user, version: person.avatarVersion),
+      );
+    } on MessagingException catch (error) {
+      debugPrint('Could not fetch ${person.user}\'s picture: $error');
+      return null;
     }
   }
 

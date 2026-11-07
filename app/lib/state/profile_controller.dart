@@ -61,6 +61,24 @@ class ProfileController extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Puts back a banner kept on the server, after a reinstall or a new sign-in.
+  Future<void> restoreBanner(List<int> bytes) =>
+      _restore('bannerPath', 'banner', bytes);
+
+  /// Puts back a picture kept on the server, after a reinstall or a new sign-in.
+  Future<void> restoreAvatar(List<int> bytes) =>
+      _restore('avatarPath', 'avatar', bytes);
+
+  Future<void> _restore(String key, String prefix, List<int> bytes) async {
+    final target = File(
+      '${_directory.path}/$prefix-${DateTime.now().millisecondsSinceEpoch}.jpg',
+    );
+    await target.writeAsBytes(bytes, flush: true);
+    await _deleteFileAt(key);
+    await _prefs.setString(key, target.path);
+    notifyListeners();
+  }
+
   Future<void> clearBanner() async {
     await _deleteFileAt('bannerPath');
     await _prefs.remove('bannerPath');
@@ -102,7 +120,10 @@ class ProfileController extends ChangeNotifier {
   /// Whether there's anything worth publishing. Without this, signing in on a device with
   /// a blank profile would wipe the one already on the server.
   bool get hasContent =>
-      nickname.isNotEmpty || bio.isNotEmpty || avatarFile != null;
+      nickname.isNotEmpty ||
+      bio.isNotEmpty ||
+      avatarFile != null ||
+      bannerFile != null;
 
   /// Forgets this person's profile on this device, on signing out.
   Future<void> clear() async {

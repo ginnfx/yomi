@@ -120,7 +120,18 @@ class FakeTransport implements MessagingTransport {
   Future<void> saveAvatar(File image) async => savedAvatar = image;
 
   @override
-  Uri avatarUri(String user) => Uri.parse('http://server/$user');
+  Uri avatarUri(String user, {int version = 0}) =>
+      Uri.parse('http://server/$user');
+
+  @override
+  Uri bannerUri(String user, {int version = 0}) =>
+      Uri.parse('http://server/$user/banner');
+
+  @override
+  Future<void> saveBanner(File image) async {}
+
+  @override
+  Future<List<int>?> fetchImage(Uri uri) async => null;
 }
 
 void main() {

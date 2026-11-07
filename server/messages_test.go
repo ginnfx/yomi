@@ -260,6 +260,25 @@ func TestProfilesAndAvatars(t *testing.T) {
 	if code != http.StatusOK || !bytes.Equal(data, picture.Bytes()) {
 		t.Fatalf("avatar: %d, %d bytes", code, len(data))
 	}
+	firstVersion := reply.Profiles[0].AvatarVersion
+	if firstVersion == 0 {
+		t.Fatal("avatar has no version, so apps cannot tell it changed")
+	}
+	if code, _ := env.call(t, http.MethodPut, "/v1/profile/avatar", "keli", picture.Bytes()); code != http.StatusOK {
+		t.Fatalf("second avatar code = %d", code)
+	}
+	if code, _ := env.call(t, http.MethodPut, "/v1/profile/banner", "keli", picture.Bytes()); code != http.StatusOK {
+		t.Fatalf("banner code = %d", code)
+	}
+	_, body = env.call(t, http.MethodGet, "/v1/profiles", "sam", nil)
+	reply.Profiles = nil
+	json.Unmarshal(body, &reply)
+	if reply.Profiles[0].AvatarVersion <= firstVersion || !reply.Profiles[0].HasBanner || reply.Profiles[0].BannerVersion == 0 {
+		t.Fatalf("versions after update = %+v", reply.Profiles[0])
+	}
+	if code, data := env.call(t, http.MethodGet, "/v1/profiles/keli/banner", "sam", nil); code != http.StatusOK || !bytes.Equal(data, picture.Bytes()) {
+		t.Fatalf("banner: %d, %d bytes", code, len(data))
+	}
 }
 
 func TestAvatarRejectsNonImagesAndBadNames(t *testing.T) {

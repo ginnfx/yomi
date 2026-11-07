@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:typed_data' show BytesBuilder;
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
@@ -107,6 +108,9 @@ class ChatProfile {
     this.displayName = '',
     this.bio = '',
     this.hasAvatar = false,
+    this.avatarVersion = 0,
+    this.hasBanner = false,
+    this.bannerVersion = 0,
     this.nowPlaying,
     this.taste,
   });
@@ -116,6 +120,9 @@ class ChatProfile {
     displayName: (json['displayName'] as String?) ?? '',
     bio: (json['bio'] as String?) ?? '',
     hasAvatar: json['hasAvatar'] == true,
+    avatarVersion: (json['avatarVersion'] as num?)?.toInt() ?? 0,
+    hasBanner: json['hasBanner'] == true,
+    bannerVersion: (json['bannerVersion'] as num?)?.toInt() ?? 0,
     nowPlaying: json['nowPlaying'] == null
         ? null
         : FriendPlaying.fromJson(json['nowPlaying'] as Map<String, dynamic>),
@@ -128,6 +135,12 @@ class ChatProfile {
   final String displayName;
   final String bio;
   final bool hasAvatar;
+
+  /// Changes whenever their picture does. Part of the picture's address, so a
+  /// cached copy of the old one is never shown.
+  final int avatarVersion;
+  final bool hasBanner;
+  final int bannerVersion;
   final FriendPlaying? nowPlaying;
 
   /// Their top artists and moods, if they share them.
@@ -227,7 +240,15 @@ abstract interface class MessagingTransport {
     required List<String> topMoods,
   });
   Future<void> saveAvatar(File image);
-  Uri avatarUri(String user);
+  Future<void> saveBanner(File image);
+
+  /// Where a person's picture lives. [version] makes the address change with the
+  /// picture, so image caches fetch the new one.
+  Uri avatarUri(String user, {int version = 0});
+  Uri bannerUri(String user, {int version = 0});
+
+  /// The bytes at [uri], or null when there is nothing there.
+  Future<List<int>?> fetchImage(Uri uri);
 }
 
 class MessagingApi implements MessagingTransport {
@@ -450,5 +471,45 @@ class MessagingApi implements MessagingTransport {
   }
 
   @override
-  Uri avatarUri(String user) => _uri('/v1/profiles/$user/avatar');
+  Future<void> saveBanner(File image) async {
+    await _call(
+      'PUT',
+      _uri('/v1/profile/banner'),
+      bytes: await image.readAsBytes(),
+    );
+  }
+
+  @override
+  Uri avatarUri(String user, {int version = 0}) =>
+      _uri('/v1/profiles/$user/avatar', {if (version > 0) 'v': '$version'});
+
+  @override
+  Uri bannerUri(String user, {int version = 0}) =>
+      _uri('/v1/profiles/$user/banner', {if (version > 0) 'v': '$version'});
+
+  @override
+  Future<List<int>?> fetchImage(Uri uri) async {
+    final client = HttpClient()..connectionTimeout = _timeout;
+    try {
+      final request = await client.getUrl(uri).timeout(_timeout);
+      final response = await request.close().timeout(_timeout);
+      if (response.statusCode == HttpStatus.notFound) return null;
+      if (response.statusCode != HttpStatus.ok) {
+        throw MessagingException(
+          'Picture request failed (${response.statusCode}).',
+        );
+      }
+      final builder = BytesBuilder(copy: false);
+      await response.forEach(builder.add).timeout(_timeout);
+      return builder.takeBytes();
+    } on SocketException {
+      throw const MessagingOffline("Can't reach the server.");
+    } on TimeoutException {
+      throw const MessagingOffline("The server didn't answer in time.");
+    } on HttpException {
+      throw const MessagingOffline('The connection was interrupted.');
+    } finally {
+      client.close(force: true);
+    }
+  }
 }

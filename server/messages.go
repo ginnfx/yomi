@@ -29,6 +29,7 @@ const (
 	maxNameChars        = 40
 	maxBioChars         = 160
 	maxAvatarBytes      = 1 << 20
+	maxBannerBytes      = 2 << 20
 	maxDeviceTokens     = 8
 	maxTokenBytes       = 4096
 	messagesPerMinute   = 30
@@ -62,6 +63,11 @@ type Profile struct {
 	DisplayName string `json:"displayName"`
 	Bio         string `json:"bio"`
 	HasAvatar   bool   `json:"hasAvatar"`
+
+	// AvatarVersion changes whenever the picture does, so apps can drop a cached copy.
+	AvatarVersion int64 `json:"avatarVersion,omitempty"`
+	HasBanner     bool  `json:"hasBanner,omitempty"`
+	BannerVersion int64 `json:"bannerVersion,omitempty"`
 
 	// What they share about their listening, if anything.
 	Taste *Taste `json:"taste,omitempty"`
@@ -135,6 +141,10 @@ func (m *MessageStore) messagesFile() string { return filepath.Join(m.dir, "mess
 func (m *MessageStore) stateFile() string    { return filepath.Join(m.dir, "social.json") }
 func (m *MessageStore) avatarFile(user string) string {
 	return filepath.Join(m.dir, "avatar-"+user+".img")
+}
+
+func (m *MessageStore) bannerFile(user string) string {
+	return filepath.Join(m.dir, "banner-"+user+".img")
 }
 
 func (m *MessageStore) loadMessages() error {
@@ -324,7 +334,11 @@ func (m *MessageStore) IsKnownUser(user string) bool {
 func (m *MessageStore) SaveProfile(profile Profile) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	profile.HasAvatar = m.state.Profiles[profile.User].HasAvatar
+	kept := m.state.Profiles[profile.User]
+	profile.HasAvatar = kept.HasAvatar
+	profile.AvatarVersion = kept.AvatarVersion
+	profile.HasBanner = kept.HasBanner
+	profile.BannerVersion = kept.BannerVersion
 	profile.Taste = m.state.Profiles[profile.User].Taste
 	m.state.Profiles[profile.User] = profile
 	return m.saveStateLocked()
@@ -345,18 +359,33 @@ func (m *MessageStore) Profiles() []Profile {
 
 // SaveAvatar stores image bytes for a user.
 func (m *MessageStore) SaveAvatar(user string, image []byte) error {
+	return m.saveImage(user, m.avatarFile(user), image, func(p *Profile, version int64) {
+		p.HasAvatar = true
+		p.AvatarVersion = version
+	})
+}
+
+// SaveBanner stores a user's profile banner.
+func (m *MessageStore) SaveBanner(user string, image []byte) error {
+	return m.saveImage(user, m.bannerFile(user), image, func(p *Profile, version int64) {
+		p.HasBanner = true
+		p.BannerVersion = version
+	})
+}
+
+func (m *MessageStore) saveImage(user, path string, image []byte, mark func(*Profile, int64)) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	temp := m.avatarFile(user) + ".tmp"
+	temp := path + ".tmp"
 	if err := os.WriteFile(temp, image, 0o666); err != nil {
 		return err
 	}
-	if err := os.Rename(temp, m.avatarFile(user)); err != nil {
+	if err := os.Rename(temp, path); err != nil {
 		return err
 	}
 	profile := m.state.Profiles[user]
 	profile.User = user
-	profile.HasAvatar = true
+	mark(&profile, time.Now().UnixNano())
 	m.state.Profiles[user] = profile
 	return m.saveStateLocked()
 }
@@ -673,11 +702,19 @@ func looksLikeImage(data []byte) bool {
 }
 
 func (s *Server) handleSaveAvatar(w http.ResponseWriter, r *http.Request) {
+	s.saveProfileImage(w, r, maxAvatarBytes, s.Messages.SaveAvatar)
+}
+
+func (s *Server) handleSaveBanner(w http.ResponseWriter, r *http.Request) {
+	s.saveProfileImage(w, r, maxBannerBytes, s.Messages.SaveBanner)
+}
+
+func (s *Server) saveProfileImage(w http.ResponseWriter, r *http.Request, limit int64, save func(string, []byte) error) {
 	user, ok := s.socialUser(w, r)
 	if !ok {
 		return
 	}
-	image, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxAvatarBytes))
+	image, err := io.ReadAll(http.MaxBytesReader(w, r.Body, limit))
 	if err != nil {
 		writeError(w, http.StatusRequestEntityTooLarge, "that picture is too large")
 		return
@@ -686,8 +723,8 @@ func (s *Server) handleSaveAvatar(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnsupportedMediaType, "send a JPEG, PNG or WebP picture")
 		return
 	}
-	if err := s.Messages.SaveAvatar(user, image); err != nil {
-		log.Printf("messages: save avatar: %v", err)
+	if err := save(user, image); err != nil {
+		log.Printf("messages: save profile image: %v", err)
 		writeError(w, http.StatusInternalServerError, "could not save the picture")
 		return
 	}
@@ -695,6 +732,14 @@ func (s *Server) handleSaveAvatar(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleAvatar(w http.ResponseWriter, r *http.Request) {
+	s.serveProfileImage(w, r, s.Messages.avatarFile)
+}
+
+func (s *Server) handleBanner(w http.ResponseWriter, r *http.Request) {
+	s.serveProfileImage(w, r, s.Messages.bannerFile)
+}
+
+func (s *Server) serveProfileImage(w http.ResponseWriter, r *http.Request, fileFor func(string) string) {
 	if _, ok := s.socialUser(w, r); !ok {
 		return
 	}
@@ -703,7 +748,7 @@ func (s *Server) handleAvatar(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "bad user name")
 		return
 	}
-	data, err := os.ReadFile(s.Messages.avatarFile(target))
+	data, err := os.ReadFile(fileFor(target))
 	if err != nil {
 		writeError(w, http.StatusNotFound, "no picture")
 		return

@@ -535,5 +535,15 @@ class _Chat implements MessagingTransport {
   @override
   Future<void> saveAvatar(File image) async {}
   @override
-  Uri avatarUri(String user) => Uri.parse('http://a/$user');
+  Uri avatarUri(String user, {int version = 0}) => Uri.parse('http://a/$user');
+
+  @override
+  Uri bannerUri(String user, {int version = 0}) =>
+      Uri.parse('http://a/$user/banner');
+
+  @override
+  Future<void> saveBanner(File image) async {}
+
+  @override
+  Future<List<int>?> fetchImage(Uri uri) async => null;
 }
