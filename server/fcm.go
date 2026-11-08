@@ -160,8 +160,27 @@ func (f *FCMSender) token(ctx context.Context) (string, error) {
 	return f.accessToken, nil
 }
 
+// Alert is one notification, whatever kind of message it announces.
+type Alert struct {
+	Title string
+	Body  string
+	// Thread groups and replaces notifications of the same kind (a sender, "update").
+	Thread string
+	Data   map[string]string
+}
+
+// messageAlert is what a new chat message looks like: only the sender's name leaves.
+func messageAlert(from string) Alert {
+	return Alert{Title: from, Body: "New message", Thread: from, Data: map[string]string{"from": from}}
+}
+
 // Notify sends to raw FCM tokens and returns the ones Google says are gone for good.
 func (f *FCMSender) Notify(ctx context.Context, tokens []string, from string) ([]string, error) {
+	return f.NotifyAlert(ctx, tokens, messageAlert(from))
+}
+
+// NotifyAlert sends any alert to raw FCM tokens and returns the ones that are gone.
+func (f *FCMSender) NotifyAlert(ctx context.Context, tokens []string, alert Alert) ([]string, error) {
 	access, err := f.token(ctx)
 	if err != nil {
 		return nil, err
@@ -169,7 +188,7 @@ func (f *FCMSender) Notify(ctx context.Context, tokens []string, from string) ([
 	var dead []string
 	var firstErr error
 	for _, token := range tokens {
-		isDead, err := f.send(ctx, access, token, from)
+		isDead, err := f.send(ctx, access, token, alert)
 		if isDead {
 			dead = append(dead, token)
 		}
@@ -180,14 +199,14 @@ func (f *FCMSender) Notify(ctx context.Context, tokens []string, from string) ([
 	return dead, firstErr
 }
 
-func (f *FCMSender) send(ctx context.Context, access, token, from string) (bool, error) {
+func (f *FCMSender) send(ctx context.Context, access, token string, alert Alert) (bool, error) {
 	body, err := json.Marshal(map[string]any{"message": map[string]any{
 		"token":        token,
-		"notification": map[string]string{"title": from, "body": "New message"},
-		"data":         map[string]string{"from": from},
+		"notification": map[string]string{"title": alert.Title, "body": alert.Body},
+		"data":         alert.Data,
 		"android": map[string]any{
 			"priority":     "HIGH",
-			"notification": map[string]string{"channel_id": "messages", "tag": from},
+			"notification": map[string]string{"channel_id": "messages", "tag": alert.Thread},
 		},
 	}})
 	if err != nil {

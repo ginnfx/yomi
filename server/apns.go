@@ -155,18 +155,26 @@ func (a *APNsSender) bearer() (string, error) {
 // Notify sends to stored tokens of the apns kinds and returns the stored tokens Apple
 // says are gone for good.
 func (a *APNsSender) Notify(ctx context.Context, stored []string, from string) ([]string, error) {
+	return a.NotifyAlert(ctx, stored, messageAlert(from))
+}
+
+// NotifyAlert sends any alert and returns the stored tokens Apple says are gone.
+func (a *APNsSender) NotifyAlert(ctx context.Context, stored []string, alert Alert) ([]string, error) {
 	bearer, err := a.bearer()
 	if err != nil {
 		return nil, err
 	}
-	payload, err := json.Marshal(map[string]any{
+	body := map[string]any{
 		"aps": map[string]any{
-			"alert":     map[string]string{"title": from, "body": "New message"},
+			"alert":     map[string]string{"title": alert.Title, "body": alert.Body},
 			"sound":     "default",
-			"thread-id": from,
+			"thread-id": alert.Thread,
 		},
-		"from": from,
-	})
+	}
+	for key, value := range alert.Data {
+		body[key] = value
+	}
+	payload, err := json.Marshal(body)
 	if err != nil {
 		return nil, err
 	}

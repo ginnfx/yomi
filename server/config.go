@@ -49,6 +49,8 @@ type Config struct {
 	APNsTeamID        string
 	APNsTopic         string
 	FCMServiceAccount string
+	ReleaseRepo       string
+	ReleaseState      string
 	LLMURL            string
 	LLMKey            string
 	LLMModel          string
@@ -88,6 +90,8 @@ func loadConfig() Config {
 		APNsTeamID:        os.Getenv("YOMI_APNS_TEAM_ID"),
 		APNsTopic:         os.Getenv("YOMI_APNS_TOPIC"),
 		FCMServiceAccount: os.Getenv("YOMI_FCM_SERVICE_ACCOUNT"),
+		ReleaseRepo:       os.Getenv("YOMI_RELEASE_REPO"),
+		ReleaseState:      os.Getenv("YOMI_RELEASE_STATE"),
 		LLMURL:            os.Getenv("YOMI_LLM_URL"),
 		LLMKey:            os.Getenv("YOMI_LLM_KEY"),
 		LLMModel:          os.Getenv("YOMI_LLM_MODEL"),

@@ -76,6 +76,7 @@ func main() {
 		startCovers(cfg, server.Reports)
 	}
 	startAI(cfg, server)
+	startReleaseWatcher(cfg, server)
 	history, err := openHistoryStore(cfg.HistoryDir)
 	if err != nil {
 		// Music matters more than stats, so the server still starts.

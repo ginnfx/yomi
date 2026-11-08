@@ -497,6 +497,17 @@ func (m *MessageStore) Devices(user string) []string {
 	return append([]string(nil), m.state.Devices[user]...)
 }
 
+// AllDevices returns a copy of every user's push tokens.
+func (m *MessageStore) AllDevices() map[string][]string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	all := make(map[string][]string, len(m.state.Devices))
+	for user, tokens := range m.state.Devices {
+		all[user] = append([]string(nil), tokens...)
+	}
+	return all
+}
+
 // ------- Push relay -------
 
 // PushRelay tells the relay that someone has a message. Only device tokens and a thread
