@@ -43,6 +43,8 @@ import 'core/radio.dart';
 import 'core/reports/reports_api.dart';
 import 'core/spotify/missing_songs.dart';
 import 'core/tunnel/ffi_tunnel_bridge.dart';
+import 'core/offline/pooled_fetcher.dart';
+import 'core/server_pool.dart';
 import 'core/youtube/youtube_fetcher.dart';
 import 'core/subsonic_client.dart';
 import 'dev_hooks.dart';
@@ -62,6 +64,7 @@ import 'state/profile_sync.dart';
 import 'core/notifications/message_notifier.dart';
 import 'core/notifications/notification_sink.dart';
 import 'core/notifications/push_registration.dart';
+import 'core/notifications/update_notifier.dart';
 import 'ui/pages/messages_page.dart';
 import 'state/player_controller.dart';
 import 'state/playlist_covers_controller.dart';
@@ -85,6 +88,9 @@ final _navigatorKey = GlobalKey<NavigatorState>();
 
 /// Computers get the quicker handoff polling and the background caching phones skip.
 final bool _isDesktop = Platform.isMacOS || Platform.isLinux;
+
+/// Never more than this many songs download at once, however many servers there are.
+const int _maxParallelDownloads = 3;
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -130,7 +136,11 @@ Future<void> main() async {
   final connectivity = ConnectivityController();
   final prefs = await SharedPreferences.getInstance();
   final ledger = AutoDownloadLedger(prefs);
+  final serverPool = ServerPool();
+  final pooledFetcher = PooledFetcher(pool: serverPool);
   final downloads = DownloadManager(
+    fetcher: pooledFetcher,
+    parallelism: () => serverPool.rank().length.clamp(1, _maxParallelDownloads),
     store: store,
     settings: settings,
     connectivity: connectivity,
@@ -147,6 +157,7 @@ Future<void> main() async {
   );
   sharedPoolPort = tunnel.uploadPortFor;
   final session = SessionController(
+    pool: serverPool,
     connectivity: connectivity,
     tunnelConnect: tunnel.connect,
     tunnelResolve: tunnel.resolve,
@@ -170,6 +181,7 @@ Future<void> main() async {
   );
   final player = PlayerController(
     audioPlayer,
+    fetcher: pooledFetcher,
     cache: cache,
     downloads: downloads,
     settings: settings,
@@ -405,9 +417,13 @@ Future<void> main() async {
   )..start();
   unawaited(
     notifications.start(
-      onTap: (user) => _navigatorKey.currentState?.push(
-        yomiRoute<void>(builder: (_) => ThreadPage(user: user)),
-      ),
+      onTap: (payload) {
+        // The update alert just opens the app, where the update banner is waiting.
+        if (payload == kUpdateNotificationPayload) return;
+        _navigatorKey.currentState?.push(
+          yomiRoute<void>(builder: (_) => ThreadPage(user: payload)),
+        );
+      },
     ),
   );
   // Asked once someone is signed in with notifications on, not at first launch.
@@ -612,8 +628,15 @@ Future<void> main() async {
       await prefs.remove(key);
     }
   }
+  final updateNotifier = UpdateNotifier(
+    sink: notifications,
+    // Shares the notifications switch: one place to turn all of Yomi's alerts off.
+    isEnabled: () => settings.areMessageNotificationsOn,
+    isInForeground: () => isInForeground,
+  );
   final updates = await _buildUpdateController(
     prefs,
+    onNewVersion: updateNotifier.notify,
     beforeRestart: () async {
       await player.pause();
       await sync.saveNow().timeout(
@@ -679,6 +702,9 @@ Future<void> main() async {
     ),
   );
   unawaited(updates.check());
+  // While Yomi stays alive in the background, keep looking, so a new version can be
+  // announced without opening the app. The check itself is rate-limited.
+  Timer.periodic(kUpdateCheckInterval, (_) => unawaited(updates.check()));
   unawaited(session.resolveRoute());
   await runDevHooks(session, player);
   unawaited(runYoutubeSpike(youtube));
@@ -763,6 +789,7 @@ Future<AppInfo> _loadAppInfo() async {
 Future<UpdateController> _buildUpdateController(
   SharedPreferences prefs, {
   required Future<void> Function() beforeRestart,
+  Future<bool> Function(ReleaseInfo release)? onNewVersion,
 }) async {
   final info = await PackageInfo.fromPlatform();
   final version = AppVersion.tryParse(info.version);
@@ -779,6 +806,7 @@ Future<UpdateController> _buildUpdateController(
         : (file) =>
               DesktopInstaller(beforeRestart: beforeRestart).install(file),
     openPage: openReleasePage,
+    onNewVersion: onNewVersion,
   );
 }
 

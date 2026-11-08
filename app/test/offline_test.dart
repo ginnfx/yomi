@@ -372,6 +372,7 @@ void main() {
     Future<void> build({
       required List<ConnectivityResult> initial,
       bool wifiOnly = true,
+      int parallel = 1,
     }) async {
       SharedPreferences.setMockInitialValues({'wifiOnlyDownloads': wifiOnly});
       settings = await SettingsController.load();
@@ -389,6 +390,7 @@ void main() {
         settings: settings,
         connectivity: connectivity,
         fetcher: fetcher,
+        parallelism: () => parallel,
       );
       manager.attach(
         SubsonicClient(baseUrl: 'http://x:4533', username: 'u', password: 'p'),
@@ -417,6 +419,41 @@ void main() {
       expect(manager.downloadedSongs.length, 3);
       expect(manager.statusOf('2'), DownloadStatus.done);
       expect(manager.localFile('1')!.path.endsWith('.m4a'), isTrue);
+    });
+
+    test('downloads several songs at once when allowed, never more', () async {
+      await build(initial: [ConnectivityResult.wifi], parallel: 3);
+
+      manager.enqueue([for (var i = 1; i <= 7; i++) song('$i')]);
+      await settle();
+
+      expect(fetcher.maxParallel, 3);
+      expect(manager.downloadedSongs.length, 7);
+      expect(manager.pendingCount, 0);
+    });
+
+    test('one failing song does not stop the others in parallel', () async {
+      await build(initial: [ConnectivityResult.wifi], parallel: 3);
+      fetcher.failIds.add('2');
+
+      manager.enqueue([song('1'), song('2'), song('3'), song('4')]);
+      await settle();
+
+      expect(manager.statusOf('2'), DownloadStatus.failed);
+      expect(manager.downloadedSongs.map((s) => s.id).toSet(), {'1', '3', '4'});
+    });
+
+    test('removing a song mid-download cancels only that one', () async {
+      await build(initial: [ConnectivityResult.wifi], parallel: 3);
+
+      manager.enqueue([song('1'), song('2'), song('3')]);
+      await Future<void>.delayed(Duration.zero);
+      await manager.remove(song('2'));
+      await settle();
+
+      expect(manager.isDownloaded('2'), isFalse);
+      expect(manager.isDownloaded('1'), isTrue);
+      expect(manager.isDownloaded('3'), isTrue);
     });
 
     test(

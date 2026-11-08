@@ -13,6 +13,7 @@ const String _lastCheckKey = 'update.lastCheckMs';
 const String _latestKey = 'update.latest';
 const String _dismissedKey = 'update.dismissed';
 const String _seenVersionKey = 'update.seenVersion';
+const String _notifiedVersionKey = 'update.notifiedVersion';
 
 /// How this platform takes an update.
 enum UpdateMode {
@@ -47,6 +48,7 @@ class UpdateController extends ChangeNotifier {
     required this.install,
     required this.openPage,
     this.now = DateTime.now,
+    this.onNewVersion,
   });
 
   final AppVersion currentVersion;
@@ -57,6 +59,10 @@ class UpdateController extends ChangeNotifier {
   final Future<void> Function(File package) install;
   final Future<void> Function(Uri url) openPage;
   final DateTime Function() now;
+
+  /// Told once per version when an update becomes available. Returns whether the person
+  /// was actually told; if not, the next check tries again.
+  final Future<bool> Function(ReleaseInfo release)? onNewVersion;
 
   UpdatePhase _phase = UpdatePhase.idle;
   ReleaseInfo? _release;
@@ -229,6 +235,22 @@ class UpdateController extends ChangeNotifier {
     _verifiedPackage = null;
     _errorMessage = null;
     _setPhase(UpdatePhase.available);
+    unawaited(_announce(latest));
+  }
+
+  Future<void> _announce(ReleaseInfo release) async {
+    final announce = onNewVersion;
+    final version = release.version.toString();
+    if (announce == null || prefs.getString(_notifiedVersionKey) == version) {
+      return;
+    }
+    try {
+      if (await announce(release)) {
+        await prefs.setString(_notifiedVersionKey, version);
+      }
+    } on Exception catch (error) {
+      debugPrint('Could not announce the update: $error');
+    }
   }
 
   bool _shouldOffer(ReleaseInfo latest) {

@@ -39,8 +39,8 @@ class _ConnectionDoctorPageState extends State<ConnectionDoctorPage> {
   Future<void> _run() async {
     final session = context.read<SessionController>();
     setState(() => _isRunning = true);
-    final urls = session.candidateUrls;
-    final results = await session.diagnose();
+    final urls = [...session.candidateUrls, ...session.suggestedUrls()];
+    final results = await session.diagnoseUrls(urls);
     if (!mounted) return;
     setState(() {
       _results = {for (var i = 0; i < urls.length; i++) urls[i]: results[i]};
@@ -59,7 +59,8 @@ class _ConnectionDoctorPageState extends State<ConnectionDoctorPage> {
   String _label(SessionController s, String url) {
     if (url == s.homeUrl) return 'Home';
     if (url == s.awayUrl) return 'Away (Tailscale)';
-    return 'Backup';
+    if (s.extraUrls.contains(url)) return 'Backup';
+    return 'Combination';
   }
 
   @override
@@ -100,6 +101,7 @@ class _ConnectionDoctorPageState extends State<ConnectionDoctorPage> {
           ),
           children: [
             for (final url in session.candidateUrls) _row(session, url),
+            ..._suggestedSection(session),
             const SizedBox(height: 16),
             TextField(
               controller: _input,
@@ -123,10 +125,31 @@ class _ConnectionDoctorPageState extends State<ConnectionDoctorPage> {
     );
   }
 
+  /// Addresses made by mixing the known hosts, ports and schemes, tried by default.
+  List<Widget> _suggestedSection(SessionController session) {
+    final urls = session.suggestedUrls();
+    if (urls.isEmpty) return const [];
+    return [
+      Padding(
+        padding: const EdgeInsets.fromLTRB(4, 12, 4, 10),
+        child: Text(
+          'Other combinations',
+          style: yomiText(
+            13,
+            weight: FontWeight.w800,
+            color: YomiColors.textSecondary,
+          ),
+        ),
+      ),
+      for (final url in urls) _row(session, url),
+    ];
+  }
+
   Widget _row(SessionController session, String url) {
     final result = _results[url];
     final isCurrent = url == session.serverUrl;
     final isExtra = session.extraUrls.contains(url);
+    final isSuggested = !session.candidateUrls.contains(url);
     final (icon, color, status) = result == null
         ? (Icons.hourglass_empty_rounded, YomiColors.textSecondary, 'Checking…')
         : result.isOk
@@ -157,7 +180,27 @@ class _ConnectionDoctorPageState extends State<ConnectionDoctorPage> {
           ),
         ),
         isThreeLine: true,
-        trailing: isExtra
+        trailing: isSuggested
+            ? (result?.isOk ?? false)
+                  ? Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        IconButton(
+                          tooltip: 'Save as a backup address',
+                          icon: const Icon(Icons.add_link_rounded),
+                          onPressed: () async {
+                            await session.addExtraUrl(url);
+                            await _run();
+                          },
+                        ),
+                        TextButton(
+                          onPressed: () => session.useUrl(url),
+                          child: const Text('Use'),
+                        ),
+                      ],
+                    )
+                  : null
+            : isExtra
             ? IconButton(
                 icon: const Icon(Icons.delete_outline_rounded),
                 onPressed: () async {

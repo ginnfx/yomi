@@ -10,7 +10,10 @@ import '../core/vault_storage.dart';
 
 import 'package:http/http.dart' as http;
 
+import '../core/address_combinations.dart';
 import '../core/connection_probe.dart';
+import '../core/server_defaults.dart';
+import '../core/server_pool.dart';
 import '../core/lan_discovery.dart';
 import '../core/subsonic_client.dart';
 import '../core/catalog_cache.dart';
@@ -48,6 +51,7 @@ const String _awayKey = 'server_url';
 const String _homeKey = 'home_url';
 const String _extraKey = 'extra_urls';
 const Duration _scanEvery = Duration(seconds: 30);
+const Duration _poolRefreshEvery = Duration(seconds: 20);
 const String _modeKey = 'route_mode';
 const String _userKey = 'username';
 const String _passwordKey = 'password';
@@ -102,6 +106,7 @@ Future<ProbeResult> _probeTunnel(String url, String user, String password) =>
 /// address saved, it checks which one works and switches by itself when the network changes.
 class SessionController extends ChangeNotifier with WidgetsBindingObserver {
   SessionController({
+    ServerPool? pool,
     VaultStorage? storage,
     ConnectivityController? connectivity,
     HomeProbe? probe,
@@ -117,7 +122,8 @@ class SessionController extends ChangeNotifier with WidgetsBindingObserver {
     this.catalogCacheFor,
     this.outboxFor,
     http.Client? httpClient,
-  }) : _httpClient = httpClient,
+  }) : pool = pool ?? ServerPool(),
+       _httpClient = httpClient,
        _roleProbe = roleProbe ?? probeIsReplica,
        _storage =
            storage ??
@@ -157,6 +163,45 @@ class SessionController extends ChangeNotifier with WidgetsBindingObserver {
   int _epoch = 0;
   bool _isSigningOut = false;
   bool _valid(int epoch) => epoch == _epoch && !_isSigningOut;
+
+  /// Every known server with its health and load, shared with the download and preload
+  /// code so they can spread transfers across all of them.
+  final ServerPool pool;
+  bool _isRefreshingPool = false;
+  DateTime? _poolCheckedAt;
+
+  /// Checks every known address at once and tells [pool] which answer and how fast.
+  /// Throttled, so calling it after each route check costs nothing extra.
+  Future<void> refreshPool({bool force = false}) async {
+    final epoch = _epoch;
+    if (_isRefreshingPool || _client == null || _isSigningOut) return;
+    final last = _poolCheckedAt;
+    if (!force &&
+        last != null &&
+        DateTime.now().difference(last) < _poolRefreshEvery) {
+      return;
+    }
+    _isRefreshingPool = true;
+    try {
+      final urls = candidateUrls;
+      pool.setServers(urls);
+      await Future.wait(
+        urls.map((url) async {
+          final result = await _probeAddress(url, _user, _password);
+          if (!_valid(epoch)) return;
+          if (result.isOk) {
+            pool.setRoute(url, _resolvedUrls[url]);
+            pool.recordSuccess(url, result.elapsed);
+          } else {
+            pool.recordFailure(url);
+          }
+        }),
+      );
+      _poolCheckedAt = DateTime.now();
+    } finally {
+      _isRefreshingPool = false;
+    }
+  }
 
   final http.Client? _httpClient;
   final VaultStorage _storage;
@@ -229,8 +274,16 @@ class SessionController extends ChangeNotifier with WidgetsBindingObserver {
           _binding?.lifecycleState == AppLifecycleState.resumed)
         _onNetworkChanged();
     });
+    // Servers can come and go while one stays in use, so keep the pool's view fresh.
+    _poolRefresh = Timer.periodic(_poolRefreshEvery, (_) {
+      if (candidateUrls.length > 1 &&
+          _binding?.lifecycleState == AppLifecycleState.resumed) {
+        unawaited(refreshPool());
+      }
+    });
   }
 
+  Timer? _poolRefresh;
   Timer? _routeRefresh;
   Timer? _debounce;
   Timer? _reachRetry;
@@ -554,8 +607,18 @@ class SessionController extends ChangeNotifier with WidgetsBindingObserver {
   }
 
   /// Tries every known address and reports how each one did. Used by the Connection doctor.
-  Future<List<ProbeResult>> diagnose() =>
-      Future.wait(candidateUrls.map((u) => _probeAddress(u, _user, _password)));
+  Future<List<ProbeResult>> diagnose() => diagnoseUrls(candidateUrls);
+
+  /// Addresses never typed in, made by mixing the known schemes, hosts and ports (and
+  /// [extraHosts], the other machines that serve the library). The doctor tries them too.
+  List<String> suggestedUrls({List<String>? extraHosts}) => addressCombinations(
+    candidateUrls,
+    extraHosts: extraHosts ?? defaultExtraHosts,
+  );
+
+  /// Checks [urls] all at once, in the same order.
+  Future<List<ProbeResult>> diagnoseUrls(List<String> urls) =>
+      Future.wait(urls.map((u) => _probeAddress(u, _user, _password)));
 
   /// Switches to [url] by hand, e.g. from the doctor, after it answered.
   void useUrl(String url) {
@@ -575,12 +638,14 @@ class SessionController extends ChangeNotifier with WidgetsBindingObserver {
     _extraUrls = [..._extraUrls, url];
     await _remember();
     notifyListeners();
+    unawaited(refreshPool(force: true));
   }
 
   Future<void> removeExtraUrl(String url) async {
     _extraUrls = _extraUrls.where((u) => u != url).toList();
     await _remember();
     notifyListeners();
+    unawaited(refreshPool(force: true));
   }
 
   static List<String> _decodeUrls(String? raw) {
@@ -827,6 +892,7 @@ class SessionController extends ChangeNotifier with WidgetsBindingObserver {
     _epoch++;
     _binding?.removeObserver(this);
     _routeRefresh?.cancel();
+    _poolRefresh?.cancel();
     _primaryRetry?.cancel();
     _roleRetry?.cancel();
     _debounce?.cancel();

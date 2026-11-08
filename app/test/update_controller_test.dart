@@ -46,6 +46,7 @@ class Harness {
   final installed = <File>[];
   final opened = <Uri>[];
   Object? installError;
+  Future<bool> Function(ReleaseInfo release)? onNewVersion;
   late Directory dir;
 
   Future<UpdateController> build({String current = '1.0.1'}) async {
@@ -92,6 +93,7 @@ class Harness {
       },
       openPage: (uri) async => opened.add(uri),
       now: () => now,
+      onNewVersion: onNewVersion,
     );
   }
 }
@@ -107,6 +109,81 @@ void main() {
 
     expect(c.phase, UpdatePhase.available);
     expect(c.release!.version.toString(), '1.0.2');
+  });
+
+  group('announcing an update', () {
+    test('tells the person once per version', () async {
+      final h = Harness(latest: release('1.0.2'));
+      final told = <String>[];
+      h.onNewVersion = (r) async {
+        told.add(r.version.toString());
+        return true;
+      };
+      final c = await h.build();
+
+      await c.check();
+      await c.checkNow();
+      await c.check();
+      await Future<void>.delayed(Duration.zero);
+
+      expect(told, ['1.0.2']);
+    });
+
+    test('tries again when the person could not be told', () async {
+      final h = Harness(latest: release('1.0.2'));
+      var calls = 0;
+      h.onNewVersion = (_) async => ++calls >= 2;
+      final c = await h.build();
+
+      await c.checkNow();
+      await Future<void>.delayed(Duration.zero);
+      await c.checkNow();
+      await Future<void>.delayed(Duration.zero);
+      await c.checkNow();
+      await Future<void>.delayed(Duration.zero);
+
+      expect(calls, 2);
+    });
+
+    test('announces a later version again', () async {
+      final h = Harness(latest: release('1.0.2'));
+      final told = <String>[];
+      h.onNewVersion = (r) async {
+        told.add(r.version.toString());
+        return true;
+      };
+      final c = await h.build();
+
+      await c.checkNow();
+      h.latest = release('1.0.3');
+      await c.checkNow();
+      await Future<void>.delayed(Duration.zero);
+
+      expect(told, ['1.0.2', '1.0.3']);
+    });
+
+    test('says nothing when already up to date', () async {
+      final h = Harness(latest: release('1.0.1'));
+      var calls = 0;
+      h.onNewVersion = (_) async => ++calls > 0;
+      final c = await h.build();
+
+      await c.checkNow();
+      await Future<void>.delayed(Duration.zero);
+
+      expect(calls, 0);
+    });
+
+    test('a failing announcement never breaks the update offer', () async {
+      final h = Harness(latest: release('1.0.2'));
+      h.onNewVersion = (_) async => throw Exception('no notifications');
+      final c = await h.build();
+
+      await c.checkNow();
+      await Future<void>.delayed(Duration.zero);
+
+      expect(c.phase, UpdatePhase.available);
+    });
   });
 
   test('stays quiet when already on the latest version', () async {
