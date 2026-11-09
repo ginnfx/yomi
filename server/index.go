@@ -190,6 +190,10 @@ func (i *HashIndex) Add(entry indexEntry) error {
 	}
 	i.mu.Lock()
 	defer i.mu.Unlock()
+	if i.file == "" {
+		i.setLocked(entry)
+		return nil
+	}
 	handle, err := os.OpenFile(i.file, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o666)
 	if err != nil {
 		return err

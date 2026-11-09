@@ -105,6 +105,20 @@ void main() {
       expect(source.onDevice['stale'], real);
     });
   });
+  testWidgets(
+    'changed artwork fetches the new version instead of a cached old one',
+    (tester) async {
+      await tester.runAsync(() async {
+        final oldKey = coverCacheKey('mf-song_aaaa', smallCoverPx);
+        final newKey = coverCacheKey('mf-song_bbbb', smallCoverPx);
+        source.onDevice[oldKey] = await _png();
+        source.onServer[newKey] = await _png();
+        expect(await service.load('http://s/old', oldKey), isNotNull);
+        expect(await service.load('http://s/new', newKey), isNotNull);
+        expect(source.downloads, [newKey]);
+      });
+    },
+  );
 
   testWidgets('a cover on this device never goes to the network', (
     tester,

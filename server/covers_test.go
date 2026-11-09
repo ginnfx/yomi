@@ -286,3 +286,52 @@ func TestEmbeddedRootsLoad(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// Append a real ID3 APIC frame to exercise the tag reader's embedded-art detection.
+func songWithCover(artist, album string) []byte {
+	data := id3File(artist, album, "")
+	payload := append([]byte{0}, []byte("image/jpeg\x00")...)
+	payload = append(payload, 3, 0)
+	payload = append(payload, 0xff, 0xd8, 0xff)
+	n := len(payload)
+	frame := []byte{'A', 'P', 'I', 'C', byte(n >> 24), byte(n >> 16), byte(n >> 8), byte(n), 0, 0}
+	data = append(data, append(frame, payload...)...)
+	n = len(data) - 10
+	data[6], data[7], data[8], data[9] = byte(n>>21&0x7f), byte(n>>14&0x7f), byte(n>>7&0x7f), byte(n&0x7f)
+	return append(data, []byte("audio")...)
+}
+
+func TestCoverSweepRepairsPartiallyCoveredAlbum(t *testing.T) {
+	world := newCoverWorld(t)
+	dir := world.addSong(t, "k/A/Album/a.mp3", songWithCover("A", "Album"))
+	world.addSong(t, "k/A/Album/b.mp3", id3File("A", "Album", "audio"))
+	tags, ok := readSongTags(filepath.Join(dir, "a.mp3"))
+	if !ok || !tags.hasArt {
+		t.Fatal("fixture must contain embedded artwork")
+	}
+	world.itunesReply = world.itunesMatch("A", "Album")
+	added, err := world.fetcher.Sweep(context.Background())
+	if err != nil || added != 1 || !hasCoverFile(dir) {
+		t.Fatalf("added %d, err %v", added, err)
+	}
+	tags, ok = readSongTags(filepath.Join(dir, "a.mp3"))
+	if !ok || !tags.hasArt {
+		t.Fatal("existing embedded artwork was changed")
+	}
+}
+
+func TestCoverSweepSkipsFullyCoveredAndMixedArtistAlbums(t *testing.T) {
+	for _, mixed := range []bool{false, true} {
+		world := newCoverWorld(t)
+		dir := world.addSong(t, "k/Album/a.mp3", songWithCover("A", "Album"))
+		other := songWithCover("A", "Album")
+		if mixed {
+			other = id3File("B", "Album", "audio")
+		}
+		world.addSong(t, "k/Album/b.mp3", other)
+		added, err := world.fetcher.Sweep(context.Background())
+		if err != nil || added != 0 || hasCoverFile(dir) || world.itunes.Load() != 0 {
+			t.Fatalf("mixed=%v: added %d err %v", mixed, added, err)
+		}
+	}
+}
