@@ -6,6 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:yomi/core/models.dart';
+import 'package:yomi/core/offline/file_fetcher.dart';
 import 'package:yomi/core/offline/audio_cache.dart';
 import 'package:yomi/core/offline/download_store.dart';
 import 'package:yomi/core/subsonic_client.dart';
@@ -16,8 +17,29 @@ import 'package:yomi/state/settings.dart';
 
 List<Song> _songs(int count) => [
   for (var i = 0; i < count; i++)
-    Song(id: 's$i', title: 'S$i', artist: 'x', album: 'y', durationSeconds: 200),
+    Song(
+      id: 's$i',
+      title: 'S$i',
+      artist: 'x',
+      album: 'y',
+      durationSeconds: 200,
+    ),
 ];
+
+class _DownloadFetcher extends FileFetcher {
+  @override
+  Future<FetchedFile> fetch(
+    Uri uri,
+    File base, {
+    void Function(double)? onProgress,
+    CancelToken? cancel,
+  }) async {
+    await base.parent.create(recursive: true);
+    final file = File('${base.path}.mp3');
+    await file.writeAsBytes([73, 68, 51]);
+    return FetchedFile(file, 3);
+  }
+}
 
 class _Audio implements AudioPlayer {
   final indexes = StreamController<int?>.broadcast(sync: true);
@@ -89,6 +111,11 @@ class _Audio implements AudioPlayer {
   }
 
   @override
+  Future<void> insertAudioSource(int index, AudioSource source) async {
+    sources = [...sources.take(index), source, ...sources.skip(index)];
+  }
+
+  @override
   Future<void> addAudioSources(List<AudioSource> more) async {
     adds += more.length;
     sources = [...sources, ...more];
@@ -127,6 +154,7 @@ void main() {
       audio,
       cache: AudioCache(dir, maxBytes: 1000),
       downloads: DownloadManager(
+        fetcher: _DownloadFetcher(),
         store: DownloadStore(Directory('${dir.path}/d')),
         settings: settings,
         connectivity: connectivity,
@@ -146,19 +174,103 @@ void main() {
     await dir.delete(recursive: true);
   });
 
-  test('next while playing seeks to the next song and updates at once', () async {
-    await player.next();
-    expect(audio.seeks, [1]);
-    expect(player.current?.id, 's1');
-  });
+  Future<void> saveQueuedSong(int index) async {
+    final song = _songs(5)[index];
+    final store = player.downloads.store;
+    await store.directory.create(recursive: true);
+    final file = File('${store.directory.path}/saved-$index.mp3');
+    await file.writeAsBytes([73, 68, 51]);
+    await store.add(song, FetchedFile(file, 3));
+  }
 
-  test('next while loading reloads at the target instead of being lost', () async {
-    audio.state = ProcessingState.loading;
-    await player.next();
-    expect(audio.seeks, isEmpty);
-    expect(audio.loads, [1]);
-    expect(player.current?.id, 's1');
-  });
+  test(
+    'download notifications defer source changes safely across play-next edits',
+    () async {
+      await player.downloads.store.load();
+      player.downloads.attach(
+        SubsonicClient(baseUrl: 'http://s', username: 'u', password: 'p'),
+      );
+      player.downloads.enqueue([_songs(5)[1]]);
+      for (
+        var attempt = 0;
+        attempt < 100 && player.downloads.pendingCount > 0;
+        attempt++
+      ) {
+        await Future<void>.delayed(const Duration(milliseconds: 1));
+      }
+      expect(player.downloads.statusOf('s1'), DownloadStatus.done);
+      // Completion must not mutate native queue indexes while editing the play queue.
+      expect((audio.sources[1] as UriAudioSource).uri.scheme, 'http');
+      const next = Song(
+        id: 'new',
+        title: 'New',
+        artist: 'A',
+        album: 'B',
+        durationSeconds: 10,
+      );
+      await player.playNext(next);
+      await player.next();
+      expect(player.current!.id, 'new');
+      await player.next();
+      expect(player.current!.id, 's1');
+      expect((audio.sources[2] as UriAudioSource).uri.scheme, 'file');
+      expect(audio.sources.length, player.queue.length);
+    },
+  );
+
+  test(
+    'a newly downloaded queued song loads locally when skipped to',
+    () async {
+      await saveQueuedSong(1);
+      await player.next();
+      expect((audio.sources[1] as UriAudioSource).uri.scheme, 'file');
+    },
+  );
+
+  test(
+    'a downloaded shuffled skip stays local and keeps shuffle order',
+    () async {
+      audio.isShuffled = true;
+      audio.shuffledOrder = [0, 2, 1, 4, 3];
+      await saveQueuedSong(2);
+      await player.next();
+      expect((audio.sources[2] as UriAudioSource).uri.scheme, 'file');
+      expect(audio.orderDuringLoad, [0, 2, 1, 4, 3]);
+    },
+  );
+
+  test(
+    'automatic advancement reloads a newly downloaded song locally',
+    () async {
+      audio.isShuffled = true;
+      audio.shuffledOrder = [0, 2, 1, 4, 3];
+      await saveQueuedSong(2);
+      audio.indexes.add(2);
+      await Future<void>.delayed(Duration.zero);
+      expect((audio.sources[2] as UriAudioSource).uri.scheme, 'file');
+      expect(audio.orderDuringLoad, [0, 2, 1, 4, 3]);
+    },
+  );
+
+  test(
+    'next while playing seeks to the next song and updates at once',
+    () async {
+      await player.next();
+      expect(audio.seeks, [1]);
+      expect(player.current?.id, 's1');
+    },
+  );
+
+  test(
+    'next while loading reloads at the target instead of being lost',
+    () async {
+      audio.state = ProcessingState.loading;
+      await player.next();
+      expect(audio.seeks, isEmpty);
+      expect(audio.loads, [1]);
+      expect(player.current?.id, 's1');
+    },
+  );
 
   test('repeated taps while loading land on the last song tapped', () async {
     audio.state = ProcessingState.loading;
@@ -278,20 +390,39 @@ void main() {
     expect(player.current?.id, 's4');
   });
 
-  test('the last song continues with suggestions when there are some', () async {
-    await player.jumpTo(4);
-    audio.indexes.add(4);
-    audio.seeks.clear();
-    player.suggestNext = () => [
-      const Song(id: 'new', title: 'N', artist: 'x', album: 'y', durationSeconds: 1),
-      const Song(id: 's1', title: 'S1', artist: 'x', album: 'y', durationSeconds: 1),
-    ];
-    expect(player.canSkipNext, isTrue);
-    await player.next();
-    expect(player.current?.id, 'new');
-    expect(player.queue, hasLength(6), reason: 'songs already queued stay out');
-    expect(audio.seeks, [5]);
-  });
+  test(
+    'the last song continues with suggestions when there are some',
+    () async {
+      await player.jumpTo(4);
+      audio.indexes.add(4);
+      audio.seeks.clear();
+      player.suggestNext = () => [
+        const Song(
+          id: 'new',
+          title: 'N',
+          artist: 'x',
+          album: 'y',
+          durationSeconds: 1,
+        ),
+        const Song(
+          id: 's1',
+          title: 'S1',
+          artist: 'x',
+          album: 'y',
+          durationSeconds: 1,
+        ),
+      ];
+      expect(player.canSkipNext, isTrue);
+      await player.next();
+      expect(player.current?.id, 'new');
+      expect(
+        player.queue,
+        hasLength(6),
+        reason: 'songs already queued stay out',
+      );
+      expect(audio.seeks, [5]);
+    },
+  );
 
   test('previous restarts the song after a few seconds', () async {
     audio.currentPosition = const Duration(seconds: 10);

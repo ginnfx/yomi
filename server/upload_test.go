@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -10,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"unicode/utf8"
 )
@@ -211,5 +213,50 @@ func TestNavidromeAuthAcceptsOnlyOkStatus(t *testing.T) {
 	}
 	if _, err := auth.Verify(context.Background(), url.Values{"u": {"a"}}); err == nil {
 		t.Fatal("missing credentials accepted")
+	}
+}
+
+func TestLegacyUploadsDeduplicateAcrossRoutesAndNames(t *testing.T) {
+	env := newBulkEnv(t)
+	code, first := env.put(t, sum(mp3Bytes), "song.mp3", mp3Bytes)
+	if code != http.StatusCreated {
+		t.Fatalf("bulk status %d", code)
+	}
+	for _, name := range []string{"song.mp3", "renamed.mp3"} {
+		resp := postFile(t, env.url, "u=keli&p=good", name, mp3Bytes)
+		var body map[string]string
+		if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		if resp.StatusCode != http.StatusOK || body["status"] != "duplicate" || body["file"] != first["file"] {
+			t.Fatalf("duplicate response: %d %#v", resp.StatusCode, body)
+		}
+	}
+	if entries := env.server.Index.Entries(); len(entries) != 1 {
+		t.Fatalf("indexed %d copies", len(entries))
+	}
+}
+
+func TestConcurrentLegacyUploadsPublishOneCopy(t *testing.T) {
+	env := newBulkEnv(t)
+	var wg sync.WaitGroup
+	for range maxConcurrentUploads {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			resp := postFile(t, env.url, "u=keli&p=good", "song.mp3", mp3Bytes)
+			if resp.StatusCode != http.StatusOK {
+				t.Errorf("status %d", resp.StatusCode)
+			}
+		}()
+	}
+	wg.Wait()
+	files, _ := filepath.Glob(filepath.Join(env.dir, "keli", "*.mp3"))
+	if len(files) != 1 {
+		t.Fatalf("published %d copies: %v", len(files), files)
+	}
+	code, body := env.put(t, sum(mp3Bytes), "other.mp3", mp3Bytes)
+	if code != http.StatusOK || body["status"] != "duplicate" {
+		t.Fatalf("bulk retry: %d %#v", code, body)
 	}
 }

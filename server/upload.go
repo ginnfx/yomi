@@ -8,7 +8,6 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/url"
-	"path/filepath"
 	"sync"
 	"time"
 )
@@ -50,6 +49,10 @@ type Server struct {
 }
 
 func newServer(cfg Config, auth Authenticator, scan func(context.Context, url.Values), index *HashIndex) *Server {
+	if index == nil {
+		// Embedded/test servers may omit persistence but still need duplicate protection.
+		index = &HashIndex{root: cfg.MusicDir, byHash: make(map[string]indexEntry), byPath: make(map[string]indexEntry)}
+	}
 	return &Server{
 		Config:     cfg,
 		Auth:       auth,
@@ -158,19 +161,22 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "send one multipart field named 'file'")
 		return
 	}
-	stored, err := s.Store.Save(user, part.FileName(), part)
+	stored, status, err := s.storeVerified(user, "", part.FileName(), http.MaxBytesReader(w, part, s.Config.MaxFileBytes))
 	if err != nil {
-		status, message := classifySaveError(err)
-		writeError(w, status, message)
+		code, message := classifySaveError(err)
+		if status != 0 {
+			code, message = status, err.Error()
+		}
+		writeError(w, code, message)
 		return
 	}
-	log.Printf("stored %s for %s", stored, user)
-	s.scans.Touch(r.URL.Query())
-	if s.Index != nil {
-		// Older apps still use this route; their songs must count as duplicates too.
-		go s.Index.seedFile(filepath.Join(s.Config.MusicDir, stored), stored)
+	if stored.isDuplicate {
+		writeDuplicate(w, stored.entry)
+		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "file": stored})
+	log.Printf("stored %s for %s", stored.entry.Path, user)
+	s.scans.Touch(r.URL.Query())
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "file": stored.entry.Path})
 }
 
 func firstFilePart(r *http.Request) (*multipart.Part, error) {

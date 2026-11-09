@@ -85,6 +85,21 @@ void main() {
 
   tearDown(() => CoverImageService.instance = original);
 
+  testWidgets(
+    'changed artwork fetches the new version instead of a cached old one',
+    (tester) async {
+      await tester.runAsync(() async {
+        final oldKey = coverCacheKey('mf-song_aaaa', smallCoverPx);
+        final newKey = coverCacheKey('mf-song_bbbb', smallCoverPx);
+        source.onDevice[oldKey] = await _png();
+        source.onServer[newKey] = await _png();
+        expect(await service.load('http://s/old', oldKey), isNotNull);
+        expect(await service.load('http://s/new', newKey), isNotNull);
+        expect(source.downloads, [newKey]);
+      });
+    },
+  );
+
   testWidgets('a cover on this device never goes to the network', (
     tester,
   ) async {
@@ -96,23 +111,24 @@ void main() {
     });
   });
 
-  testWidgets('a dropped connection doesn\'t go looking for a cover elsewhere', (
-    tester,
-  ) async {
-    await tester.runAsync(() async {
-      var lookups = 0;
-      final image = await service.load(
-        'http://s/k',
-        'k',
-        fallbackUrl: () async {
-          lookups++;
-          return null;
-        },
-      );
-      expect(image, isNull);
-      expect(lookups, 0);
-    });
-  });
+  testWidgets(
+    'a dropped connection doesn\'t go looking for a cover elsewhere',
+    (tester) async {
+      await tester.runAsync(() async {
+        var lookups = 0;
+        final image = await service.load(
+          'http://s/k',
+          'k',
+          fallbackUrl: () async {
+            lookups++;
+            return null;
+          },
+        );
+        expect(image, isNull);
+        expect(lookups, 0);
+      });
+    },
+  );
 
   testWidgets('a cover the server doesn\'t have is looked for elsewhere', (
     tester,
@@ -281,7 +297,9 @@ void main() {
         value: FakeSession(),
         child: Directionality(
           textDirection: TextDirection.ltr,
-          child: Center(child: CoverArt(coverArtId: id, size: size)),
+          child: Center(
+            child: CoverArt(coverArtId: id, size: size),
+          ),
         ),
       );
 
@@ -322,7 +340,11 @@ void main() {
       () => Future<void>.delayed(const Duration(milliseconds: 50)),
     );
     await tester.pumpAndSettle();
-    expect(shown(tester), isNotNull, reason: 'offline, small is better than none');
+    expect(
+      shown(tester),
+      isNotNull,
+      reason: 'offline, small is better than none',
+    );
     await tester.pumpWidget(const SizedBox());
   });
 

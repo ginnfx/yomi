@@ -83,6 +83,28 @@ void main() {
           200,
         );
 
+    test('public timed lyrics must beat server plain text', () async {
+      final server = MockClient(
+        (_) async => subsonicLyrics([
+          {
+            'synced': false,
+            'line': [
+              {'value': 'plain server lyrics'},
+            ],
+          },
+        ]),
+      );
+      final public = MockClient(
+        (_) async => http.Response(
+          jsonEncode({'syncedLyrics': '[00:01.00]timed public lyrics'}),
+          200,
+        ),
+      );
+      final found = await LyricsService(httpClient: public)
+          .forSong(clientReturning(server), song);
+      expect(found?.isSynced, isTrue);
+    });
+
     test('saved lyrics work with the server and internet down', () async {
       final online = MockClient((request) async {
         if (request.url.host == 'lrclib.net') {
@@ -109,6 +131,31 @@ void main() {
       expect(found!.lines.single.text, 'saved line');
     });
 
+    test('plain lyrics saved by older versions are immediately checked for timed lyrics', () async {
+      final store = LyricsStore(dir);
+      await store.write(
+        song.id,
+        LyricsLookup.found(Lyrics.parsePlain('old plain')),
+      );
+      final file = dir.listSync().whereType<File>().single;
+      final json =
+          jsonDecode(await file.readAsString()) as Map<String, dynamic>;
+      json.remove('lookupVersion');
+      await file.writeAsString(jsonEncode(json));
+      final transport = MockClient((request) async {
+        if (request.url.host != 'lrclib.net') return subsonicLyrics(const []);
+        return http.Response(
+          jsonEncode({'syncedLyrics': '[00:01.00]timed'}),
+          200,
+        );
+      });
+      final service = LyricsService(httpClient: transport, store: store);
+      expect(
+        (await service.forSong(clientReturning(transport), song))!.isSynced,
+        isTrue,
+      );
+    });
+
     test('a network failure is not remembered as "no lyrics"', () async {
       var isDown = true;
       final transport = MockClient((request) async {
@@ -128,6 +175,107 @@ void main() {
       isDown = false;
       expect((await service.forSong(client, song))!.lines.single.text, 'back');
     });
+
+    test(
+      'failed stale refresh retries without renewing the disk entry',
+      () async {
+        var now = DateTime(2026, 1, 1);
+        final store = LyricsStore(dir, now: () => now);
+        await store.write(
+          song.id,
+          LyricsLookup.found(Lyrics.parsePlain('saved')),
+        );
+        now = now.add(kNoLyricsRetryAfter + const Duration(minutes: 1));
+        var down = true;
+        final transport = MockClient((request) async {
+          if (down) throw const SocketException('offline');
+          if (request.url.host == 'lrclib.net') {
+            return http.Response(
+              jsonEncode({'syncedLyrics': '[00:01.00]timed'}),
+              200,
+            );
+          }
+          return subsonicLyrics(const []);
+        });
+        final service = LyricsService(httpClient: transport, store: store);
+        final client = clientReturning(transport);
+        expect(
+          (await service.forSong(client, song))!.lines.single.text,
+          'saved',
+        );
+        expect((await store.read(song.id))!.isStale, isTrue);
+        down = false;
+        expect((await service.forSong(client, song))!.isSynced, isTrue);
+        expect((await store.read(song.id))!.lyrics!.isSynced, isTrue);
+      },
+    );
+
+    test(
+      'server plain lyrics survive a failed public lookup without being cached',
+      () async {
+        final server = MockClient(
+          (_) async => subsonicLyrics([
+            {
+              'synced': false,
+              'line': [
+                {'value': 'server plain'},
+              ],
+            },
+          ]),
+        );
+        var down = true;
+        final public = MockClient((_) async {
+          if (down) throw const SocketException('offline');
+          return http.Response(
+            jsonEncode({'syncedLyrics': '[00:01.00]timed'}),
+            200,
+          );
+        });
+        final store = LyricsStore(dir);
+        final service = LyricsService(httpClient: public, store: store);
+        final client = clientReturning(server);
+        expect((await service.forSong(client, song))!.isSynced, isFalse);
+        expect(await store.read(song.id), isNull);
+        down = false;
+        expect((await service.forSong(client, song))!.isSynced, isTrue);
+      },
+    );
+
+    test(
+      'a partial public failure does not renew stale plain lyrics',
+      () async {
+        var now = DateTime(2026, 1, 1);
+        final store = LyricsStore(dir, now: () => now);
+        await store.write(
+          song.id,
+          LyricsLookup.found(Lyrics.parsePlain('saved')),
+        );
+        now = now.add(kNoLyricsRetryAfter + const Duration(minutes: 1));
+        var searchDown = true;
+        final transport = MockClient((request) async {
+          if (request.url.host != 'lrclib.net') return subsonicLyrics(const []);
+          if (request.url.path == '/api/get') {
+            return http.Response(jsonEncode({'plainLyrics': 'plain'}), 200);
+          }
+          if (searchDown) throw const SocketException('search down');
+          return http.Response(
+            jsonEncode([
+              {'duration': 100, 'syncedLyrics': '[00:01.00]timed'},
+            ]),
+            200,
+          );
+        });
+        final service = LyricsService(httpClient: transport, store: store);
+        final client = clientReturning(transport);
+        expect(
+          (await service.forSong(client, song))!.lines.single.text,
+          'saved',
+        );
+        expect((await store.read(song.id))!.isStale, isTrue);
+        searchDown = false;
+        expect((await service.forSong(client, song))!.isSynced, isTrue);
+      },
+    );
 
     test('a real "no lyrics" answer is remembered, then rechecked', () async {
       var calls = 0;

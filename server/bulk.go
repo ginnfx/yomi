@@ -189,10 +189,12 @@ func (s *Server) storeVerified(user, hash, name string, body io.Reader) (storedF
 		tmp.Close()
 		return storedFile{}, 0, err
 	}
-	if hex.EncodeToString(hasher.Sum(nil)) != hash {
+	actualHash := hex.EncodeToString(hasher.Sum(nil))
+	if hash != "" && actualHash != hash {
 		tmp.Close()
 		return storedFile{}, http.StatusUnprocessableEntity, errHashMismatch
 	}
+	hash = actualHash
 	artist, album, err := readAudioInfo(tmp, strings.ToLower(filepath.Ext(safeName)))
 	if closeErr := tmp.Close(); closeErr != nil {
 		return storedFile{}, 0, closeErr

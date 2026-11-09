@@ -84,7 +84,10 @@ void main() {
 
   test('saves every song\'s small cover', () async {
     await prefiller.wake();
-    expect(source.downloads, unorderedEquals([_key('a'), _key('b'), _key('c')]));
+    expect(
+      source.downloads,
+      unorderedEquals([_key('a'), _key('b'), _key('c')]),
+    );
   });
 
   test('never downloads a cover that is already saved', () async {
@@ -93,18 +96,24 @@ void main() {
     expect(source.downloads, [_key('c')]);
   });
 
-  test('moves a cover from the older store instead of downloading it', () async {
-    source.stored.addAll([_key('a'), _key('b')]);
-    source.inOlderStore.add(_key('c'));
-    await prefiller.wake();
-    expect(source.migrated, [_key('c')]);
-    expect(source.downloads, isEmpty);
-  });
+  test(
+    'moves a cover from the older store instead of downloading it',
+    () async {
+      source.stored.addAll([_key('a'), _key('b')]);
+      source.inOlderStore.add(_key('c'));
+      await prefiller.wake();
+      expect(source.migrated, [_key('c')]);
+      expect(source.downloads, isEmpty);
+    },
+  );
 
-  test('fetches one cover per picture when an ID comes in two forms', () async {
+  test('keeps versioned and unversioned cover IDs separate', () async {
     songs = [_song('a', cover: 'mf-a_856ea3607b69e089'), _song('a')];
     await prefiller.wake();
-    expect(source.downloads, [_key('a')]);
+    expect(source.downloads, [
+      coverCacheKey('mf-a_856ea3607b69e089', smallCoverPx),
+      _key('a'),
+    ]);
   });
 
   test('skips songs with no cover ID', () async {
@@ -167,16 +176,19 @@ void main() {
     expect(source.downloads.where((k) => k == _key('a')), hasLength(1));
   });
 
-  test('a dropped connection stops the run, and a later wake retries', () async {
-    source.unreachable.addAll([_key('a'), _key('b'), _key('c')]);
-    await prefiller.wake();
-    final tried = source.downloads.length;
-    expect(tried, lessThan(3));
+  test(
+    'a dropped connection stops the run, and a later wake retries',
+    () async {
+      source.unreachable.addAll([_key('a'), _key('b'), _key('c')]);
+      await prefiller.wake();
+      final tried = source.downloads.length;
+      expect(tried, lessThan(3));
 
-    source.unreachable.clear();
-    await prefiller.wake();
-    expect(source.stored, containsAll([_key('a'), _key('b'), _key('c')]));
-  });
+      source.unreachable.clear();
+      await prefiller.wake();
+      expect(source.stored, containsAll([_key('a'), _key('b'), _key('c')]));
+    },
+  );
 
   test('carries on by itself after a dropped connection', () async {
     final retrying = CoverPrefiller(
@@ -196,17 +208,20 @@ void main() {
     expect(source.stored, containsAll([_key('a'), _key('b'), _key('c')]));
   });
 
-  test('once finished, waking does no more work until the library changes', () async {
-    await prefiller.wake();
-    final asked = source.downloads.length;
-    source.stored.clear();
-    await prefiller.wake();
-    expect(source.downloads, hasLength(asked));
+  test(
+    'once finished, waking does no more work until the library changes',
+    () async {
+      await prefiller.wake();
+      final asked = source.downloads.length;
+      source.stored.clear();
+      await prefiller.wake();
+      expect(source.downloads, hasLength(asked));
 
-    songs = [...songs, _song('d')];
-    await prefiller.wake();
-    expect(source.downloads, contains(_key('d')));
-  });
+      songs = [...songs, _song('d')];
+      await prefiller.wake();
+      expect(source.downloads, contains(_key('d')));
+    },
+  );
 
   test('a library that changes mid-run is picked up afterwards', () async {
     source.onDownload = (key) {

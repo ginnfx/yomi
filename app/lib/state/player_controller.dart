@@ -40,6 +40,7 @@ class PlayerController extends ChangeNotifier implements TransportCommands {
         if (!_disposed) notifyListeners();
       },
     );
+    downloads.addListener(_onDownloadsChanged);
     settings.addListener(_onCacheSettingsChanged);
     connectivity.addListener(_onCacheSettingsChanged);
     _subscriptions
@@ -151,7 +152,10 @@ class PlayerController extends ChangeNotifier implements TransportCommands {
     _error = null;
     _stalls.reset();
     _shouldPlayAfterLoad = _shouldPlayAfterLoad || wasPlaying;
-    await _load(index, position);
+    final order = _player.shuffleModeEnabled
+        ? (_heldOrder ??= _HeldShuffleOrder(_order))
+        : null;
+    await _load(index, position, shuffleOrder: order);
     if (!_disposed) notifyListeners();
   }
 
@@ -249,7 +253,8 @@ class PlayerController extends ChangeNotifier implements TransportCommands {
     final mustReload =
         state == ProcessingState.loading ||
         state == ProcessingState.idle ||
-        _needsNewSources;
+        _needsNewSources ||
+        _hasStaleLocalSource(target);
     if (!mustReload) {
       await _player.seek(Duration.zero, index: target);
       if (_pendingIndex == target) _pendingIndex = null;
@@ -388,25 +393,35 @@ class PlayerController extends ChangeNotifier implements TransportCommands {
     );
   }
 
-  Future<void> _switchQueuedToLocal(Song song) async {
-    // In shuffle the swapped song would land somewhere random, and during a skip the
-    // queue is about to change anyway. Streaming works just as well in those cases.
-    if (_player.shuffleModeEnabled || _pendingIndex != null) return;
-    final generation = _loadGeneration;
+  bool _hasStaleLocalSource(int index) {
+    if (index < 0 || index >= _queue.length || !_isLocal(_queue[index])) {
+      return false;
+    }
+    final sources = _player.audioSources;
+    if (sources.length != _queue.length) return false;
+    final source = sources[index];
+    return source is UriAudioSource && source.uri.scheme != 'file';
+  }
+
+  void _onDownloadsChanged() {
+    if (_disposed || _needsNewSources) return;
     for (var i = 0; i < _queue.length; i++) {
-      // The playing item is never touched; only songs still waiting in the queue are swapped.
-      if (_queue[i].id != song.id ||
-          i <= (_index ?? -1) ||
-          _player.audioSources.length != _queue.length) {
-        continue;
+      if (downloads.isDownloaded(_queue[i].id) && _hasStaleLocalSource(i)) {
+        _needsNewSources = true;
+        notifyListeners();
+        return;
       }
-      try {
-        // Adding first means there's never a moment without a next song.
-        await _player.insertAudioSource(i + 1, _sourceFor(song));
-        if (generation != _loadGeneration) return;
-        await _player.removeAudioSourceAt(i);
-      } on Object catch (error) {
-        debugPrint('Could not switch ${song.title} to its cached copy: $error');
+    }
+  }
+
+  Future<void> _switchQueuedToLocal(Song song) async {
+    if (_disposed) return;
+    // Rebuild on advancement instead of inserting/removing native sources while
+    // another queue edit may be in flight. The current song keeps playing untouched.
+    for (var i = 0; i < _queue.length; i++) {
+      if (_queue[i].id == song.id && _hasStaleLocalSource(i)) {
+        _needsNewSources = true;
+        return;
       }
     }
   }
@@ -556,7 +571,9 @@ class PlayerController extends ChangeNotifier implements TransportCommands {
     _pendingIndex = null;
     final didChangeSong = index != _index;
     _index = index;
-    if (_needsNewSources && didChangeSong && index != null) {
+    if (didChangeSong &&
+        index != null &&
+        (_needsNewSources || _hasStaleLocalSource(index))) {
       unawaited(_reloadSources(fromStart: true));
     }
     final song = current;
@@ -601,6 +618,7 @@ class PlayerController extends ChangeNotifier implements TransportCommands {
   void dispose() {
     _disposed = true;
     _stallTimer.cancel();
+    downloads.removeListener(_onDownloadsChanged);
     settings.removeListener(_onCacheSettingsChanged);
     connectivity.removeListener(_onCacheSettingsChanged);
     _preloader.dispose();
