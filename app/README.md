@@ -213,3 +213,9 @@ flutter build macos --release
 ```
 
 Live playback and uploads additionally need a reachable server and a valid account.
+
+### Playback and embedded-network verification
+
+See [the 2026-11-09 incident and physical-device acceptance checklist](../docs/iphone-networking-2026-11-09.md). A reachable library, enrolled tunnel, mock test or server-side audio response does not prove native iPhone playback with the separate Tailscale app off. Current iPhone build: **1.1.7 (10113)**.
+
+Uploaded-cover troubleshooting: [replica artwork path and retry repair](../docs/upload-covers-2026-11-09.md).
