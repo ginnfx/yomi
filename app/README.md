@@ -1,5 +1,11 @@
 # Yomi client
 
+## Versioning
+
+Keep the public version at **1.1.7** until a release is explicitly requested.
+Individual fixes/features accumulate for a later release; local device updates
+increase only the internal build number. Do not create release tags automatically.
+
 One Flutter app for iOS, Android, macOS and Linux. The Mac version uses the same
 Subsonic/Navidrome client and Yomi upload service as the mobile app.
 
@@ -27,8 +33,17 @@ Developer signing identity and notarization.
 
 The Mac sign-in screen starts with the addresses referenced in the source:
 
-- Away/Tailscale: `http://100.88.180.104:4533`
-- Home network: `http://192.168.1.18:4533`
+- Primary/Tailscale (always-on cloud): `http://100.82.99.19:4533`
+- Standby/Tailscale (Mac): `http://100.105.93.93:4533`
+- No fixed home/LAN address by default, so moving the Mac between networks is safe.
+
+The iOS installation script enables a one-time migration of the old personal
+Android/Mac/cloud addresses to this topology. It preserves login, account ID,
+downloads and custom deployments. For a direct Flutter build, include
+`--dart-define=YOMI_MIGRATE_PERSONAL_SERVERS=true` to enable that migration. The
+cloud is the writable primary; the Mac follows it as a read-only standby. On
+cloud failure, Yomi can play the replicated library from the Mac, then returns
+when the cloud is available. Edits/uploads wait for the primary.
 
 Sign in using only the same username and password as on iOS. Server addresses
 are preconfigured on every platform and editable under Advanced connection

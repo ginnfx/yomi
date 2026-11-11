@@ -69,6 +69,29 @@ void main() {
   });
 
   group('TunnelController', () {
+    test(
+      'personal migration retargets Android enrollment without rejoining',
+      () async {
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setString('tunnel.serverHost', '100.88.180.104');
+        final marker = File('${dir.path}/ts/node-state');
+        await marker.parent.create(recursive: true);
+        await marker.writeAsString('existing node');
+        final upgraded = TunnelController(
+          bridge: bridge,
+          prefs: prefs,
+          stateDir: marker.parent,
+          migratePersonalServers: true,
+        );
+        expect(await upgraded.connect(), isNotNull);
+        expect(prefs.getString('tunnel.serverHost'), '100.82.99.19');
+        expect(bridge.calls, contains('forward 100.82.99.19:4533'));
+        expect(bridge.calls, isNot(contains('forward 100.88.180.104:4533')));
+        expect(bridge.lastKey, isEmpty);
+        expect(await marker.readAsString(), 'existing node');
+      },
+    );
+
     test('backup forwards reuse the node and map the companion port', () async {
       await tunnel.join('tskey-auth-abc', '100.1.2.3');
       bridge.calls.clear();
@@ -84,6 +107,24 @@ void main() {
       await tunnel.reconnect();
       expect(await tunnel.resolve('http://100.105.93.93:4533'), isNot(local));
     });
+
+    test(
+      'a routine lookup never restarts a node that is not healthy',
+      () async {
+        // Arrange: joined, then the node reports something other than Running.
+        await tunnel.join('tskey-auth-abc', '100.1.2.3');
+        bridge.currentState = 'Starting';
+        bridge.calls.clear();
+
+        // Act
+        final local = await tunnel.resolve('http://100.105.93.93:4533');
+
+        // Assert: restarting would cut whatever is streaming through the node.
+        expect(local, isNull);
+        expect(bridge.calls, isNot(contains('stop')));
+        expect(bridge.calls, isNot(contains('start')));
+      },
+    );
 
     test('LAN and unenrolled backups never start an embedded node', () async {
       expect(await tunnel.resolve('http://192.168.1.10:4533'), isNull);

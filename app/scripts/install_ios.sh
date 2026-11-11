@@ -7,5 +7,5 @@ if [ "$#" -ne 1 ]; then
 fi
 APP_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 cd "$APP_DIR"
-flutter build ios --release
+flutter build ios --release --dart-define=YOMI_MIGRATE_PERSONAL_SERVERS=true
 xcrun devicectl device install app --device "$1" "$APP_DIR/build/ios/iphoneos/Runner.app"
