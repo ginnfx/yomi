@@ -140,54 +140,59 @@ void main() {
     child: const Material(child: SearchPage()),
   );
 
-  testWidgets(
-    'server paging counts server rows separately from local matches',
-    (tester) async {
-      final client = _PagedClient();
-      final unloaded = CatalogController(
-        directory: Directory('${dir.path}/unloaded'),
-      );
-      const local = Song(
-        id: '79',
-        title: 'Match 79',
-        artist: 'X',
-        album: 'A',
-        durationSeconds: 1,
-      );
-      await pumpScreen(
-        tester,
-        const Material(child: SearchPage()),
-        size: const Size(800, 2400),
-        extraProviders: [
-          ChangeNotifierProvider<SessionController>.value(
-            value: _PagedSession(client),
-          ),
-          ChangeNotifierProvider<CatalogController>.value(value: unloaded),
-          ChangeNotifierProvider<HomeController>.value(
-            value: _Home([
-              const HomeShelf(ShelfKind.jumpBack, 'Local', [local]),
-            ]),
-          ),
-          ChangeNotifierProvider<AiController>.value(
-            value: AiController(file: File('${dir.path}/labels.json')),
-          ),
-        ],
-      );
-      await tester.enterText(find.byType(TextField).first, 'Match');
-      await tester.pump(const Duration(milliseconds: 400));
-      await settleScreen(tester);
-      final more = find.text('Show more songs');
-      await tester.scrollUntilVisible(
-        more,
-        800,
-        scrollable: find.byType(Scrollable).first,
-      );
-      await tester.tap(more);
-      await settleScreen(tester);
-      expect(client.offsets, [0, 40]);
-      expect(find.text('Match 40'), findsOneWidget);
-    },
-  );
+  testWidgets('server paging counts server rows separately from local matches', (
+    tester,
+  ) async {
+    final client = _PagedClient();
+    final unloaded = CatalogController(
+      directory: Directory('${dir.path}/unloaded'),
+    );
+    const local = Song(
+      id: '79',
+      title: 'Match 79',
+      artist: 'X',
+      album: 'A',
+      durationSeconds: 1,
+    );
+    await pumpScreen(
+      tester,
+      const Material(child: SearchPage()),
+      size: const Size(800, 2400),
+      extraProviders: [
+        ChangeNotifierProvider<SessionController>.value(
+          value: _PagedSession(client),
+        ),
+        ChangeNotifierProvider<CatalogController>.value(value: unloaded),
+        ChangeNotifierProvider<HomeController>.value(
+          value: _Home([
+            const HomeShelf(ShelfKind.jumpBack, 'Local', [local]),
+          ]),
+        ),
+        ChangeNotifierProvider<AiController>.value(
+          value: AiController(file: File('${dir.path}/labels.json')),
+        ),
+      ],
+    );
+    await tester.enterText(find.byType(TextField).first, 'Match');
+    await tester.pump(const Duration(milliseconds: 400));
+    await settleScreen(tester);
+    final more = find.text('Show more songs');
+    await tester.scrollUntilVisible(
+      more,
+      800,
+      // The search bar has a scrollable of its own, ahead of the results list.
+      scrollable: find
+          .descendant(
+            of: find.byType(ListView).first,
+            matching: find.byType(Scrollable),
+          )
+          .first,
+    );
+    await tester.tap(more);
+    await settleScreen(tester);
+    expect(client.offsets, [0, 40]);
+    expect(find.text('Match 40'), findsOneWidget);
+  });
 
   testWidgets('a typo finds the song straight away, with no server search', (
     tester,
@@ -245,9 +250,10 @@ void main() {
     await tester.pump(const Duration(minutes: 1));
   });
 
-  testWidgets('recent searches only appear once the search bar is tapped', (
+  testWidgets('recent searches stay put when the search bar is tapped', (
     tester,
   ) async {
+    // Arrange
     await pumpScreen(
       tester,
       page(),
@@ -256,16 +262,44 @@ void main() {
         'recentSearches': ['halo'],
       },
     );
-    expect(find.widgetWithText(ActionChip, 'halo'), findsNothing);
+    final chip = find.widgetWithText(ActionChip, 'halo');
+    final browseBefore = tester.getTopLeft(find.text('Browse'));
 
+    // Act
     await tester.tap(find.byType(TextField));
     await tester.pump();
-    expect(find.widgetWithText(ActionChip, 'halo'), findsOneWidget);
 
-    await tester.tap(find.widgetWithText(ActionChip, 'halo'));
+    // Assert: nothing below the bar moved, so a tap can't land on the wrong thing.
+    expect(chip, findsOneWidget);
+    expect(tester.getTopLeft(find.text('Browse')), browseBefore);
+
+    await tester.tap(chip);
     await tester.pump();
     expect(tester.testTextInput.isVisible, isTrue);
     expect(find.text('Halo'), findsWidgets);
+    await tester.pump(const Duration(minutes: 1));
+  });
+
+  testWidgets('choosing a recent search leaves the cursor after it', (
+    tester,
+  ) async {
+    // Arrange
+    await pumpScreen(
+      tester,
+      page(),
+      size: phoneSize,
+      prefs: {
+        'recentSearches': ['halo'],
+      },
+    );
+
+    // Act
+    await tester.tap(find.widgetWithText(ActionChip, 'halo'));
+    await tester.pump();
+
+    // Assert
+    final field = tester.widget<TextField>(find.byType(TextField));
+    expect(field.controller!.selection.baseOffset, 'halo'.length);
     await tester.pump(const Duration(minutes: 1));
   });
 
