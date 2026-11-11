@@ -232,18 +232,6 @@ class _IconTile extends StatelessWidget {
       height: size,
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(_coverRadius),
-        boxShadow: [
-          BoxShadow(
-            color: context.accent.withValues(alpha: 0.25),
-            blurRadius: size * 0.12,
-            offset: Offset(-size * 0.025, size * 0.025),
-          ),
-          BoxShadow(
-            color: context.accentSecondary.withValues(alpha: 0.28),
-            blurRadius: size * 0.15,
-            offset: Offset(size * 0.03, size * 0.035),
-          ),
-        ],
         gradient: LinearGradient(
           colors: colors,
           begin: Alignment.topLeft,

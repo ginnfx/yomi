@@ -6,7 +6,10 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
+	"runtime"
 	"strings"
+	"time"
 )
 
 type webSource struct {
@@ -20,6 +23,17 @@ type webSearchResult struct {
 
 // Only a fixed search API is contacted; the model cannot fetch arbitrary URLs.
 func searchWeb(ctx context.Context, client *http.Client, key, query string) any {
+	query = strings.TrimSpace(query)
+	if query == "" || len(query) > 400 {
+		return map[string]string{"error": "Search needs 1–400 bytes of text."}
+	}
+	if strings.TrimSpace(key) == "" {
+		return searchPublicWeb(ctx, client, query)
+	}
+	return searchBrave(ctx, client, key, query)
+}
+
+func searchBrave(ctx context.Context, client *http.Client, key, query string) any {
 	if key == "" {
 		return map[string]string{"error": "Web search is not configured on this server."}
 	}
@@ -72,10 +86,27 @@ func (s *Server) assistantTools(credentials url.Values) libraryLookup {
 		if call.Name != "web_search" {
 			return library(ctx, call)
 		}
-		client, err := newInternetClient()
+		client, err := newSearchClient()
 		if err != nil {
 			return map[string]string{"error": "Web search unavailable."}
 		}
+		if client.Transport != nil {
+			defer client.CloseIdleConnections()
+		}
 		return searchWeb(ctx, client, s.Config.SearchKey, call.Query)
 	}
+}
+
+// Modern hosts use system DNS, proxy and TLS settings. Retain the explicit DNS
+// and bundled-root client only for the original phone without resolv.conf.
+func newSearchClient() (*http.Client, error) {
+	if runtime.GOOS == "android" {
+		return newInternetClient()
+	}
+	if runtime.GOOS == "linux" {
+		if _, err := os.Stat("/etc/resolv.conf"); os.IsNotExist(err) {
+			return newInternetClient()
+		}
+	}
+	return &http.Client{Timeout: 15 * time.Second}, nil
 }

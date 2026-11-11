@@ -20,7 +20,7 @@ func TestWebSearchBoundaries(t *testing.T) {
 		}
 		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"web":{"results":[{"title":"Evidence","url":"https://example.com/song","description":"text"},{"title":"Unsafe","url":"javascript:alert(1)"}]}}`)), Header: http.Header{}}, nil
 	})}
-	for _, args := range [][2]string{{"", "東京 lyrics"}, {"secret", ""}, {"secret", strings.Repeat("x", 401)}} {
+	for _, args := range [][2]string{{"secret", ""}, {"secret", strings.Repeat("x", 401)}} {
 		if _, ok := searchWeb(context.Background(), client, args[0], args[1]).(map[string]string); !ok {
 			t.Fatal("expected explicit unavailable/argument error")
 		}

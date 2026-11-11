@@ -117,7 +117,7 @@ func newBackupSource(cfg Config) *BackupSource {
 		Create: func(ctx context.Context) error {
 			ctx, cancel := context.WithTimeout(ctx, backupCommandWait)
 			defer cancel()
-			output, err := exec.CommandContext(ctx, "/system/bin/sh", "-c", cfg.BackupCommand).CombinedOutput()
+			output, err := exec.CommandContext(ctx, "sh", "-c", cfg.BackupCommand).CombinedOutput()
 			if err != nil {
 				return fmt.Errorf("%w: %s", err, bytes.TrimSpace(output))
 			}
