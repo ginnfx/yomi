@@ -303,6 +303,7 @@ class SessionController extends ChangeNotifier with WidgetsBindingObserver {
   Timer? _reachRetry;
   bool _isServerReachable = true;
   bool _isChecking = false;
+  bool _checkPending = false;
 
   /// False once a quick check fails; the app then shows the offline screen and keeps retrying.
   bool get isServerReachable => _isServerReachable;
@@ -602,6 +603,10 @@ class SessionController extends ChangeNotifier with WidgetsBindingObserver {
       }
     } finally {
       _isChecking = false;
+      if (_checkPending) {
+        _checkPending = false;
+        scheduleMicrotask(checkServer);
+      }
     }
     if (!_valid(epoch)) return;
     _reachRetry?.cancel();
@@ -750,7 +755,7 @@ class SessionController extends ChangeNotifier with WidgetsBindingObserver {
   void _checkNow() {
     _reachRetry?.cancel();
     if (_isChecking) {
-      _reachRetry = Timer(Duration.zero, checkServer);
+      _checkPending = true;
     } else {
       unawaited(checkServer());
     }
