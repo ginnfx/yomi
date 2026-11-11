@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
@@ -20,6 +21,7 @@ class _FakeSource implements CoverSource {
   final List<String> downloads = [];
   final List<String> forgotten = [];
   final Set<String> notOnServer = {};
+  final Set<String> temporarilyMissing = {};
   int cancels = 0;
 
   @override
@@ -34,6 +36,9 @@ class _FakeSource implements CoverSource {
   @override
   Future<Uint8List> download(String url, String cacheKey) async {
     downloads.add(cacheKey);
+    if (temporarilyMissing.contains(cacheKey)) {
+      throw const CoverNotAvailable('replica placeholder', isTransient: true);
+    }
     if (notOnServer.contains(cacheKey)) {
       throw const CoverNotAvailable('test');
     }
@@ -85,6 +90,22 @@ void main() {
 
   tearDown(() => CoverImageService.instance = original);
 
+  testWidgets('a cached Navidrome placeholder is replaced with real artwork', (
+    tester,
+  ) async {
+    await tester.runAsync(() async {
+      final placeholder = await File('test/fixtures/navidrome-placeholder.webp')
+          .readAsBytes();
+      source.onDevice['stale'] = placeholder;
+      final real = await _png();
+      source.onServer['stale'] = real;
+      expect(await service.load('http://server/cover', 'stale'), isNotNull);
+      expect(source.forgotten, contains('stale'));
+      expect(source.downloads, ['stale']);
+      expect(source.onDevice['stale'], real);
+    });
+  });
+
   testWidgets('a cover on this device never goes to the network', (
     tester,
   ) async {
@@ -96,23 +117,24 @@ void main() {
     });
   });
 
-  testWidgets('a dropped connection doesn\'t go looking for a cover elsewhere', (
-    tester,
-  ) async {
-    await tester.runAsync(() async {
-      var lookups = 0;
-      final image = await service.load(
-        'http://s/k',
-        'k',
-        fallbackUrl: () async {
-          lookups++;
-          return null;
-        },
-      );
-      expect(image, isNull);
-      expect(lookups, 0);
-    });
-  });
+  testWidgets(
+    'a dropped connection doesn\'t go looking for a cover elsewhere',
+    (tester) async {
+      await tester.runAsync(() async {
+        var lookups = 0;
+        final image = await service.load(
+          'http://s/k',
+          'k',
+          fallbackUrl: () async {
+            lookups++;
+            return null;
+          },
+        );
+        expect(image, isNull);
+        expect(lookups, 0);
+      });
+    },
+  );
 
   testWidgets('a cover the server doesn\'t have is looked for elsewhere', (
     tester,
@@ -146,6 +168,34 @@ void main() {
       expect(source.downloads, hasLength(2));
     });
   });
+
+  testWidgets(
+    'a replica placeholder does not suppress a repaired cover for an hour',
+    (tester) async {
+      await tester.runAsync(() async {
+        source.temporarilyMissing.add('k');
+        var fallbackCalls = 0;
+        expect(
+          await service.load(
+            'http://s/k',
+            'k',
+            fallbackUrl: () async {
+              fallbackCalls++;
+              return 'http://external/guess';
+            },
+          ),
+          isNull,
+        );
+        expect(fallbackCalls, 0);
+        expect(service.isMissing('k'), isFalse);
+        source.temporarilyMissing.clear();
+        source.onServer['k'] = await _png();
+        now = now.add(const Duration(seconds: 16));
+        expect(await service.load('http://s/k', 'k'), isNotNull);
+        expect(source.downloads, hasLength(2));
+      });
+    },
+  );
 
   testWidgets('a failed cover is tried again after a while', (tester) async {
     await tester.runAsync(() async {
@@ -281,7 +331,9 @@ void main() {
         value: FakeSession(),
         child: Directionality(
           textDirection: TextDirection.ltr,
-          child: Center(child: CoverArt(coverArtId: id, size: size)),
+          child: Center(
+            child: CoverArt(coverArtId: id, size: size),
+          ),
         ),
       );
 
@@ -300,6 +352,32 @@ void main() {
     await tester.pumpWidget(cover('a'));
     expect(shown(tester), same(service.peek(keyFor('a'))));
   });
+
+  testWidgets(
+    'legacy real art remains visible offline without hiding a new revision',
+    (tester) async {
+      final legacy = keyFor('mf-song');
+      final revised = keyFor('mf-song_abcd1234');
+      await tester.runAsync(() async {
+        source.onDevice[legacy] = await _png();
+        await service.warm([legacy], limit: const Duration(seconds: 5));
+      });
+      source.held[revised] = Completer();
+      await tester.pumpWidget(cover('mf-song_abcd1234'));
+      expect(shown(tester), same(service.peek(legacy)));
+      expect(service.peek(revised), isNull);
+      await tester.runAsync(() async {
+        source.onDevice[revised] = await _png();
+        await service.warm([revised], limit: const Duration(seconds: 5));
+      });
+      service.retryFailed();
+      source.held[revised]!.completeError(Exception('old request canceled'));
+      await tester.pumpAndSettle();
+      expect(service.peek(revised), isNotNull);
+      expect(shown(tester), same(service.peek(revised)));
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
 
   testWidgets('a big cover shows the saved small one while it loads', (
     tester,
@@ -322,7 +400,11 @@ void main() {
       () => Future<void>.delayed(const Duration(milliseconds: 50)),
     );
     await tester.pumpAndSettle();
-    expect(shown(tester), isNotNull, reason: 'offline, small is better than none');
+    expect(
+      shown(tester),
+      isNotNull,
+      reason: 'offline, small is better than none',
+    );
     await tester.pumpWidget(const SizedBox());
   });
 

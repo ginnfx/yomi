@@ -217,9 +217,24 @@ class _DeviceCoverSource implements CoverSource {
       );
       try {
         final rows = await database.rawQuery(
-          "SELECT key FROM cacheObject WHERE key LIKE 'cover-%'",
+          "SELECT key, length FROM cacheObject WHERE key LIKE 'cover-%'",
         );
-        return olderCoverKeys([for (final row in rows) row['key']! as String]);
+        final manager = store == _coverStoreName
+            ? coverCacheManager
+            : DefaultCacheManager();
+        final keys = <String>[];
+        for (final row in rows) {
+          final key = row['key']! as String;
+          if (row['length'] == navidromePlaceholderBytes) {
+            final bytes = await _read(manager, key);
+            if (bytes != null && isNavidromePlaceholder(bytes)) {
+              await manager.removeFile(key);
+              continue;
+            }
+          }
+          keys.add(key);
+        }
+        return olderCoverKeys(keys);
       } finally {
         await database.close();
       }
@@ -405,6 +420,9 @@ class CoverImageService {
         // cover, so waiting in line for an outside lookup would only hold it back.
         return await _download(url, cacheKey);
       } on CoverNotAvailable catch (error) {
+        // A replica may repair this reference on its next request. Keep retrying
+        // the embedded art instead of promoting an external guess as exact.
+        if (error.isTransient) return null;
         debugPrint('$error');
       }
     }
@@ -455,6 +473,10 @@ class CoverImageService {
   /// version, would leave the cover blank for good, so it's thrown away. A real picture
   /// that won't decode right now is kept: the phone may just be short of memory.
   Future<ui.Image?> _decodeOrForget(Uint8List bytes, String cacheKey) async {
+    if (isNavidromePlaceholder(bytes)) {
+      await _source.forget(cacheKey);
+      return null;
+    }
     try {
       return await _decodeAndTrim(bytes);
     } on Object catch (error) {

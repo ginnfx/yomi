@@ -167,7 +167,7 @@ class _CoverImageState extends State<_CoverImage> {
     final exact = _service.peek(widget.cacheKey);
     _hasExactImage = exact != null;
     // While the big version loads, show the small one we already have instead of a blank.
-    _image = exact ?? _smallVersion();
+    _image = exact ?? _savedFallback();
     // A retry leaves the fallback up, rather than flickering to blank and back.
     _isLoading = exact == null && _failures == 0;
     if (exact != null) return;
@@ -193,11 +193,10 @@ class _CoverImageState extends State<_CoverImage> {
   /// downloads, or at all when there's no connection.
   Future<void> _showSavedSmallVersion(int generation) async {
     final id = widget.coverArtId;
-    if (id == null || widget.pixels == smallCoverPx) return;
-    final key = coverCacheKey(id, smallCoverPx);
-    await _service.warm([key], limit: _smallVersionLimit);
+    if (id == null) return;
+    await _service.warm(_fallbackKeys, limit: _smallVersionLimit);
     if (!mounted || generation != _generation || _image != null) return;
-    final small = _service.peek(key);
+    final small = _savedFallback();
     if (small == null) return;
     setState(() {
       _image = small;
@@ -213,9 +212,23 @@ class _CoverImageState extends State<_CoverImage> {
     _retryTimer = Timer(wait > _longestRetry ? _longestRetry : wait, _retry);
   }
 
-  ui.Image? _smallVersion() {
+  List<String> get _fallbackKeys {
     final id = widget.coverArtId;
-    return id == null ? null : _service.peek(coverCacheKey(id, smallCoverPx));
+    if (id == null) return const [];
+    final small = coverCacheKey(id, smallCoverPx);
+    return {
+      if (widget.pixels != smallCoverPx) small,
+      if (legacyCoverCacheKey(widget.cacheKey) case final key?) key,
+      if (legacyCoverCacheKey(small) case final key?) key,
+    }.toList();
+  }
+
+  ui.Image? _savedFallback() {
+    for (final key in _fallbackKeys) {
+      final image = _service.peek(key);
+      if (image != null) return image;
+    }
+    return null;
   }
 
   Future<ui.Image?> _load() {
