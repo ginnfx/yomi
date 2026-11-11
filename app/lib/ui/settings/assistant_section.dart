@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -8,13 +10,27 @@ import '../theme.dart';
 import 'settings_widgets.dart';
 
 /// Turns "Ask Yomi" on or off, and decides where else the AI is allowed to help.
-class AssistantSection extends StatelessWidget {
+class AssistantSection extends StatefulWidget {
   const AssistantSection({super.key});
+
+  @override
+  State<AssistantSection> createState() => _AssistantSectionState();
+}
+
+class _AssistantSectionState extends State<AssistantSection> {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) unawaited(context.read<AiController>().refresh());
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
     final settings = context.watch<SettingsController>();
-    final isAvailable = context.watch<AiController>().isAvailable;
+    final ai = context.watch<AiController>();
+    final isAvailable = ai.isAvailable;
     final isOn = isAvailable && settings.isAssistantOn;
     return Column(
       children: [
@@ -24,14 +40,22 @@ class AssistantSection extends StatelessWidget {
               ? 'Ask for music in your own words: it plays what you have, finds '
                     'the rest on YouTube, and can request songs to add. Only what '
                     'you type is sent, never your messages or history.'
-              : "The server's AI isn't set up, so the assistant isn't available.",
+              : ai.isChecking
+              ? 'Checking whether the assistant is available…'
+              : ai.availabilityError ?? "The server's AI isn't set up, so the assistant isn't available.",
           children: [
             SettingsSwitch(
               title: 'Ask Yomi',
               subtitle: 'A music assistant on Home and Search',
               value: isOn,
-              onChanged: isAvailable ? settings.setAssistantOn : (_) {},
+              onChanged: isAvailable ? settings.setAssistantOn : null,
             ),
+            if (!isAvailable)
+              TextButton.icon(
+                onPressed: ai.isChecking ? null : () => unawaited(ai.refresh()),
+                icon: const Icon(Icons.refresh),
+                label: const Text('Check again'),
+              ),
             if (isOn) const _ClearConversation(),
           ],
         ),

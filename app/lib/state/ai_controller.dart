@@ -13,9 +13,17 @@ const int _queueChunk = 1000;
 /// Labels the AI has given your library. Everything is optional: without a key on the
 /// server, or when the server's away, the app simply has no labels and carries on.
 class AiController extends ChangeNotifier {
-  AiController({required File file}) : _file = file;
+  AiController({
+    required File file,
+    this.retryDelay = const Duration(seconds: 15),
+  }) : _file = file;
 
   final File _file;
+  final Duration retryDelay;
+  Timer? _retry;
+  Future<void>? _refreshing;
+  bool _isChecking = false;
+  String? _availabilityError;
   AiApi? _api;
   Map<String, SongTag> _songs = const {};
   Map<String, List<String>> _similar = const {};
@@ -25,6 +33,8 @@ class AiController extends ChangeNotifier {
 
   /// Whether the server has AI features turned on.
   bool get isAvailable => _isAvailable;
+  bool get isChecking => _isChecking;
+  String? get availabilityError => _availabilityError;
   Map<String, List<String>> get similarArtists => _similar;
 
   /// How many songs have labels, so screens can tell when more arrive.
@@ -71,7 +81,18 @@ class AiController extends ChangeNotifier {
   }
 
   void attach(AiApi? api) {
+    _retry?.cancel();
+    _refreshing = null;
+    _isChecking = false;
+    _availabilityError = null;
+    if (_api != null &&
+        api != null &&
+        (_api!.serverUrl != api.serverUrl || _api!.port != api.port)) {
+      _etag = null;
+      _isAvailable = false;
+    }
     _api = api;
+    _lastQueued = null;
     if (api == null) {
       _songs = const {};
       _similar = const {};
@@ -94,20 +115,51 @@ class AiController extends ChangeNotifier {
   }
 
   /// Fetches new labels, if there are any.
-  Future<void> refresh() async {
+  Future<void> refresh() {
     final api = _api;
-    if (api == null) return;
+    if (api == null) return Future.value();
+    if (_refreshing case final active?) return active;
+    late final Future<void> pending;
+    pending = _refresh(api).whenComplete(() {
+      if (identical(_refreshing, pending)) _refreshing = null;
+    });
+    return _refreshing = pending;
+  }
+
+  Future<void> _refresh(AiApi api) async {
+    _retry?.cancel();
+    _isChecking = true;
+    notifyListeners();
     try {
       final reply = await api.tags(etag: _etag);
-      if (reply == null || !identical(api, _api)) return;
-      final json = jsonDecode(reply.body) as Map<String, dynamic>;
-      _etag = reply.etag;
-      _apply(json);
-      notifyListeners();
-      await _save(json);
+      if (!identical(api, _api)) return;
+      _availabilityError = null;
+      if (reply != null) {
+        final json = jsonDecode(reply.body) as Map<String, dynamic>;
+        _etag = reply.etag;
+        _apply(json);
+        await _save(json);
+      }
     } on Object catch (error) {
+      if (!identical(api, _api)) return;
+      _availabilityError = "Couldn't check the assistant. Try again.";
       debugPrint('Could not refresh labels: $error');
+    } finally {
+      if (identical(api, _api)) {
+        _isChecking = false;
+        if (!_isAvailable || _availabilityError != null) {
+          _retry = Timer(retryDelay, () => unawaited(refresh()));
+        }
+        notifyListeners();
+      }
     }
+  }
+
+  @override
+  void dispose() {
+    _retry?.cancel();
+    _api = null;
+    super.dispose();
   }
 
   Future<void> _save(Map<String, dynamic> json) async {
