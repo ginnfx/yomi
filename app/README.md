@@ -139,10 +139,11 @@ beside the real app.
 
 ## Releasing
 
-Tagging `vX.Y.Z` runs the tests, builds the signed APK, the Mac app and the Linux
-AppImage, and publishes them with SHA-256 sidecars as a GitHub release (a failed
-Linux build doesn't hold back the others). Android, Mac and Linux users then see an
-update banner.
+Tagging `vX.Y.Z` runs the tests and builds the signed Android APK, macOS ZIP,
+Linux AppImage, and unsigned iOS IPA. All four builds must succeed before the
+GitHub release is published with SHA-256 sidecars. Android, Mac and Linux users
+then see an update banner. The iOS IPA must be signed separately before installation;
+GitHub does not hold Apple signing credentials.
 
 Android downloads and verifies the APK before opening the system confirmation.
 On macOS and Linux, **Update & restart** downloads and verifies the new app,
