@@ -32,11 +32,15 @@ class TunnelController extends ChangeNotifier {
     required this.bridge,
     required this.prefs,
     required this.stateDir,
+    this.migratePersonalServers = const bool.fromEnvironment(
+      'YOMI_MIGRATE_PERSONAL_SERVERS',
+    ),
   });
 
   final TunnelBridge bridge;
   final SharedPreferences prefs;
   final Directory stateDir;
+  final bool migratePersonalServers;
   final Map<String, String> _forwards = {};
   final Map<String, int> _uploadPorts = {};
   String? _musicUrl;
@@ -79,7 +83,9 @@ class TunnelController extends ChangeNotifier {
         uri.scheme != 'http' ||
         !(uri.host.startsWith('100.') || uri.host.endsWith('.ts.net')))
       return null;
-    if (await _connect() == null) return null;
+    // A routine probe must never restart a node that music may be streaming through.
+    // Only the failover path does that, once everything else has failed.
+    if (await _connect(mayRestart: false) == null) return null;
     final cached = _forwards[url];
     if (cached != null) return cached;
     try {
@@ -122,9 +128,19 @@ class TunnelController extends ChangeNotifier {
   /// device hasn't joined or the tunnel can't start right now.
   Future<String?> connect() => _serialize(() => _connect());
 
-  Future<String?> _connect({bool restart = false}) async {
-    final host = prefs.getString(_hostKey);
+  /// With [mayRestart] off, a node that was started but isn't healthy right now is left
+  /// alone and null is returned, rather than closing every connection through it.
+  Future<String?> _connect({
+    bool restart = false,
+    bool mayRestart = true,
+  }) async {
+    var host = prefs.getString(_hostKey);
     if (host == null) return null;
+    // Keep the enrolled node, but retire the former Android destination.
+    if (migratePersonalServers && host == '100.88.180.104') {
+      host = '100.82.99.19';
+      await prefs.setString(_hostKey, host);
+    }
     try {
       final current = _musicUrl;
       if (!restart &&
@@ -132,6 +148,7 @@ class TunnelController extends ChangeNotifier {
           await bridge.state() == _runningState) {
         return current;
       }
+      if (!mayRestart && current != null) return null;
       // Phones can suspend the node, so anything but a healthy state starts over.
       _forwards.clear();
       _uploadPorts.clear();

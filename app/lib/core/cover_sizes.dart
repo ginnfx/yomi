@@ -7,17 +7,21 @@ const double _smallCoverMaxLogical = 120;
 int coverPixelsFor(double logicalSize) =>
     logicalSize <= _smallCoverMaxLogical ? smallCoverPx : largeCoverPx;
 
-/// The server sometimes adds a suffix to a song's or album's cover ID and sometimes
-/// doesn't, for the same picture. Playlists are left out, as their cover really does
-/// change with their songs.
-final RegExp _suffixedCoverId = RegExp(r'^((?:mf|al)-[A-Za-z0-9]+)_[0-9a-f]+$');
-
 final RegExp _savedCoverKey = RegExp(r'^cover-(.+)-(\d+)$');
+final RegExp _revisionKey = RegExp(
+  r'^cover-((?:mf|al)-[A-Za-z0-9]+)_[0-9a-f]+-(\d+)$',
+);
 
-/// Ignores that suffix, so a cover saved once is found whichever ID the server sends.
+/// Legacy artwork may be shown offline while the current revision is fetched,
+/// but must never be promoted into the current revision's cache entry.
+String? legacyCoverCacheKey(String cacheKey) {
+  final match = _revisionKey.firstMatch(cacheKey);
+  return match == null ? null : 'cover-${match.group(1)}-${match.group(2)}';
+}
+
+/// Preserve the artwork revision: corrected art must not reuse an older picture.
 String coverCacheKey(String coverArtId, int pixels) {
-  final id = _suffixedCoverId.firstMatch(coverArtId)?.group(1) ?? coverArtId;
-  return 'cover-$id-$pixels';
+  return 'cover-$coverArtId-$pixels';
 }
 
 /// Maps today's key for each cover to the key it was saved under, so covers saved by

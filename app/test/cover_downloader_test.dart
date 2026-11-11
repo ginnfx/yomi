@@ -10,6 +10,54 @@ import 'package:yomi/core/cover_downloader.dart';
 final Uint8List _jpeg = Uint8List.fromList([0xFF, 0xD8, 0xFF, 0xE0, 1, 2]);
 
 void main() {
+  test(
+    'the generic Navidrome record is not treated as an album cover',
+    () async {
+      final placeholder = await File('test/fixtures/navidrome-placeholder.webp')
+          .readAsBytes();
+      expect(isNavidromePlaceholder(placeholder), isTrue);
+      final downloader = CoverDownloader(
+        newClient: () =>
+            MockClient((_) async => http.Response.bytes(placeholder, 200)),
+      );
+      await expectLater(
+        downloader.fetch('http://server/rest/getCoverArt?id=mf-song'),
+        throwsA(
+          isA<CoverNotAvailable>().having(
+            (e) => e.isTransient,
+            'transient',
+            isTrue,
+          ),
+        ),
+      );
+      downloader.cancelAll();
+      expect(isNavidromePlaceholder(_jpeg), isFalse);
+    },
+  );
+
+  test(
+    'a stale placeholder in the server pool falls through to Navidrome',
+    () async {
+      final placeholder = await File('test/fixtures/navidrome-placeholder.webp')
+          .readAsBytes();
+      final downloader = CoverDownloader(
+        uploadPortFor: (_) => 4534,
+        newClient: () => MockClient(
+          (request) async => http.Response.bytes(
+            request.url.path.startsWith('/v1/pool/') ? placeholder : _jpeg,
+            200,
+          ),
+        ),
+      );
+      expect(
+        await downloader.fetch(
+          'http://server:4533/rest/getCoverArt?id=mf-song',
+        ),
+        _jpeg,
+      );
+      downloader.cancelAll();
+    },
+  );
   test('recognises pictures and rejects error messages', () {
     expect(looksLikeImage(_jpeg), isTrue);
     expect(

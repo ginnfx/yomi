@@ -13,6 +13,7 @@ import 'package:http/http.dart' as http;
 import '../core/address_combinations.dart';
 import '../core/connection_probe.dart';
 import '../core/server_defaults.dart';
+import '../core/server_topology.dart';
 import '../core/server_pool.dart';
 import '../core/lan_discovery.dart';
 import '../core/subsonic_client.dart';
@@ -33,6 +34,9 @@ const Duration _reachTimeout = Duration(seconds: 4);
 const Duration _wakeTimeout = Duration(seconds: 8);
 const int _routineAttempts = 2;
 const Duration _reachRetryEvery = Duration(seconds: 15);
+
+/// How long a better address may still answer after a lower-priority one already has.
+const Duration _failoverGrace = Duration(milliseconds: 1500);
 const Duration _primaryRetryEvery = Duration(seconds: 60);
 const Duration _roleRetryAfter = Duration(seconds: 15);
 const List<String> _secureKeys = [
@@ -44,6 +48,7 @@ const List<String> _secureKeys = [
   _modeKey,
   _userKey,
   _passwordKey,
+  _topologyKey,
 ];
 const String _accountKey = 'account_id';
 const String _lastUrlKey = 'last_url';
@@ -55,6 +60,7 @@ const Duration _poolRefreshEvery = Duration(seconds: 20);
 const String _modeKey = 'route_mode';
 const String _userKey = 'username';
 const String _passwordKey = 'password';
+const String _topologyKey = 'server_topology';
 
 /// Turns "100.88.180.104" or "http://host" into "http://host:4533".
 String normalizeServerUrl(String input) {
@@ -122,6 +128,9 @@ class SessionController extends ChangeNotifier with WidgetsBindingObserver {
     this.catalogCacheFor,
     this.outboxFor,
     http.Client? httpClient,
+    this.migratePersonalServers = const bool.fromEnvironment(
+      'YOMI_MIGRATE_PERSONAL_SERVERS',
+    ),
   }) : pool = pool ?? ServerPool(),
        _httpClient = httpClient,
        _roleProbe = roleProbe ?? probeIsReplica,
@@ -244,6 +253,7 @@ class SessionController extends ChangeNotifier with WidgetsBindingObserver {
   /// The upload service's port for an address; it differs when going through the tunnel.
   final int Function(String url)? uploadPortFor;
   final RoleProbe _roleProbe;
+  final bool migratePersonalServers;
   bool _isOnTunnel = false;
   bool _isOnReplica = false;
   Timer? _primaryRetry;
@@ -269,19 +279,23 @@ class SessionController extends ChangeNotifier with WidgetsBindingObserver {
     _binding ??= WidgetsBinding.instance;
     _binding!.addObserver(this);
     _routeRefresh = Timer.periodic(const Duration(seconds: 30), (_) {
-      if (_client != null &&
-          _mode == RouteMode.auto &&
-          _binding?.lifecycleState == AppLifecycleState.resumed)
+      if (_client != null && _mode == RouteMode.auto && _isActive) {
         _onNetworkChanged();
+      }
     });
     // Servers can come and go while one stays in use, so keep the pool's view fresh.
     _poolRefresh = Timer.periodic(_poolRefreshEvery, (_) {
-      if (candidateUrls.length > 1 &&
-          _binding?.lifecycleState == AppLifecycleState.resumed) {
-        unawaited(refreshPool());
-      }
+      if (candidateUrls.length > 1 && _isActive) unawaited(refreshPool());
     });
   }
+
+  /// Says whether the route still matters while the app is off screen, such as when
+  /// music is playing. Without it, checks stop until the app is opened again.
+  bool Function()? isNeededInBackground;
+
+  bool get _isActive =>
+      _binding?.lifecycleState == AppLifecycleState.resumed ||
+      (isNeededInBackground?.call() ?? false);
 
   Timer? _poolRefresh;
   Timer? _routeRefresh;
@@ -289,6 +303,7 @@ class SessionController extends ChangeNotifier with WidgetsBindingObserver {
   Timer? _reachRetry;
   bool _isServerReachable = true;
   bool _isChecking = false;
+  bool _checkPending = false;
 
   /// False once a quick check fails; the app then shows the offline screen and keeps retrying.
   bool get isServerReachable => _isServerReachable;
@@ -362,9 +377,49 @@ class SessionController extends ChangeNotifier with WidgetsBindingObserver {
         );
         _user = user;
         _password = password;
+        var migrated = false;
+        if (migratePersonalServers &&
+            defaultServerUrl == cloudMusicUrl &&
+            await _storage.read(key: _topologyKey) != cloudTopologyVersion) {
+          final topology = migrateCloudTopology(
+            away: normalizeServerUrl(away),
+            home: _homeUrl,
+            extras: _extraUrls,
+          );
+          if (topology != null) {
+            _awayUrl = topology.away;
+            _homeUrl = topology.home;
+            _extraUrls = topology.extras;
+            await _storage.write(key: _awayKey, value: _awayUrl);
+            await _storage.write(key: _homeKey, value: _homeUrl);
+            await _storage.write(key: _extraKey, value: jsonEncode(_extraUrls));
+            await _storage.write(
+              key: _topologyKey,
+              value: cloudTopologyVersion,
+            );
+            migrated = true;
+          }
+        }
+        // Signed in to the cloud before backups were built in: add the standby once.
+        // Afterwards the list is the user's own, so removing it sticks.
+        if (!migrated &&
+            await _storage.read(key: _topologyKey) != cloudTopologyVersion) {
+          final seeded = withDefaultBackup(
+            away: _awayUrl!,
+            home: _homeUrl,
+            extras: _extraUrls,
+          );
+          if (seeded.length != _extraUrls.length) {
+            _extraUrls = seeded;
+            await _storage.write(key: _extraKey, value: jsonEncode(_extraUrls));
+          }
+          if (_awayUrl == cloudMusicUrl) await _markTopology();
+        }
         await _openAccount();
         final lastUrl = await _storage.read(key: _lastUrlKey);
-        final url = candidateUrls.contains(lastUrl) ? lastUrl! : away;
+        final url = !migrated && candidateUrls.contains(lastUrl)
+            ? lastUrl!
+            : _awayUrl!;
         _route = url == _homeUrl ? ActiveRoute.home : ActiveRoute.away;
         _isOnBackup = url != _homeUrl && url != _awayUrl;
         _build(url);
@@ -454,7 +509,13 @@ class SessionController extends ChangeNotifier with WidgetsBindingObserver {
     _mode = RouteMode.auto;
     _user = user.trim();
     _password = password;
+    _extraUrls = withDefaultBackup(
+      away: away,
+      home: _homeUrl,
+      extras: _extraUrls,
+    );
     await _remember();
+    await _markTopology();
     await _openAccount();
     _route = homeWorks ? ActiveRoute.home : ActiveRoute.away;
     _isOnTunnel = tunnelUrl != null;
@@ -478,6 +539,9 @@ class SessionController extends ChangeNotifier with WidgetsBindingObserver {
     if (mode != null) _mode = mode;
     await _remember();
     await refreshRoute();
+    // The route check trusts the away address without trying it; this does try it,
+    // and moves to a backup at once if it doesn't answer.
+    _checkNow();
   }
 
   /// Decides between home and away: on home Wi-Fi it probes the home address quickly,
@@ -539,6 +603,10 @@ class SessionController extends ChangeNotifier with WidgetsBindingObserver {
       }
     } finally {
       _isChecking = false;
+      if (_checkPending) {
+        _checkPending = false;
+        scheduleMicrotask(checkServer);
+      }
     }
     if (!_valid(epoch)) return;
     _reachRetry?.cancel();
@@ -554,14 +622,16 @@ class SessionController extends ChangeNotifier with WidgetsBindingObserver {
   /// first one (in priority order) that answers.
   Future<bool> _failOver(String deadUrl, {bool retryTunnel = true}) async {
     final epoch = _epoch;
-    final others = candidateUrls.where((u) => u != deadUrl).toList();
-    final results = await Future.wait(
-      others.map((u) => _probeAddress(u, _user, _password)),
-    );
+    // A direct failure does not mean the same server is unreachable through
+    // the embedded node. Try it before falling back to a read-only peer.
+    final others = [
+      if (candidateUrls.contains(deadUrl)) deadUrl,
+      ...candidateUrls.where((u) => u != deadUrl),
+    ];
+    final working = await _firstWorking(others);
     if (!_valid(epoch)) return false;
-    final working = results.where((r) => r.isOk).toList();
-    if (working.isNotEmpty) {
-      final url = working.first.url;
+    if (working != null) {
+      final url = working.url;
       _isOnBackup = url != _homeUrl && url != _awayUrl;
       _route = url == _homeUrl ? ActiveRoute.home : ActiveRoute.away;
       _isOnTunnel = false;
@@ -577,6 +647,43 @@ class SessionController extends ChangeNotifier with WidgetsBindingObserver {
       return _failOver(deadUrl, retryTunnel: false);
     }
     return _connectThroughTunnel();
+  }
+
+  /// Probes [urls] at once and returns the best one that answers, or null. The best is
+  /// the earliest in the list, but once any address answers the ones ahead of it only
+  /// get [_failoverGrace] longer, so a dead main server can't hold up a live backup.
+  Future<ProbeResult?> _firstWorking(List<String> urls) {
+    if (urls.isEmpty) return Future.value();
+    final done = Completer<ProbeResult?>();
+    final results = List<ProbeResult?>.filled(urls.length, null);
+    Timer? grace;
+    ProbeResult? best() {
+      for (final result in results) {
+        if (result != null && result.isOk) return result;
+      }
+      return null;
+    }
+
+    void finish() {
+      grace?.cancel();
+      if (!done.isCompleted) done.complete(best());
+    }
+
+    for (var i = 0; i < urls.length; i++) {
+      unawaited(
+        _probeAddress(urls[i], _user, _password).then((result) {
+          if (done.isCompleted) return;
+          results[i] = result;
+          final firstOk = results.indexWhere((r) => r != null && r.isOk);
+          final isSettled = firstOk < 0
+              ? !results.contains(null)
+              : !results.take(firstOk).contains(null);
+          if (isSettled) return finish();
+          if (firstOk >= 0) grace ??= Timer(_failoverGrace, finish);
+        }),
+      );
+    }
+    return done.future;
   }
 
   /// Last resort after every direct address failed, so a device that can reach the
@@ -639,6 +746,19 @@ class SessionController extends ChangeNotifier with WidgetsBindingObserver {
     await _remember();
     notifyListeners();
     unawaited(refreshPool(force: true));
+    // A backup is usually added because nothing else answers, so use it straight away
+    // rather than at the next retry.
+    if (!_isServerReachable) _checkNow();
+  }
+
+  /// Runs the reachability check now, or right after the one already running.
+  void _checkNow() {
+    _reachRetry?.cancel();
+    if (_isChecking) {
+      _checkPending = true;
+    } else {
+      unawaited(checkServer());
+    }
   }
 
   Future<void> removeExtraUrl(String url) async {
@@ -795,6 +915,15 @@ class SessionController extends ChangeNotifier with WidgetsBindingObserver {
     _roleRetry?.cancel();
     _debounce?.cancel();
     notifyListeners();
+  }
+
+  Future<void> _markTopology() async {
+    if (_awayUrl != cloudMusicUrl) return;
+    try {
+      await _storage.write(key: _topologyKey, value: cloudTopologyVersion);
+    } on Exception catch (error) {
+      debugPrint('Could not save the server layout version: $error');
+    }
   }
 
   /// Saving is best effort: if the keychain is unavailable the user can still listen,

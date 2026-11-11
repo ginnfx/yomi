@@ -54,9 +54,7 @@ const Duration _interpretTimeout = Duration(seconds: 8);
 class _SearchPageState extends State<SearchPage> {
   final _controller = TextEditingController();
 
-  /// Recent searches show only while the search bar is tapped into.
-  late final FocusNode _searchFocus = FocusNode()
-    ..addListener(() => setState(() {}));
+  final FocusNode _searchFocus = FocusNode();
   Timer? _timer;
   List<Artist> _artists = const [];
   List<Song> _songs = const [];
@@ -182,7 +180,8 @@ class _SearchPageState extends State<SearchPage> {
                   if (filters.matches(song, ai.tagFor(song))) song,
               ],
               taste,
-              Random(),
+              // The same words keep the same order, so nothing moves while typing on.
+              Random(_controller.text.trim().toLowerCase().hashCode),
               take: _maxDescribedSongs,
             );
     });
@@ -196,7 +195,12 @@ class _SearchPageState extends State<SearchPage> {
   }
 
   void _useRecent(String text) {
-    _controller.text = text;
+    // Setting only the text leaves the cursor at the start, so typing on would
+    // put new letters before the chosen words.
+    _controller.value = TextEditingValue(
+      text: text,
+      selection: TextSelection.collapsed(offset: text.length),
+    );
     _onChanged(text);
   }
 
@@ -234,6 +238,7 @@ class _SearchPageState extends State<SearchPage> {
       } on SubsonicException catch (error) {
         if (error.kind != ErrorKind.unreachable) rethrow;
         await session.checkServer();
+        if (!mounted || !session.isSignedIn) return;
         results = await session.client.search(
           text,
           count: _pageSize,
@@ -333,7 +338,10 @@ class _SearchPageState extends State<SearchPage> {
 
   @override
   Widget build(BuildContext context) {
-    final client = context.watch<SessionController>().client;
+    final session = context.watch<SessionController>();
+    // This page stays mounted behind the others, including while signing out.
+    if (!session.isSignedIn) return const SizedBox.shrink();
+    final client = session.client;
     final player = context.read<PlayerController>();
     final visible = _visibleSongs;
     final indexed = _indexed;
@@ -349,8 +357,9 @@ class _SearchPageState extends State<SearchPage> {
         : visible;
     return SafeArea(
       bottom: false,
-      child: ListView(
-        keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+      // The title and search bar stay put, so a search can be changed from anywhere
+      // in a long list of results.
+      child: Column(
         children: [
           Padding(
             padding: const EdgeInsets.fromLTRB(
@@ -403,207 +412,227 @@ class _SearchPageState extends State<SearchPage> {
               ),
             ),
           ),
-          AnimatedSwitcher(
-            duration: context.motion(YomiMotion.quick),
-            child: _isLoading
-                ? Padding(
-                    padding: const EdgeInsets.only(top: 12),
-                    child: LinearProgressIndicator(
-                      minHeight: 2,
-                      color: context.accent,
-                      backgroundColor: Colors.transparent,
+          Expanded(
+            child: ListView(
+              keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+              children: [
+                AnimatedSwitcher(
+                  duration: context.motion(YomiMotion.quick),
+                  child: _isLoading
+                      ? Padding(
+                          padding: const EdgeInsets.only(top: 12),
+                          child: LinearProgressIndicator(
+                            minHeight: 2,
+                            color: context.accent,
+                            backgroundColor: Colors.transparent,
+                          ),
+                        )
+                      : const SizedBox(width: double.infinity, height: 14),
+                ),
+                if (_error != null)
+                  ErrorView(
+                    error: _error!,
+                    onRetry: () => _search(_controller.text),
+                  )
+                else if (!_hasSearched) ...[
+                  // Always shown, so nothing below moves when the search bar is tapped into or
+                  // out of. Counts as part of the bar, so tapping a chip doesn't close it first.
+                  TextFieldTapRegion(
+                    child: _RecentSearches(onSelected: _useRecent),
+                  ),
+                  if (context.watch<AiController>().isAvailable &&
+                      context.watch<SettingsController>().isAiSearchOn)
+                    MoodChips(onSelected: _useRecent),
+                  Row(
+                    children: [
+                      const Expanded(child: SectionTitle('Browse')),
+                      IconButton(
+                        tooltip: 'Refresh suggestions',
+                        icon: const Icon(Icons.refresh_rounded),
+                        onPressed: () => setState(() => _browseRevision++),
+                      ),
+                      const SizedBox(width: kPagePadding),
+                    ],
+                  ),
+                  AsyncSection<List<Song>>(
+                    skeleton: const Padding(
+                      padding: EdgeInsets.symmetric(horizontal: kPagePadding),
+                      child: Shimmer(
+                        child: SkeletonBox(height: 200, radius: 16),
+                      ),
+                    ),
+                    key: ValueKey('browse-$_browseRevision'),
+                    load: () {
+                      final songs = <String, Song>{
+                        for (final shelf
+                            in context.read<HomeController>().shelves)
+                          for (final song in shelf.songs) song.id: song,
+                      }.values.toList()..shuffle();
+                      return songs.isEmpty
+                          ? client
+                                .randomSongs(size: 24)
+                                .then(
+                                  (pool) => (pool.toList()..shuffle())
+                                      .take(8)
+                                      .toList(),
+                                )
+                          : Future.value(songs.take(8).toList());
+                    },
+                    builder: (context, songs) => Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: kPagePadding,
+                      ),
+                      child: context.isWideLayout
+                          ? CompactMusicGrid(
+                              items: [
+                                for (var i = 0; i < songs.length; i++)
+                                  MusicShortcut(
+                                    title: songs[i].title,
+                                    subtitle: songs[i].artist,
+                                    coverArtId: songs[i].coverArtId,
+                                    onTap: () =>
+                                        player.playQueue(songs, startIndex: i),
+                                  ),
+                              ],
+                            )
+                          : GridView.count(
+                              crossAxisCount: 2,
+                              shrinkWrap: true,
+                              physics: const NeverScrollableScrollPhysics(),
+                              mainAxisSpacing: 12,
+                              crossAxisSpacing: 12,
+                              childAspectRatio: 1.45,
+                              children: [
+                                for (var i = 0; i < songs.length; i++)
+                                  _BrowseTile(
+                                    song: songs[i],
+                                    onTap: () =>
+                                        player.playQueue(songs, startIndex: i),
+                                  ),
+                              ],
+                            ),
+                    ),
+                  ),
+                ] else if (isEmpty)
+                  Padding(
+                    padding: const EdgeInsets.all(48),
+                    child: Column(
+                      children: [
+                        Icon(
+                          Icons.search_off_rounded,
+                          size: 44,
+                          color: YomiColors.textSecondary,
+                        ),
+                        const SizedBox(height: 12),
+                        Text(
+                          'Nothing for "${_controller.text.trim()}"',
+                          textAlign: TextAlign.center,
+                          style: yomiText(16, weight: FontWeight.w700),
+                        ),
+                      ],
                     ),
                   )
-                : const SizedBox(width: double.infinity, height: 14),
-          ),
-          if (_error != null)
-            ErrorView(error: _error!, onRetry: () => _search(_controller.text))
-          else if (!_hasSearched) ...[
-            // Counts as part of the search bar, so tapping a chip doesn't close it first.
-            if (_searchFocus.hasFocus)
-              TextFieldTapRegion(
-                child: _RecentSearches(onSelected: _useRecent),
-              ),
-            if (context.watch<AiController>().isAvailable &&
-                context.watch<SettingsController>().isAiSearchOn)
-              MoodChips(onSelected: _useRecent),
-            Row(
-              children: [
-                const Expanded(child: SectionTitle('Browse')),
-                IconButton(
-                  tooltip: 'Refresh suggestions',
-                  icon: const Icon(Icons.refresh_rounded),
-                  onPressed: () => setState(() => _browseRevision++),
-                ),
-                const SizedBox(width: kPagePadding),
-              ],
-            ),
-            AsyncSection<List<Song>>(
-              skeleton: const Padding(
-                padding: EdgeInsets.symmetric(horizontal: kPagePadding),
-                child: Shimmer(child: SkeletonBox(height: 200, radius: 16)),
-              ),
-              key: ValueKey('browse-$_browseRevision'),
-              load: () {
-                final songs = <String, Song>{
-                  for (final shelf in context.read<HomeController>().shelves)
-                    for (final song in shelf.songs) song.id: song,
-                }.values.toList()..shuffle();
-                return songs.isEmpty
-                    ? client
-                          .randomSongs(size: 24)
-                          .then(
-                            (pool) =>
-                                (pool.toList()..shuffle()).take(8).toList(),
-                          )
-                    : Future.value(songs.take(8).toList());
-              },
-              builder: (context, songs) => Padding(
-                padding: const EdgeInsets.symmetric(horizontal: kPagePadding),
-                child: context.isWideLayout
-                    ? CompactMusicGrid(
-                        items: [
-                          for (var i = 0; i < songs.length; i++)
-                            MusicShortcut(
-                              title: songs[i].title,
-                              subtitle: songs[i].artist,
-                              coverArtId: songs[i].coverArtId,
-                              onTap: () =>
-                                  player.playQueue(songs, startIndex: i),
+                else ...[
+                  if (_filters != null && _isVibeFirst) _vibeSection(player),
+                  if (indexed != null)
+                    LocalResults(results: indexed, onOpened: _rememberSearch),
+                  if (_artists.isNotEmpty) ...[
+                    const SectionTitle('Artists'),
+                    SizedBox(
+                      height: _avatarSize + 44,
+                      child: ListView.separated(
+                        scrollDirection: Axis.horizontal,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: kPagePadding,
+                        ),
+                        itemCount: _artists.length,
+                        separatorBuilder: (_, _) => const SizedBox(width: 18),
+                        itemBuilder: (context, i) {
+                          final artist = _artists[i];
+                          return GestureDetector(
+                            onTap: () => openArtist(context, artist),
+                            child: SizedBox(
+                              width: _avatarSize,
+                              child: Column(
+                                children: [
+                                  ArtistAvatar(
+                                    artistId: artist.id,
+                                    name: artist.name,
+                                    size: _avatarSize,
+                                  ),
+                                  const SizedBox(height: 10),
+                                  Text(
+                                    artist.name,
+                                    maxLines: 2,
+                                    textAlign: TextAlign.center,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: yomiText(
+                                      13,
+                                      weight: FontWeight.w700,
+                                      height: 1.2,
+                                    ),
+                                  ),
+                                ],
+                              ),
                             ),
-                        ],
-                      )
-                    : GridView.count(
-                        crossAxisCount: 2,
-                        shrinkWrap: true,
-                        physics: const NeverScrollableScrollPhysics(),
-                        mainAxisSpacing: 12,
-                        crossAxisSpacing: 12,
-                        childAspectRatio: 1.45,
-                        children: [
-                          for (var i = 0; i < songs.length; i++)
-                            _BrowseTile(
-                              song: songs[i],
-                              onTap: () =>
-                                  player.playQueue(songs, startIndex: i),
-                            ),
-                        ],
+                          );
+                        },
                       ),
-              ),
-            ),
-          ] else if (isEmpty)
-            Padding(
-              padding: const EdgeInsets.all(48),
-              child: Column(
-                children: [
-                  Icon(
-                    Icons.search_off_rounded,
-                    size: 44,
-                    color: YomiColors.textSecondary,
-                  ),
-                  const SizedBox(height: 12),
-                  Text(
-                    'Nothing for "${_controller.text.trim()}"',
-                    textAlign: TextAlign.center,
-                    style: yomiText(16, weight: FontWeight.w700),
-                  ),
-                ],
-              ),
-            )
-          else ...[
-            if (_filters != null && _isVibeFirst) _vibeSection(player),
-            if (indexed != null)
-              LocalResults(results: indexed, onOpened: _rememberSearch),
-            if (_artists.isNotEmpty) ...[
-              const SectionTitle('Artists'),
-              SizedBox(
-                height: _avatarSize + 44,
-                child: ListView.separated(
-                  scrollDirection: Axis.horizontal,
-                  padding: const EdgeInsets.symmetric(horizontal: kPagePadding),
-                  itemCount: _artists.length,
-                  separatorBuilder: (_, _) => const SizedBox(width: 18),
-                  itemBuilder: (context, i) {
-                    final artist = _artists[i];
-                    return GestureDetector(
-                      onTap: () => openArtist(context, artist),
-                      child: SizedBox(
-                        width: _avatarSize,
-                        child: Column(
-                          children: [
-                            ArtistAvatar(
-                              artistId: artist.id,
-                              name: artist.name,
-                              size: _avatarSize,
-                            ),
-                            const SizedBox(height: 10),
-                            Text(
-                              artist.name,
-                              maxLines: 2,
-                              textAlign: TextAlign.center,
-                              overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                  if (_songs.isNotEmpty) ...[
+                    SectionTitle(
+                      'Songs',
+                      trailing: shownSongs.length < visible.length
+                          ? SeeAllButton(
+                              count: visible.length,
+                              onPressed: () => _openAll(
+                                '"${_controller.text.trim()}"',
+                                visible,
+                              ),
+                            )
+                          : Text(
+                              '${visible.length}${_hasMore ? '+' : ''}',
                               style: yomiText(
                                 13,
                                 weight: FontWeight.w700,
-                                height: 1.2,
+                                color: YomiColors.textSecondary,
                               ),
                             ),
-                          ],
-                        ),
-                      ),
-                    );
-                  },
-                ),
-              ),
-            ],
-            if (_songs.isNotEmpty) ...[
-              SectionTitle(
-                'Songs',
-                trailing: shownSongs.length < visible.length
-                    ? SeeAllButton(
-                        count: visible.length,
-                        onPressed: () =>
-                            _openAll('"${_controller.text.trim()}"', visible),
-                      )
-                    : Text(
-                        '${_songs.length}${_hasMore ? '+' : ''}',
-                        style: yomiText(
-                          13,
-                          weight: FontWeight.w700,
-                          color: YomiColors.textSecondary,
-                        ),
-                      ),
-              ),
-              GenreFilterBar(
-                groups: _resultGenres,
-                selected: _selectedGenres,
-                onChanged: (selected) =>
-                    setState(() => _selectedGenres = selected),
-              ),
-              for (var i = 0; i < shownSongs.length; i++)
-                SongTile(
-                  key: ValueKey(visible[i].id),
-                  song: visible[i],
-                  onTap: () {
-                    _rememberSearch();
-                    player.playQueue(visible, startIndex: i);
-                  },
-                ),
-              if (_hasMore)
-                Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 12),
-                  child: Center(
-                    child: OutlinedButton(
-                      onPressed: _isLoading
-                          ? null
-                          : () => _search(_controller.text, more: true),
-                      child: const Text('Show more songs'),
                     ),
-                  ),
-                ),
-            ],
-            if (_filters != null && !_isVibeFirst) _vibeSection(player),
-          ],
+                    GenreFilterBar(
+                      groups: _resultGenres,
+                      selected: _selectedGenres,
+                      onChanged: (selected) =>
+                          setState(() => _selectedGenres = selected),
+                    ),
+                    for (var i = 0; i < shownSongs.length; i++)
+                      SongTile(
+                        key: ValueKey(visible[i].id),
+                        song: visible[i],
+                        onTap: () {
+                          _rememberSearch();
+                          player.playQueue(visible, startIndex: i);
+                        },
+                      ),
+                    if (_hasMore)
+                      Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        child: Center(
+                          child: OutlinedButton(
+                            onPressed: _isLoading
+                                ? null
+                                : () => _search(_controller.text, more: true),
+                            child: const Text('Show more songs'),
+                          ),
+                        ),
+                      ),
+                  ],
+                  if (_filters != null && !_isVibeFirst) _vibeSection(player),
+                ],
+              ],
+            ),
+          ),
         ],
       ),
     );

@@ -127,6 +127,8 @@ class FakeSession extends ChangeNotifier implements SessionController {
   @override
   bool get hasHomeAddress => true;
   @override
+  bool get isSignedIn => true;
+  @override
   SubsonicClient get client =>
       SubsonicClient(baseUrl: 'http://server', username: 'u', password: 'p');
 

@@ -13,6 +13,9 @@ const Duration _lookupTimeout = Duration(seconds: 8);
 /// How long "this song has no lyrics" is believed before asking again.
 const Duration kNoLyricsRetryAfter = Duration(days: 7);
 
+// Recheck plain lyrics saved before cross-provider timed-lyrics lookup was fixed.
+const int _lyricsLookupVersion = 2;
+
 class LyricLine {
   const LyricLine(this.start, this.text);
 
@@ -146,7 +149,9 @@ class LyricsStore {
         // Plain text is worth another look later: timed lyrics may have appeared.
         return LyricsLookup.found(
           found,
-          isStale: !found.isSynced && !isCurrent,
+          isStale:
+              !found.isSynced &&
+              (!isCurrent || json['lookupVersion'] != _lyricsLookupVersion),
         );
       }
       return isCurrent ? const LyricsLookup.none() : null;
@@ -164,6 +169,7 @@ class LyricsStore {
       await directory.create(recursive: true);
       await temp.writeAsString(
         jsonEncode({
+          'lookupVersion': _lyricsLookupVersion,
           'lyrics': lookup.lyrics?.toJson(),
           'checkedAtMs': _now().millisecondsSinceEpoch,
         }),
@@ -204,8 +210,13 @@ class LyricsService {
   final Map<String, Future<Lyrics?>> _cache = {};
   final Map<String, Lyrics> _found = {};
 
-  Future<Lyrics?> forSong(SubsonicClient client, Song song) =>
-      _cache.putIfAbsent(song.id, () => _resolveAndRemember(client, song));
+  Future<Lyrics?> forSong(SubsonicClient client, Song song) {
+    final cached = _cache[song.id];
+    if (cached != null) return cached;
+    final future = _resolveAndRemember(client, song);
+    _cache[song.id] = future;
+    return future;
+  }
 
   /// Lyrics already found this session, without waiting: the player opens straight
   /// into its lyrics layout instead of switching to it a moment later.
@@ -222,9 +233,17 @@ class LyricsService {
     if (saved != null && !saved.isStale) return saved.lyrics;
     final lookup = await _find(client, song);
     final upgrade = lookup.lyrics;
+    if (lookup.isStale) {
+      _cache.remove(song.id);
+      return saved?.lyrics ?? upgrade;
+    }
     if (saved != null && (upgrade == null || !upgrade.isSynced)) {
       // Nothing better turned up: keep what was saved and look again later.
-      await store?.write(song.id, saved);
+      if (lookup.isCertain) {
+        await store?.write(song.id, saved);
+      } else {
+        _cache.remove(song.id);
+      }
       return saved.lyrics;
     }
     if (lookup.isCertain) {
@@ -238,16 +257,24 @@ class LyricsService {
 
   Future<LyricsLookup> _find(SubsonicClient client, Song song) async {
     var isServerCertain = true;
+    Lyrics? plain;
     try {
       final fromServer = await client.lyricsFor(song.id);
-      if (fromServer != null) return LyricsLookup.found(fromServer);
+      if (fromServer?.isSynced == true) return LyricsLookup.found(fromServer!);
+      plain = fromServer;
     } on Object catch (error) {
       // The server may be older or offline; the public lookup below still works.
       debugPrint('Server lyrics lookup failed: $error');
       isServerCertain = false;
     }
     final public = await _findPublic(song);
-    if (public.lyrics != null) return public;
+    if (public.lyrics?.isSynced == true) return public;
+    if (plain != null || public.lyrics != null) {
+      return LyricsLookup.found(
+        plain ?? public.lyrics!,
+        isStale: !public.isCertain || public.isStale,
+      );
+    }
     return public.isCertain && isServerCertain
         ? const LyricsLookup.none()
         : const LyricsLookup.unknown();
@@ -267,7 +294,9 @@ class LyricsService {
       if (lyrics.isSynced) return result;
       plain ??= lyrics;
     }
-    if (plain != null) return LyricsLookup.found(plain);
+    if (plain != null) {
+      return LyricsLookup.found(plain, isStale: !isCertain);
+    }
     return isCertain ? const LyricsLookup.none() : const LyricsLookup.unknown();
   }
 

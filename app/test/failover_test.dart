@@ -51,6 +51,9 @@ class FakeAudio implements AudioPlayer {
   @override
   Stream<PlaybackEvent> get playbackEventStream => const Stream.empty();
   @override
+  bool get shuffleModeEnabled => false;
+
+  @override
   bool get playing => isPlaying;
   @override
   ProcessingState get processingState => state;

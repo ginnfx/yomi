@@ -395,3 +395,86 @@ func TestKnownArtistsAreCapped(t *testing.T) {
 		t.Fatalf("artists = %d", got)
 	}
 }
+
+func TestBackupKeepsChatsWhenTheMainServerLosesItsMessagesFolder(t *testing.T) {
+	// Arrange: a backup already holding a chat, and a main server whose messages
+	// could not be opened, so it serves history only.
+	replicaMessages, err := openMessageStore(t.TempDir(), time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := replicaMessages.SaveProfile(Profile{User: "sam"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := replicaMessages.Send(Message{From: "keli", To: "sam", Text: "hello"}); err != nil {
+		t.Fatal(err)
+	}
+	primary := newServer(Config{MusicDir: t.TempDir(), MaxFileBytes: 1 << 10, NavidromeURL: adminNavidrome(t)}, adminAuth{}, nil, nil)
+	primary.History = openTestHistory(t)
+	ts := httptest.NewServer(primary.routes())
+	t.Cleanup(ts.Close)
+	sync := &StateSync{
+		PrimaryURL: ts.URL,
+		Login:      url.Values{"u": {"admin"}, "p": {"good"}},
+		Client:     ts.Client(),
+		Roots:      map[string]string{stateRootMessages: replicaMessages.dir, stateRootHistory: t.TempDir()},
+		OnChanged:  replicaMessages.Reload,
+	}
+
+	// Act
+	if err := sync.Run(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	// Assert
+	replicaMessages.Reload()
+	if got := replicaMessages.Thread("sam", "keli", 0, 0); len(got) != 1 {
+		t.Fatalf("the backup lost its chat: %v", got)
+	}
+}
+
+func TestBackupKeepsALongerLogThanAFreshMainServerHas(t *testing.T) {
+	// Arrange: the main server came back with an empty messages folder and one new
+	// message, while the backup still has the two older ones.
+	primaryMessages, err := openMessageStore(t.TempDir(), time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := primaryMessages.SaveProfile(Profile{User: "sam"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := primaryMessages.Send(Message{From: "keli", To: "sam", Text: "new"}); err != nil {
+		t.Fatal(err)
+	}
+	replicaMessages, err := openMessageStore(t.TempDir(), time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, text := range []string{"first older message", "second older message"} {
+		if _, err := replicaMessages.Send(Message{From: "keli", To: "sam", Text: text}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	primary := newServer(Config{MusicDir: t.TempDir(), MaxFileBytes: 1 << 10, NavidromeURL: adminNavidrome(t)}, adminAuth{}, nil, nil)
+	primary.Messages = primaryMessages
+	ts := httptest.NewServer(primary.routes())
+	t.Cleanup(ts.Close)
+	sync := &StateSync{
+		PrimaryURL: ts.URL,
+		Login:      url.Values{"u": {"admin"}, "p": {"good"}},
+		Client:     ts.Client(),
+		Roots:      map[string]string{stateRootMessages: replicaMessages.dir},
+		OnChanged:  replicaMessages.Reload,
+	}
+
+	// Act
+	if err := sync.Run(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	// Assert
+	replicaMessages.Reload()
+	if got := replicaMessages.Thread("sam", "keli", 0, 0); len(got) != 2 {
+		t.Fatalf("the backup's longer chat log was replaced: %v", got)
+	}
+}

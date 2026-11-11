@@ -3,15 +3,19 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
+import 'package:crypto/crypto.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/io_client.dart';
 
 /// The server gave a clear answer: there is no picture for this cover. Trying again
 /// right away won't help, unlike when the connection fails.
 class CoverNotAvailable implements Exception {
-  const CoverNotAvailable(this.reason);
+  const CoverNotAvailable(this.reason, {this.isTransient = false});
 
   final String reason;
+
+  /// A default image can be a temporary replica/catalog miss, not absent artwork.
+  final bool isTransient;
 
   @override
   String toString() => 'No cover available: $reason';
@@ -36,6 +40,14 @@ bool looksLikeImage(Uint8List bytes) {
 }
 
 const String _navidromeCoverPath = '/rest/getCoverArt';
+
+/// Navidrome's generic blue record is a successful image response, not album art.
+/// Exact bytes avoid mistaking a real blue album cover for the placeholder.
+const int navidromePlaceholderBytes = 69228;
+bool isNavidromePlaceholder(Uint8List bytes) =>
+    bytes.length == navidromePlaceholderBytes &&
+    sha256.convert(bytes).toString() ==
+        '273a4dbd61dfbb0a12d5d8ffe780eb7a3d4d000bc9771c5411cc70ae4dfa8a1f';
 const String _poolCoverPath = '/v1/pool/cover/';
 
 /// Set once at startup to find the upload service's port for an address, so covers can
@@ -121,6 +133,12 @@ class CoverDownloader {
     if (!looksLikeImage(bytes)) {
       throw const CoverNotAvailable('the answer was not a picture');
     }
+    if (isNavidromePlaceholder(bytes)) {
+      throw const CoverNotAvailable(
+        'the server returned its default cover',
+        isTransient: true,
+      );
+    }
     return bytes;
   }
 
@@ -137,7 +155,10 @@ class CoverDownloader {
       final response = await _client.get(pooled).timeout(requestTimeout);
       if (generation != _generation) return null;
       final bytes = response.bodyBytes;
-      if (response.statusCode == 200 && looksLikeImage(bytes)) return bytes;
+      if (response.statusCode == 200 &&
+          looksLikeImage(bytes) &&
+          !isNavidromePlaceholder(bytes))
+        return bytes;
       // A route the server doesn't have, or a pool it turned off, means no pool here.
       // A cover it says it doesn't have is just that one cover.
       final status = response.statusCode;

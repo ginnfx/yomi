@@ -224,6 +224,33 @@ void main() {
     );
   });
 
+  test('changing the queue on a paused device does not stop the one that is playing', () async {
+    // Arrange: the phone is playing and the Mac is following along, paused.
+    await phonePlayer.playQueue(songs);
+    await phone.saveNow();
+    await mac.refresh();
+    expect(macPlayer.isPlaying, false);
+    final writes = server.writes;
+
+    // Act: a song is added on the Mac without pressing play.
+    await macPlayer.playQueue([...songs, songs.first], autoplay: false);
+    await mac.saveNow();
+    await phone.refresh();
+
+    // Assert: nothing was published, the phone plays on, and the Mac keeps its queue.
+    expect(server.writes, writes);
+    expect(phonePlayer.isPlaying, true);
+    await phone.saveNow();
+    await mac.refresh();
+    expect(macPlayer.queue.length, 3);
+
+    // Pressing play on the Mac is a real takeover.
+    await macPlayer.togglePlay();
+    await mac.saveNow();
+    await phone.refresh();
+    expect(phonePlayer.isPlaying, false);
+  });
+
   test(
     'pause and seek publish the latest position and a return handoff works',
     () async {

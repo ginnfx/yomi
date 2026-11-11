@@ -181,21 +181,24 @@ func (f *CoverFetcher) findAlbumsMissingArt() ([]albumFolder, error) {
 	return albums, nil
 }
 
-// inspectAlbumFolder needs every song to agree on the album and none to carry its own art.
+// inspectAlbumFolder requires one artist/album and at least one track missing art.
 func inspectAlbumFolder(dir string, songs []string) (albumFolder, bool) {
 	album := albumFolder{dir: dir}
+	missingArt := false
 	for _, song := range songs {
 		tags, ok := readSongTags(song)
-		if !ok || tags.album == "" || tags.artist == "" || tags.hasArt {
+		if !ok || tags.album == "" || tags.artist == "" {
 			return albumFolder{}, false
 		}
+		missingArt = missingArt || !tags.hasArt
 		if album.album == "" {
 			album.album, album.artist = tags.album, tags.artist
-		} else if normalizeForMatch(album.album) != normalizeForMatch(tags.album) {
+		} else if normalizeForMatch(album.album) != normalizeForMatch(tags.album) ||
+			normalizeForMatch(album.artist) != normalizeForMatch(tags.artist) {
 			return albumFolder{}, false
 		}
 	}
-	return album, album.album != ""
+	return album, album.album != "" && missingArt
 }
 
 type songTags struct {

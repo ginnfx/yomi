@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:yomi/core/connection_probe.dart';
@@ -103,6 +105,62 @@ void main() {
       expect(session.routeLabel, 'Backup address');
     },
   );
+
+  test('a live backup is used without waiting for a main address that hangs', () async {
+    // Arrange: the home address never answers at all; the backup answers at once.
+    FlutterSecureStorage.setMockInitialValues({
+      'server_url': 'http://127.0.0.1:1',
+      'home_url': dead,
+      'username': 'u',
+      'password': 'p',
+      'route_mode': 'away',
+      'extra_urls': '["$backup"]',
+    });
+    final never = Completer<ProbeResult>();
+    session = SessionController(
+      probe: (url, user, password) async => false,
+      urlProbe: (url, user, password) => url == dead
+          ? never.future
+          : Future.value(
+              ProbeResult(
+                url: url,
+                isOk: url == backup,
+                elapsed: Duration.zero,
+                problem: 'No answer',
+              ),
+            ),
+    );
+    await session.restore();
+
+    // Act
+    // Restoring already started a check, so wait for whichever one is running.
+    final deadline = DateTime.now().add(const Duration(seconds: 5));
+    while (session.serverUrl != backup && DateTime.now().isBefore(deadline)) {
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+    }
+
+    // Assert
+    expect(session.isServerReachable, isTrue);
+    expect(session.serverUrl, backup);
+    session.dispose();
+  });
+
+  test('a backup added while offline is used straight away', () async {
+    // Arrange
+    final working = <String>{};
+    await start(working);
+    expect(session.isServerReachable, isFalse);
+
+    // Act
+    working.add('http://10.0.0.5:4533');
+    await session.addExtraUrl('10.0.0.5');
+    await Future<void>.delayed(const Duration(milliseconds: 200));
+
+    // Assert
+    expect(session.isServerReachable, isTrue);
+    expect(session.serverUrl, 'http://10.0.0.5:4533');
+    session.dispose();
+  });
 
   test('stays offline when no address answers', () async {
     await start({});
