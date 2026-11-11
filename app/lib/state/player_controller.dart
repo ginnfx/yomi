@@ -19,6 +19,7 @@ import 'download_manager.dart';
 import 'settings.dart';
 
 const Duration _stallCheckEvery = Duration(seconds: 1);
+const int _maxRecoveries = 3;
 
 /// Owns the audio player and the play queue; the UI listens to this.
 class PlayerController extends ChangeNotifier implements TransportCommands {
@@ -73,6 +74,8 @@ class PlayerController extends ChangeNotifier implements TransportCommands {
   bool _disposed = false;
   late final AudioPreloader _preloader;
   String? _retriedSongId;
+  String? _recoveringSongId;
+  int _recoveries = 0;
   String? _warmCurrentId;
   final List<StreamSubscription<Object?>> _subscriptions = [];
   SubsonicClient? _client;
@@ -133,6 +136,22 @@ class PlayerController extends ChangeNotifier implements TransportCommands {
     } else {
       unawaited(_reloadSources());
     }
+  }
+
+  /// Starts the current song again after the server came back at the same address.
+  /// A failed song is only given [_maxRecoveries] of these, so one that can't play at
+  /// all doesn't reload forever.
+  void resumeAfterFailure() {
+    final song = current;
+    final hasFailed = _error != null || _stalls.isStalled;
+    if (_disposed || song == null || !hasFailed || _isDisconnected) return;
+    if (_recoveringSongId != song.id) {
+      _recoveringSongId = song.id;
+      _recoveries = 0;
+    }
+    if (_recoveries >= _maxRecoveries) return;
+    _recoveries++;
+    unawaited(_reloadSources());
   }
 
   bool get _isFlowing =>

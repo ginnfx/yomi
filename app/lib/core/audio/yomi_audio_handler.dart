@@ -69,7 +69,11 @@ class YomiAudioHandler extends BaseAudioHandler with SeekHandler {
     },
     androidCompactActionIndices: const [0, 1, 2],
     processingState: switch (processing) {
-      ProcessingState.idle => AudioProcessingState.idle,
+      // The player drops to idle on any stream error while it is still meant to be
+      // playing. Reporting idle makes Android stop the playback service and release its
+      // wake lock, so the retry would run in a process the system is free to suspend.
+      ProcessingState.idle =>
+        isPlaying ? AudioProcessingState.buffering : AudioProcessingState.idle,
       ProcessingState.loading => AudioProcessingState.loading,
       ProcessingState.buffering => AudioProcessingState.buffering,
       ProcessingState.ready => AudioProcessingState.ready,

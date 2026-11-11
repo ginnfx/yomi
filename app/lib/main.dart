@@ -190,7 +190,16 @@ Future<void> main() async {
   await session.restoreSaved();
   session.startMonitoring();
   audioHandler.commands = player;
-  player.onStalled = () => unawaited(session.checkServer());
+  player.onStalled = () => unawaited(
+    session.checkServer().then((_) {
+      // The address may be unchanged, in which case nothing else restarts the song.
+      if (session.isSignedIn && session.isServerReachable) {
+        player.resumeAfterFailure();
+      }
+    }),
+  );
+  // Music playing with the screen off still needs a working route.
+  session.isNeededInBackground = () => player.isPlaying;
   final listeningDir = '${supportDir.path}/listening';
   File historyFile(String account) =>
       File('$listeningDir/history-$account.json');
@@ -558,6 +567,7 @@ Future<void> main() async {
     }
     player.isServerDown = !isReachable;
     if (client != null && becameReachable) {
+      unawaited(ai.refresh());
       unawaited(client.flushOutbox());
       unawaited(messages.flushPending());
     }

@@ -49,6 +49,33 @@ void main() {
     expect(commands.calls, ['next', 'previous']);
   });
 
+  test(
+    'a failed stream that should still be playing is not reported as stopped',
+    () {
+      // Act: the player drops to idle on an error while still meant to be playing.
+      final failed = YomiAudioHandler.playbackStateFor(
+        isPlaying: true,
+        processing: ProcessingState.idle,
+        position: Duration.zero,
+        buffered: Duration.zero,
+        speed: 1,
+        index: 0,
+      );
+      final stopped = YomiAudioHandler.playbackStateFor(
+        isPlaying: false,
+        processing: ProcessingState.idle,
+        position: Duration.zero,
+        buffered: Duration.zero,
+        speed: 1,
+        index: 0,
+      );
+
+      // Assert: idle is what makes Android shut the playback service down.
+      expect(failed.processingState, AudioProcessingState.buffering);
+      expect(stopped.processingState, AudioProcessingState.idle);
+    },
+  );
+
   test('play only starts playback when it is stopped', () async {
     commands.playing = true;
     await handler.play();
