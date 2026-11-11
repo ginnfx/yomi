@@ -268,3 +268,20 @@ func TestBackupsAreCachedBriefly(t *testing.T) {
 		t.Fatalf("creates after expiry = %d", creates)
 	}
 }
+
+func TestBackupCommandUsesHostShell(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("YOMI_BACKUP_TEST_DIR", dir)
+	source := newBackupSource(Config{
+		BackupDir: dir,
+		BackupCommand: `printf 'SQLite format 3\000' > "$YOMI_BACKUP_TEST_DIR/navidrome.db"`,
+	})
+	path, err := source.Latest(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil || string(data) != sqliteHeader {
+		t.Fatalf("backup data = %q, err = %v", data, err)
+	}
+}
