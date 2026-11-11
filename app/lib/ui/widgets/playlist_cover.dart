@@ -59,7 +59,26 @@ class PlaylistCover extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final cover = _cover(context);
+    final cover = DecoratedBox(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(radius),
+        boxShadow: [
+          BoxShadow(
+            color: Theme.of(context).colorScheme.primary
+                .withValues(alpha: 0.28),
+            blurRadius: size * 0.12,
+            offset: Offset(-size * 0.025, size * 0.025),
+          ),
+          BoxShadow(
+            color: Theme.of(context).colorScheme.secondary
+                .withValues(alpha: 0.3),
+            blurRadius: size * 0.15,
+            offset: Offset(size * 0.03, size * 0.035),
+          ),
+        ],
+      ),
+      child: _cover(context),
+    );
     final pick = onPick;
     if (pick == null) return cover;
     final hasPicture = _hasPicture(context);

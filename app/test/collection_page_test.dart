@@ -2,6 +2,7 @@ import 'dart:io';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';
 import 'package:yomi/core/ai/ai_api.dart';
@@ -106,7 +107,22 @@ Widget _album() => CollectionPage(
 );
 
 void main() {
-  setUpAll(loadAppFonts);
+  TestWidgetsFlutterBinding.ensureInitialized();
+  setUpAll(() async {
+    await loadAppFonts();
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(
+          const MethodChannel('plugins.flutter.io/path_provider'),
+          (_) async => Directory.systemTemp.path,
+        );
+  });
+  tearDownAll(
+    () => TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(
+          const MethodChannel('plugins.flutter.io/path_provider'),
+          null,
+        ),
+  );
   overscrollTests();
 
   testWidgets('an album reads "Album · 6 songs, 23 min" under its artist', (
@@ -242,6 +258,9 @@ void main() {
       find.byType(MaterialApp),
       matchesGoldenFile('goldens/song_menu.png'),
     );
+    // Drain the artwork lookup throttle when this golden runs on its own.
+    await tester.pump(const Duration(seconds: 4));
+    await tester.pump(const Duration(seconds: 4));
   }, skip: !Platform.isMacOS);
 
   testWidgets('Share opens a card to share and the phone\'s own apps', (

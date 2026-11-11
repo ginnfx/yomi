@@ -1,3 +1,9 @@
+import 'package:url_launcher/url_launcher.dart';
+
+import '../../core/ai/assistant.dart';
+import '../../state/assistant_controller.dart';
+import '../widgets/report_sheet.dart';
+
 import 'dart:async';
 import 'dart:math';
 
@@ -100,6 +106,10 @@ class _SearchPageState extends State<SearchPage> {
   }
 
   void _onChanged(String text) {
+    _identifyRevision++;
+    _identified = null;
+    _identifying = false;
+    _identifyError = null;
     _generation++;
     _timer?.cancel();
     setState(() {});
@@ -186,6 +196,35 @@ class _SearchPageState extends State<SearchPage> {
               take: _maxDescribedSongs,
             );
     });
+  }
+
+  ChatAnswer? _identified;
+  int _identifyRevision = 0;
+  bool _identifying = false;
+  String? _identifyError;
+
+  Future<void> _identify() async {
+    final generation = _identifyRevision;
+    setState(() {
+      _identifying = true;
+      _identifyError = null;
+    });
+    try {
+      final answer = await context.read<AssistantController>().identify(
+        _controller.text.trim(),
+      );
+      if (!mounted || generation != _identifyRevision) return;
+      setState(() => _identified = answer);
+    } on Object {
+      if (mounted && generation == _identifyRevision) {
+        setState(
+          () => _identifyError = 'Could not identify the song. Try again.',
+        );
+      }
+    } finally {
+      if (mounted && generation == _identifyRevision)
+        setState(() => _identifying = false);
+    }
   }
 
   void _rememberSearch() {
@@ -416,6 +455,61 @@ class _SearchPageState extends State<SearchPage> {
                   )
                 : const SizedBox(width: double.infinity, height: 14),
           ),
+          if (_controller.text.trim().isNotEmpty &&
+              (context.watch<AssistantController?>()?.isAvailable ?? false))
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: kPagePadding),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: TextButton.icon(
+                  onPressed: _identifying ? null : _identify,
+                  icon: const Icon(Icons.travel_explore),
+                  label: Text(
+                    _identifying
+                        ? 'Looking for the song…'
+                        : 'Find by lyrics or translated title',
+                  ),
+                ),
+              ),
+            ),
+          if (_identifyError != null)
+            Padding(
+              padding: const EdgeInsets.all(kPagePadding),
+              child: Text(_identifyError!),
+            ),
+          if (_identified case final answer?) ...[
+            Padding(
+              padding: const EdgeInsets.all(kPagePadding),
+              child: Text(answer.reply),
+            ),
+            for (final source in answer.sources)
+              TextButton(
+                onPressed: () => launchUrl(source.url),
+                child: Text(source.title),
+              ),
+            for (final suggestion in answer.songs)
+              if (suggestion.song case final song?)
+                SongTile(
+                  song: song,
+                  onTap: () => player.playQueue(
+                    answer.librarySongs,
+                    startIndex: answer.librarySongs.indexOf(song),
+                  ),
+                )
+              else
+                ListTile(
+                  title: Text(suggestion.title),
+                  subtitle: Text('${suggestion.artist} · Outside your library'),
+                  trailing: TextButton(
+                    onPressed: () => requestSong(
+                      context,
+                      artist: suggestion.artist,
+                      title: suggestion.title,
+                    ),
+                    child: const Text('Request'),
+                  ),
+                ),
+          ],
           if (_error != null)
             ErrorView(error: _error!, onRetry: () => _search(_controller.text))
           else if (!_hasSearched) ...[

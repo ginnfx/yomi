@@ -164,6 +164,7 @@ class ImportedPlaylistPage extends StatelessWidget {
               child: PlaylistCover(
                 playlistId: playlist.id,
                 coverArtId: queue.firstOrNull?.coverArtId,
+                songs: queue,
                 size: _heroCover,
                 radius: 20,
                 elevated: true,

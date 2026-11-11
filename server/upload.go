@@ -122,6 +122,7 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("DELETE /v1/playlists/{id}/cover", s.handleDeletePlaylistCover)
 	mux.HandleFunc("POST /v1/ai/names", s.handleMixNames)
 	mux.HandleFunc("POST /v1/ai/chat", s.handleChat)
+	mux.HandleFunc("GET /v1/audio/boost/{id}", s.handleVolumeBoost)
 	mux.HandleFunc("POST /v1/ai/discover", s.handleDiscover)
 	mux.HandleFunc("POST /v1/reports", s.handleAddReport)
 	mux.HandleFunc("GET /v1/reports", s.handleListReports)

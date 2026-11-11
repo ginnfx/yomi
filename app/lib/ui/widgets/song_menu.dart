@@ -16,6 +16,7 @@ import 'action_sheet.dart';
 import 'playlist_sheet.dart';
 import 'queue_sheet.dart';
 import 'report_sheet.dart';
+import 'volume_boost_sheet.dart';
 
 typedef SongAction = SheetAction;
 
@@ -200,7 +201,17 @@ Future<void> showSongMenu(
       tell("You'll see less like this");
     },
     onRemoveFromPlaylist: onRemoveFromPlaylist,
-    extraActions: extraActions,
+    extraActions: [
+      if (!song.isFromYoutube)
+        SongAction(
+          icon: Icons.volume_up_rounded,
+          label: player.boostFor(song) == 0
+              ? 'Volume boost…'
+              : 'Volume boost · +${player.boostFor(song)} dB',
+          onSelected: () => showVolumeBoost(context, song),
+        ),
+      ...extraActions,
+    ],
   );
 
   return showActionSheet(

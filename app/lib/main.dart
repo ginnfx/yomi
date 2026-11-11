@@ -319,11 +319,15 @@ Future<void> main() async {
               similarArtists: ai.similarArtists,
             );
       radioMemo = (memoKey, radio);
-      if (radio.isNotEmpty) return radio.take(_suggestedSongsPerSkip).toList();
+      if (radio.isNotEmpty)
+        return [
+          ...radio,
+          ...catalog.songs.where((song) => !radio.any((r) => r.id == song.id)),
+        ];
     }
-    return [for (final shelf in home.shelves) ...shelf.songs]
-        .take(_suggestedSongsPerSkip)
-        .toList();
+    return catalog.songs.isNotEmpty
+        ? catalog.songs
+        : [for (final shelf in home.shelves) ...shelf.songs];
   };
   final uploadsDir = '${supportDir.path}/uploads';
   final uploads = UploadQueue(
@@ -711,7 +715,6 @@ Future<void> main() async {
 }
 
 /// Follows the signed-in account, then brings its saved songs up to date.
-const int _suggestedSongsPerSkip = 20;
 
 /// How long the app must be away before a prepared Home replaces the one showing.
 const Duration _showNewHomeAfter = Duration(minutes: 30);

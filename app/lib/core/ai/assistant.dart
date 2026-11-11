@@ -53,9 +53,17 @@ class ChatAnswer {
     required this.reply,
     this.songs = const [],
     this.playlistName,
+    this.sources = const [],
   });
 
   factory ChatAnswer.fromJson(Map<String, dynamic> json) => ChatAnswer(
+    sources: [
+      for (final item in (json['sources'] as List? ?? []).whereType<Map>())
+        if (Uri.tryParse(item['url'] as String? ?? '') case final uri?
+            when uri.host.isNotEmpty &&
+                (uri.scheme == 'https' || uri.scheme == 'http'))
+          (title: item['title'] as String? ?? uri.host, url: uri),
+    ],
     reply: (json['reply'] as String?)?.trim() ?? '',
     songs: [
       for (final item
@@ -72,6 +80,7 @@ class ChatAnswer {
   final String reply;
   final List<SuggestedSong> songs;
   final String? playlistName;
+  final List<({String title, Uri url})> sources;
 
   List<Song> get librarySongs => [
     for (final suggestion in songs)
@@ -95,6 +104,7 @@ class ChatAnswer {
       for (final song in songs) song.withSong(findInLibrary(song, index)),
     ],
     playlistName: playlistName,
+    sources: sources,
   );
 }
 

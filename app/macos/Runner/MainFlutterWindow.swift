@@ -33,6 +33,20 @@ class MainFlutterWindow: NSWindow {
         result(FlutterMethodNotImplemented)
       }
     }
+    func applyIcon(_ name: String) {
+      NSApp.applicationIconImage = NSImage(named: name == "Default" ? "AppIcon" : name)
+    }
+    let iconChannel = FlutterMethodChannel(name: "yomi/app_icon", binaryMessenger: flutterViewController.engine.binaryMessenger)
+    applyIcon(UserDefaults.standard.string(forKey: "yomi.appIcon") ?? "Default")
+    iconChannel.setMethodCallHandler { call, result in
+      if call.method == "get" { result(UserDefaults.standard.string(forKey: "yomi.appIcon") ?? "Default"); return }
+      guard call.method == "set", let name = call.arguments as? String, ["Default", "Midnight", "Sakura"].contains(name) else {
+        result(FlutterMethodNotImplemented); return
+      }
+      UserDefaults.standard.set(name, forKey: "yomi.appIcon")
+      applyIcon(name)
+      result(nil)
+    }
     self.center()
     self.setFrameAutosaveName("YomiMainWindow")
 

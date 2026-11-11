@@ -2,6 +2,8 @@ package com.yomi.yomi
 
 import android.content.ActivityNotFoundException
 import android.content.Intent
+import android.content.ComponentName
+import android.content.pm.PackageManager
 import androidx.core.content.FileProvider
 import com.ryanheise.audioservice.AudioServiceActivity
 import io.flutter.embedding.engine.FlutterEngine
@@ -17,6 +19,29 @@ class MainActivity : AudioServiceActivity() {
         super.configureFlutterEngine(flutterEngine)
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, INSTALLER_CHANNEL)
             .setMethodCallHandler(::handleInstallerCall)
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "yomi/app_icon").setMethodCallHandler { call, result ->
+            val names = listOf("Default", "Midnight", "Sakura")
+            fun component(name: String) = ComponentName(packageName, "${MainActivity::class.java.`package`!!.name}.Icon$name")
+            when (call.method) {
+                "get" -> result.success(names.firstOrNull {
+                    packageManager.getComponentEnabledSetting(component(it)) == PackageManager.COMPONENT_ENABLED_STATE_ENABLED
+                } ?: "Default")
+                "set" -> {
+                    val name = call.arguments as? String
+                    if (name !in names) result.error("invalid", "Unknown icon", null)
+                    else {
+                        try {
+                            packageManager.setComponentEnabledSetting(component(name!!), PackageManager.COMPONENT_ENABLED_STATE_ENABLED, PackageManager.DONT_KILL_APP)
+                            for (other in names.filter { it != name }) {
+                                packageManager.setComponentEnabledSetting(component(other), PackageManager.COMPONENT_ENABLED_STATE_DISABLED, PackageManager.DONT_KILL_APP)
+                            }
+                            result.success(null)
+                        } catch (error: Exception) { result.error("icon", error.message, null) }
+                    }
+                }
+                else -> result.notImplemented()
+            }
+        }
         TunnelChannel(flutterEngine.dartExecutor.binaryMessenger)
         PushChannel(flutterEngine.dartExecutor.binaryMessenger)
         YtDlpChannel(flutterEngine.dartExecutor.binaryMessenger, this)

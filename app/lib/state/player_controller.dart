@@ -110,13 +110,16 @@ class PlayerController extends ChangeNotifier implements TransportCommands {
 
   /// Whether Next would do anything right now.
   bool get canSkipNext =>
-      _targetFrom(1) != null || _newSuggestions().isNotEmpty;
+      _queue.any(isAvailableNow) || _newSuggestions().isNotEmpty;
 
   /// Called after sign-in/out so stream and cover URLs use the right credentials.
   void attach(SubsonicClient? client) {
     final previous = _client;
     _client = client;
     if (client == null) {
+      _retiredBoosts.addAll(_boostedFiles.values);
+      _boostedFiles.clear();
+      _boostLevels.clear();
       _preloader.stop();
       _player.stop();
       _queue = const [];
@@ -228,14 +231,13 @@ class PlayerController extends ChangeNotifier implements TransportCommands {
         : null;
   }
 
-  List<Song> _newSuggestions() {
+  Iterable<Song> _newSuggestions() sync* {
     final suggest = suggestNext;
-    if (suggest == null || _queue.isEmpty) return const [];
+    if (suggest == null || _queue.isEmpty) return;
     final queued = {for (final song in _queue) song.id};
-    return [
-      for (final song in suggest())
-        if (!queued.contains(song.id)) song,
-    ];
+    for (final song in suggest()) {
+      if (queued.add(song.id) && isAvailableNow(song)) yield song;
+    }
   }
 
   Future<void> _skipTo(int target) async {
@@ -323,7 +325,7 @@ class PlayerController extends ChangeNotifier implements TransportCommands {
           : client.coverArtUri(song.coverArtId, size: 600),
     );
     // Songs from YouTube exist only as a file on this device.
-    final external = _externalFiles[song.id];
+    final external = _boostedFiles[song.id] ?? _externalFiles[song.id];
     if (external != null) return AudioSource.file(external.path, tag: tag);
     if (allowLocal) {
       final local =
@@ -335,11 +337,31 @@ class PlayerController extends ChangeNotifier implements TransportCommands {
   }
 
   bool _isLocal(Song song) =>
+      _boostedFiles.containsKey(song.id) ||
       _externalFiles.containsKey(song.id) ||
       downloads.isDownloaded(song.id) ||
       cache.isCached(song.id);
 
   final Map<String, File> _externalFiles = {};
+  final Map<String, File> _boostedFiles = {};
+  final List<File> _retiredBoosts = [];
+  final Map<String, int> _boostLevels = {};
+  int boostFor(Song song) => _boostLevels[song.id] ?? 0;
+
+  Future<void> useBoost(Song song, File? file, int decibels) async {
+    final old = _boostedFiles.remove(song.id);
+    if (file != null) _boostedFiles[song.id] = file;
+    _boostLevels[song.id] = decibels;
+    if (_queue.any((queued) => queued.id == song.id)) {
+      if (current?.id == song.id) {
+        await _reloadSources();
+      } else {
+        _needsNewSources = true;
+      }
+    }
+    notifyListeners();
+    if (old != null && old.path != file?.path) _retiredBoosts.add(old);
+  }
 
   /// Lets [song] play from [file] although the server doesn't have it.
   void registerExternalFile(Song song, File file) =>
@@ -526,14 +548,43 @@ class PlayerController extends ChangeNotifier implements TransportCommands {
       _player.playing ? _player.pause() : _player.play();
   @override
   Future<void> next() async {
-    final target = _targetFrom(1);
-    if (target != null) return _skipTo(target);
-    final more = _newSuggestions();
-    if (more.isEmpty) return;
-    final first = _queue.length;
-    _queue = List.unmodifiable([..._queue, ...more]);
-    await _player.addAudioSources(more.map(_sourceFor).toList());
-    return _skipTo(first);
+    // Advance immediately even if a native load is still in flight. _skipTo
+    // replaces that load, so rapid taps retain the latest intended position.
+    final order = _order;
+    final position = order.indexOf(_index ?? -1);
+    if (position >= 0) {
+      for (final target in order.skip(position + 1)) {
+        if (isAvailableNow(_queue[target])) return _skipTo(target);
+      }
+      if (_player.loopMode == LoopMode.all) {
+        for (final target in order.take(position + 1)) {
+          if (isAvailableNow(_queue[target])) return _skipTo(target);
+        }
+      }
+    }
+    var more = _newSuggestions().take(20).toList();
+    if (more.isEmpty) {
+      // The library is finite. Reuse a bounded pool, avoiding an immediate
+      // repeat whenever another playable song exists.
+      more = <String, Song>{
+        for (final song in _queue.where(isAvailableNow).take(40)) song.id: song,
+      }.values.toList()..shuffle();
+      if (more.isEmpty) return;
+      if (more.length > 1 && more.first.id == current?.id) {
+        more.add(more.removeAt(0));
+      }
+      more = more.take(20).toList();
+    }
+    // Keep recent history for Previous, without retaining every consumed
+    // source over an endless session.
+    final history = [for (final i in order.take(position + 1)) _queue[i]];
+    final recent = history.skip(max(0, history.length - 20)).toList();
+    _userSkips++;
+    return playQueue(
+      [...recent, ...more],
+      startIndex: recent.length,
+      autoplay: isPlaying || _shouldPlayAfterLoad,
+    );
   }
 
   @override
@@ -625,7 +676,17 @@ class PlayerController extends ChangeNotifier implements TransportCommands {
     for (final subscription in _subscriptions) {
       subscription.cancel();
     }
-    _player.dispose();
+    unawaited(
+      _player.dispose().then((_) async {
+        for (final file in [..._boostedFiles.values, ..._retiredBoosts]) {
+          try {
+            await file.parent.delete(recursive: true);
+          } on FileSystemException {
+            /* Already removed. */
+          }
+        }
+      }),
+    );
     super.dispose();
   }
 }

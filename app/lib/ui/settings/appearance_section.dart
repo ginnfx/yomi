@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 import '../../state/appearance_controller.dart';
 import '../theme.dart';
 import 'accent_picker_sheet.dart';
+import 'app_icon_row.dart';
 import 'settings_widgets.dart';
 
 class AppearanceSection extends StatelessWidget {
@@ -82,6 +83,7 @@ class AppearanceSection extends StatelessWidget {
             value: appearance.isTrueBlack,
             onChanged: appearance.setTrueBlack,
           ),
+        const AppIconRow(),
         const _TextSizeRow(),
         SettingsSwitch(
           title: 'Reduce motion',

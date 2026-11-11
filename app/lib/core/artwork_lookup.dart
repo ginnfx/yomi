@@ -1,5 +1,7 @@
 import 'dart:convert';
 
+import 'search_index.dart';
+
 import 'package:http/http.dart' as http;
 import 'package:crypto/crypto.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -12,7 +14,7 @@ class ArtworkLookup {
   final Map<String, Future<String?>> _pending = {};
   Future<void> _tail = Future.value();
   static String normalized(String value) =>
-      value.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '');
+      normalizeForSearch(value).replaceAll(' ', '');
 
   Future<String?> find(String artist, String album, String title) {
     if (artist.trim().isEmpty || normalized(artist).startsWith('unknown'))
@@ -22,7 +24,7 @@ class ArtworkLookup {
         ? title
         : album;
     final key =
-        'art_lookup_v1_${sha256.convert(utf8.encode('$artist|$identity'))}';
+        'art_lookup_v2_${sha256.convert(utf8.encode('$artist|$identity'))}';
     return _pending.putIfAbsent(key, () async {
       try {
         final prefs = await SharedPreferences.getInstance();

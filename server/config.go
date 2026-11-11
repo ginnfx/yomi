@@ -52,6 +52,7 @@ type Config struct {
 	ReleaseRepo       string
 	ReleaseState      string
 	LLMURL            string
+	SearchKey         string
 	LLMKey            string
 	LLMModel          string
 	TagsDir           string
@@ -93,6 +94,7 @@ func loadConfig() Config {
 		ReleaseRepo:       os.Getenv("YOMI_RELEASE_REPO"),
 		ReleaseState:      os.Getenv("YOMI_RELEASE_STATE"),
 		LLMURL:            os.Getenv("YOMI_LLM_URL"),
+		SearchKey:         os.Getenv("YOMI_SEARCH_KEY"),
 		LLMKey:            os.Getenv("YOMI_LLM_KEY"),
 		LLMModel:          os.Getenv("YOMI_LLM_MODEL"),
 		TagsDir:           envOr("YOMI_TAGS_DIR", defaultTagsDir),

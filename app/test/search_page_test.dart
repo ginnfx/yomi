@@ -1,3 +1,8 @@
+import 'dart:async';
+
+import 'package:yomi/core/ai/assistant.dart';
+import 'package:yomi/state/assistant_controller.dart';
+
 import 'dart:convert';
 import 'dart:io';
 
@@ -63,6 +68,17 @@ class _PagedSession extends FakeSession {
   final _PagedClient paged;
   @override
   SubsonicClient get client => paged;
+}
+
+class _IdentificationAssistant extends ChangeNotifier
+    implements AssistantController {
+  final result = Completer<ChatAnswer>();
+  @override
+  bool get isAvailable => true;
+  @override
+  Future<ChatAnswer> identify(String query) => result.future;
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
 
 void main() {
@@ -139,6 +155,49 @@ void main() {
     ],
     child: const Material(child: SearchPage()),
   );
+
+  testWidgets('identification survives a pending regular search debounce', (
+    tester,
+  ) async {
+    final assistant = _IdentificationAssistant();
+    final unloaded = CatalogController(
+      directory: Directory('${dir.path}/identify-unloaded'),
+    );
+    await pumpScreen(
+      tester,
+      const Material(child: SearchPage()),
+      size: const Size(800, 2400),
+      extraProviders: [
+        ChangeNotifierProvider<SessionController>.value(
+          value: _PagedSession(_PagedClient()),
+        ),
+        ChangeNotifierProvider<CatalogController>.value(value: unloaded),
+        ChangeNotifierProvider<HomeController>.value(value: _Home()),
+        ChangeNotifierProvider<AiController>.value(
+          value: AiController(file: File('${dir.path}/identify-labels.json')),
+        ),
+        ChangeNotifierProvider<AssistantController>.value(value: assistant),
+        ChangeNotifierProvider<ConnectivityController>(
+          create: (_) => ConnectivityController(
+            changes: const Stream.empty(),
+            check: () async => [ConnectivityResult.wifi],
+          ),
+        ),
+      ],
+    );
+    await tester.enterText(
+      find.byType(TextField).first,
+      'remember these lyrics',
+    );
+    await tester.pump();
+    await tester.tap(find.text('Find by lyrics or translated title'));
+    await tester.pump(const Duration(milliseconds: 400));
+    assistant.result.complete(const ChatAnswer(reply: 'Identified recording'));
+    await tester.pumpAndSettle();
+    expect(find.text('Identified recording'), findsOneWidget);
+    expect(find.text('Looking for the song…'), findsNothing);
+    expect(find.text('Find by lyrics or translated title'), findsOneWidget);
+  });
 
   testWidgets(
     'server paging counts server rows separately from local matches',
