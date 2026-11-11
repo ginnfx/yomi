@@ -234,7 +234,7 @@ void main() {
       ),
       roleProbe: (_, _) async => false,
       urlProbe: (url, _, _) {
-        entered.complete();
+        if (!entered.isCompleted) entered.complete();
         return response.future;
       },
     );
