@@ -146,9 +146,14 @@ class PlaybackSyncController extends ChangeNotifier
       return;
     }
     if (queueChanged || started) {
-      _ownsPlayback = true;
+      // What was chosen here is kept either way. Only music that is actually playing
+      // here takes over the account's queue: adding a song on a paused device must
+      // not stop whichever device is playing.
       _claim = true;
-      _remote = null;
+      if (now[2] == true) {
+        _ownsPlayback = true;
+        _remote = null;
+      }
       notifyListeners();
     }
     if (_ownsPlayback) {
