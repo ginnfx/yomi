@@ -340,6 +340,9 @@ func (s *Server) handleStateIndex(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	files := []stateFile{}
+	// Naming the folders being served lets a backup tell "this file was deleted" from
+	// "this server couldn't open that folder at all".
+	roots := []string{}
 	for label, root := range s.stateRoots() {
 		found, err := listStateFiles(root, label)
 		if err != nil {
@@ -347,9 +350,10 @@ func (s *Server) handleStateIndex(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "couldn't list files")
 			return
 		}
+		roots = append(roots, label)
 		files = append(files, found...)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"files": files})
+	writeJSON(w, http.StatusOK, map[string]any{"files": files, "roots": roots})
 }
 
 func (s *Server) handleStateFile(w http.ResponseWriter, r *http.Request) {
@@ -377,9 +381,14 @@ type StateSync struct {
 	seen       map[string]stateFile
 }
 
+// isAppendOnlyLog reports files the main server only ever adds to: chats, reactions and
+// plays. One that is missing or smaller there means the main server lost data, so the
+// copy here is the one worth keeping.
+func isAppendOnlyLog(name string) bool { return strings.HasSuffix(name, ".jsonl") }
+
 // Run copies anything new or changed. One bad file doesn't stop the others.
 func (r *StateSync) Run(ctx context.Context) error {
-	files, err := r.fetchIndex(ctx)
+	files, served, err := r.fetchIndex(ctx)
 	if err != nil {
 		return err
 	}
@@ -403,6 +412,10 @@ func (r *StateSync) Run(ctx context.Context) error {
 		if r.seen[key] == file {
 			continue
 		}
+		if r.wouldShrinkLog(file) {
+			log.Printf("replica state: keeping %s: the main server's copy is smaller", key)
+			continue
+		}
 		if err := r.fetchFile(ctx, file); err != nil {
 			log.Printf("replica state: %s: %v", key, redactURL(err))
 			if firstFailure == nil {
@@ -413,7 +426,8 @@ func (r *StateSync) Run(ctx context.Context) error {
 		r.seen[key] = file
 		isChanged = true
 	}
-	// A complete manifest is authoritative for previously mirrored files.
+	// The manifest is authoritative for previously mirrored files, but only in folders
+	// the main server says it is serving, and never for its append-only logs.
 	present := make(map[string]bool, len(files))
 	for _, file := range files {
 		present[file.Root+"/"+file.Name] = true
@@ -425,6 +439,9 @@ func (r *StateSync) Run(ctx context.Context) error {
 		root, known := r.Roots[old.Root]
 		name := filepath.FromSlash(old.Name)
 		if !known || !filepath.IsLocal(name) {
+			continue
+		}
+		if !served[old.Root] || isAppendOnlyLog(old.Name) {
 			continue
 		}
 		if err := os.Remove(filepath.Join(root, name)); err != nil && !errors.Is(err, os.ErrNotExist) {
@@ -440,6 +457,17 @@ func (r *StateSync) Run(ctx context.Context) error {
 		r.OnChanged()
 	}
 	return firstFailure
+}
+
+// wouldShrinkLog reports whether fetching file would replace a longer local log.
+func (r *StateSync) wouldShrinkLog(file stateFile) bool {
+	root, known := r.Roots[file.Root]
+	name := filepath.FromSlash(file.Name)
+	if !known || !filepath.IsLocal(name) || !isAppendOnlyLog(file.Name) {
+		return false
+	}
+	info, err := os.Stat(filepath.Join(root, name))
+	return err == nil && info.Size() > file.Size
 }
 
 func (r *StateSync) get(ctx context.Context, path string, extra url.Values) (*http.Response, error) {
@@ -465,19 +493,32 @@ func (r *StateSync) get(ctx context.Context, path string, extra url.Values) (*ht
 	return resp, nil
 }
 
-func (r *StateSync) fetchIndex(ctx context.Context) ([]stateFile, error) {
+// fetchIndex returns the main server's files and which folders it is serving.
+func (r *StateSync) fetchIndex(ctx context.Context) ([]stateFile, map[string]bool, error) {
 	resp, err := r.get(ctx, "/v1/replica/state", nil)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	defer resp.Body.Close()
 	var reply struct {
 		Files []stateFile `json:"files"`
+		Roots *[]string   `json:"roots"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&reply); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return reply.Files, nil
+	served := map[string]bool{}
+	if reply.Roots != nil {
+		for _, root := range *reply.Roots {
+			served[root] = true
+		}
+		return reply.Files, served, nil
+	}
+	// An older main server doesn't say, so only a folder it listed something from counts.
+	for _, file := range reply.Files {
+		served[file.Root] = true
+	}
+	return reply.Files, served, nil
 }
 
 func (r *StateSync) fetchFile(ctx context.Context, file stateFile) error {
