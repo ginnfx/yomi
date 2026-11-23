@@ -27,6 +27,7 @@ import '../widgets/made_for_you.dart';
 import '../widgets/compact_music_grid.dart';
 import '../widgets/shimmer.dart';
 import '../widgets/profile_panel.dart';
+import '../widgets/recent_added_sheet.dart';
 import 'collection_page.dart';
 import 'messages_page.dart';
 import '../widgets/yomi_refresh.dart';
@@ -393,6 +394,11 @@ class _Header extends StatelessWidget {
               semanticsLabel: '$greeting, $name',
               style: yomiText(24, weight: FontWeight.w800, letterSpacing: -0.5),
             ),
+          ),
+          IconButton(
+            tooltip: 'Recently added',
+            onPressed: () => showRecentlyAdded(context),
+            icon: const Icon(Icons.new_releases_outlined),
           ),
           const _MessagesButton(),
         ],

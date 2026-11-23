@@ -133,6 +133,11 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('offers recently added from the header', (tester) async {
+    await pumpScreen(tester, home(), size: phoneSize, prefs: hideQuick);
+    expect(find.byTooltip('Recently added'), findsOneWidget);
+  });
+
   testWidgets('screenshot', (tester) async {
     await pumpScreen(tester, home(), size: phoneSize, prefs: hideQuick);
     await expectLater(

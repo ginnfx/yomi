@@ -58,6 +58,23 @@ class ScanStatus {
 }
 
 /// Thin client for the Subsonic/OpenSubsonic API that Navidrome serves.
+/// One page of the newest albums, flattened into songs, newest album first.
+class RecentSongsPage {
+  const RecentSongsPage({
+    required this.songs,
+    required this.nextOffset,
+    required this.hasMore,
+  });
+
+  final List<Song> songs;
+
+  /// The album offset to pass to the next [SubsonicClient.recentSongsPage].
+  final int nextOffset;
+
+  /// Whether the server has another album after this page.
+  final bool hasMore;
+}
+
 class SubsonicClient {
   SubsonicClient({
     required String baseUrl,
@@ -515,6 +532,31 @@ class SubsonicClient {
       found.addAll(await albumSongs(album.id));
     }
     return List.unmodifiable(found.take(count));
+  }
+
+  /// One page of the newest albums, flattened into their songs, newest album
+  /// first. Paging follows albums rather than songs, so an album split across
+  /// pages can't repeat: [RecentSongsPage.nextOffset] is what to ask for next.
+  Future<RecentSongsPage> recentSongsPage({
+    int albumsPerPage = 6,
+    int albumOffset = 0,
+  }) async {
+    if (albumsPerPage < 1) {
+      throw ArgumentError.value(albumsPerPage, 'albumsPerPage', 'must be > 0');
+    }
+    // Ask for one extra album to know whether another page exists.
+    final albums = await this.albums(
+      'newest',
+      size: albumsPerPage + 1,
+      offset: albumOffset,
+    );
+    final page = albums.take(albumsPerPage).toList(growable: false);
+    final lists = await Future.wait(page.map((album) => albumSongs(album.id)));
+    return RecentSongsPage(
+      songs: List.unmodifiable([for (final list in lists) ...list]),
+      nextOffset: albumOffset + page.length,
+      hasMore: albums.length > page.length,
+    );
   }
 
   /// Tells the server what is playing. With [submission] the play counts toward
