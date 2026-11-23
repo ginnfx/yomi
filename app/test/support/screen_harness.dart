@@ -79,6 +79,8 @@ class FakeLyricsService implements LyricsService {
 }
 
 class FakePlayer extends ChangeNotifier implements PlayerController {
+  @override
+  int boostFor(Song song) => 0;
   FakePlayer(this._song, {this.fakePosition = const Duration(seconds: 12)});
 
   final Song? _song;

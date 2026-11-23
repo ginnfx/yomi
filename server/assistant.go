@@ -49,6 +49,7 @@ type SuggestedSong struct {
 
 // ChatReply is what the assistant answers: words, songs, and a name if it made a playlist.
 type ChatReply struct {
+	Sources      []webSource     `json:"sources,omitempty"`
 	Reply        string          `json:"reply"`
 	Songs        []SuggestedSong `json:"songs"`
 	PlaylistName string          `json:"playlistName,omitempty"`
@@ -135,7 +136,7 @@ func cleanSongs(songs []SuggestedSong, limit int) []SuggestedSong {
 //go:embed prompts/assistant.md
 var assistantSystemPrompt string
 
-// Chat keeps Yomi's voice while grounding music suggestions in library evidence.
+// Chat preserves Yomi's voice while grounding answers in library and web evidence.
 func (i *Interpreter) Chat(ctx context.Context, messages []ChatMessage, taste ChatTaste, lookups ...libraryLookup) (ChatReply, error) {
 	input := map[string]any{"conversation": messages, "taste": taste}
 	payload, err := json.Marshal(input)
@@ -147,6 +148,8 @@ func (i *Interpreter) Chat(ctx context.Context, messages []ChatMessage, taste Ch
 	system := assistantSystemPrompt
 	var reply ChatReply
 	results := []any{}
+	sources := []webSource{}
+	seenSources := map[string]bool{}
 	for turn := 0; ; turn++ {
 		var step struct {
 			ChatReply
@@ -166,6 +169,14 @@ func (i *Interpreter) Chat(ctx context.Context, messages []ChatMessage, taste Ch
 		if len(lookups) > 0 && lookups[0] != nil {
 			result = lookups[0](ctx, *step.Tool)
 		}
+		if web, ok := result.(webSearchResult); ok {
+			for _, source := range web.Sources {
+				if !seenSources[source.URL] {
+					sources = append(sources, source)
+					seenSources[source.URL] = true
+				}
+			}
+		}
 		results = append(results, map[string]any{"call": step.Tool, "result": result})
 		input["libraryResults"] = results
 		if turn == 5 {
@@ -177,6 +188,7 @@ func (i *Interpreter) Chat(ctx context.Context, messages []ChatMessage, taste Ch
 		}
 	}
 	return ChatReply{
+		Sources:      sources,
 		Reply:        clip(reply.Reply, chatReplyMaxChars),
 		Songs:        cleanSongs(reply.Songs, chatMaxSongs),
 		PlaylistName: clip(reply.PlaylistName, mixNameMaxChars),
@@ -234,7 +246,7 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	for index, message := range request.Messages {
 		request.Messages[index].Text = strings.TrimSpace(message.Text)
 	}
-	reply, err := s.interpreter.Chat(r.Context(), request.Messages, cleanTaste(request.Taste), s.assistantLibrary(r.URL.Query()))
+	reply, err := s.interpreter.Chat(r.Context(), request.Messages, cleanTaste(request.Taste), s.assistantTools(r.URL.Query()))
 	if err != nil {
 		log.Printf("chat: %v", err)
 		writeError(w, http.StatusBadGateway, "the assistant couldn't answer right now")

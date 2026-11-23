@@ -5,6 +5,11 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';
 import 'package:yomi/core/ai/ai_api.dart';
 import 'package:yomi/core/models.dart';
+import 'package:yomi/core/cover_palette.dart';
+import 'package:yomi/core/subsonic_client.dart';
+import 'package:yomi/ui/pages/collection_header.dart';
+import 'package:yomi/ui/widgets/playlist_cover.dart';
+import 'package:yomi/ui/theme.dart';
 import 'package:yomi/core/search_index.dart';
 import 'package:yomi/core/spotify/imported_playlist.dart';
 import 'package:yomi/core/taste.dart';
@@ -49,12 +54,34 @@ class _Ai extends ChangeNotifier implements AiController {
 }
 
 class _Covers extends ChangeNotifier implements PlaylistCoversController {
+  String? picture;
+  void setPicture(String url) {
+    picture = url;
+    notifyListeners();
+  }
+
   @override
-  bool hasCover(String id) => false;
+  bool hasCover(String id) => picture != null;
   @override
-  String? urlFor(String id) => null;
+  String? urlFor(String id) => picture;
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
+
+class _Palette extends CoverPalette {
+  final requested = <String>[];
+  @override
+  Future<Color?> colorForImage(
+    String key,
+    ImageProvider Function() provider,
+  ) async {
+    requested.add(key);
+    return key.contains('teal') ? Colors.teal : Colors.pink;
+  }
+
+  @override
+  Future<Color?> colorFor(SubsonicClient client, String? coverArtId) async =>
+      null;
 }
 
 /// Pretends the songs in [saved] are on the device.
@@ -85,6 +112,8 @@ void main() {
     WidgetTester tester, {
     Set<String> saved = const {},
     List<ImportEntry>? entries,
+    _Covers? covers,
+    CoverPalette? palette,
   }) async {
     final dir = (await tester.runAsync(
       () => Directory.systemTemp.createTemp('yomi_import_dl'),
@@ -108,10 +137,11 @@ void main() {
       ImportedPlaylistPage(playlistId: playlist.id),
       size: const Size(1080, 2340),
       extraProviders: [
+        if (palette != null) Provider<CoverPalette>.value(value: palette),
         ChangeNotifierProvider<ImportsController>.value(value: imports),
         ChangeNotifierProvider<CatalogController>.value(value: _Catalog()),
         ChangeNotifierProvider<PlaylistCoversController>.value(
-          value: _Covers(),
+          value: covers ?? _Covers(),
         ),
         ChangeNotifierProvider<DownloadManager>.value(value: downloads),
         ChangeNotifierProvider<HomeController>.value(value: _Home()),
@@ -120,6 +150,44 @@ void main() {
     );
     return downloads;
   }
+
+  testWidgets(
+    'imported playlist background follows the custom picture, not the accent',
+    (tester) async {
+      final covers = _Covers()..picture = 'https://images.example/teal.jpg';
+      final palette = _Palette();
+      await pumpImport(tester, covers: covers, palette: palette);
+      await settleScreen(tester);
+      final context = tester.element(find.byType(CollectionHeader));
+      final page = context.pageColor;
+      expect(
+        tester.widget<CollectionHeader>(find.byType(CollectionHeader)).color,
+        Color.lerp(page, Colors.teal, headerTintStrength),
+      );
+      covers.setPicture('https://images.example/pink.jpg');
+      await settleScreen(tester);
+      await tester.pump(const Duration(seconds: 1));
+      expect(
+        tester.widget<CollectionHeader>(find.byType(CollectionHeader)).color,
+        Color.lerp(page, Colors.pink, headerTintStrength),
+      );
+      expect(
+        palette.requested,
+        containsAll([
+          'https://images.example/teal.jpg',
+          'https://images.example/pink.jpg',
+        ]),
+      );
+      final cover = find.byType(PlaylistCover).first;
+      for (final element
+          in find
+              .descendant(of: cover, matching: find.byType(DecoratedBox))
+              .evaluate()) {
+        final decoration = (element.widget as DecoratedBox).decoration;
+        if (decoration is BoxDecoration) expect(decoration.boxShadow, isNull);
+      }
+    },
+  );
 
   testWidgets('downloads the songs of an import that are in the library', (
     tester,

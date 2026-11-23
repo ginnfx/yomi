@@ -10,6 +10,7 @@ import '../../state/imports_controller.dart';
 import '../../state/reports_controller.dart';
 import '../theme.dart';
 import 'share_exported_file.dart';
+import 'cover_art.dart';
 import 'youtube_play_button.dart';
 
 /// How many to show before "Show all".
@@ -117,7 +118,14 @@ class _WantedSongsSectionState extends State<WantedSongsSection> {
             contentPadding: const EdgeInsets.symmetric(
               horizontal: kPagePadding,
             ),
-            leading: const Icon(Icons.music_note_rounded),
+            leading: CoverArt(
+              coverArtId: null,
+              size: 48,
+              artist: song.artist,
+              title: song.title,
+              album: '',
+              seed: song.title,
+            ),
             title: Text(
               song.title,
               maxLines: 1,

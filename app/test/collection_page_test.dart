@@ -2,6 +2,7 @@ import 'dart:io';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';
 import 'package:yomi/core/ai/ai_api.dart';
@@ -13,6 +14,9 @@ import 'package:yomi/state/home_controller.dart';
 import 'package:yomi/state/offline_keeper.dart';
 import 'package:yomi/state/playlist_covers_controller.dart';
 import 'package:yomi/core/models.dart';
+import 'package:yomi/core/cover_palette.dart';
+import 'package:yomi/ui/pages/collection_header.dart';
+import 'package:yomi/ui/theme.dart';
 import 'package:yomi/core/subsonic_client.dart';
 import 'package:yomi/state/session.dart';
 import 'package:yomi/state/messages_controller.dart';
@@ -45,12 +49,26 @@ class _FakeKeeper extends ChangeNotifier implements OfflineKeeper {
 }
 
 class _FakeCovers extends ChangeNotifier implements PlaylistCoversController {
+  String? picture;
+  void setPicture(String url) {
+    picture = url;
+    notifyListeners();
+  }
+
   @override
-  String? urlFor(String id) => null;
+  String? urlFor(String id) => picture;
   @override
-  bool hasCover(String id) => false;
+  bool hasCover(String id) => picture != null;
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
+
+class _PicturePalette extends CoverPalette {
+  @override
+  Future<Color?> colorForImage(
+    String key,
+    ImageProvider Function() provider,
+  ) async => key.contains('teal') ? Colors.teal : Colors.pink;
 }
 
 class _FakeCatalog extends ChangeNotifier implements CatalogController {
@@ -106,7 +124,22 @@ Widget _album() => CollectionPage(
 );
 
 void main() {
-  setUpAll(loadAppFonts);
+  TestWidgetsFlutterBinding.ensureInitialized();
+  setUpAll(() async {
+    await loadAppFonts();
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(
+          const MethodChannel('plugins.flutter.io/path_provider'),
+          (_) async => Directory.systemTemp.path,
+        );
+  });
+  tearDownAll(
+    () => TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(
+          const MethodChannel('plugins.flutter.io/path_provider'),
+          null,
+        ),
+  );
   overscrollTests();
 
   testWidgets('an album reads "Album · 6 songs, 23 min" under its artist', (
@@ -223,6 +256,49 @@ void main() {
     },
   );
 
+  testWidgets('playlist background changes when its chosen picture changes', (
+    tester,
+  ) async {
+    final covers = _FakeCovers()..picture = 'https://images.example/teal.jpg';
+    await pumpScreen(
+      tester,
+      CollectionPage(
+        title: 'Picture playlist',
+        subtitle: '',
+        playlist: const Playlist(
+          id: 'picture',
+          name: 'Picture playlist',
+          songCount: 6,
+          durationSeconds: 1000,
+        ),
+        savedSongs: _songs,
+        loadSongs: () async => _songs,
+      ),
+      size: _phone,
+      extraProviders: [
+        Provider<CoverPalette>.value(value: _PicturePalette()),
+        ChangeNotifierProvider<PlaylistCoversController>.value(value: covers),
+        ChangeNotifierProvider<OfflineKeeper>.value(value: _FakeKeeper()),
+        ChangeNotifierProvider<CatalogController>.value(value: _FakeCatalog()),
+        ChangeNotifierProvider<HomeController>.value(value: _FakeHome()),
+        ChangeNotifierProvider<AiController>.value(value: _FakeAi()),
+      ],
+    );
+    await settleScreen(tester);
+    final page = tester.element(find.byType(CollectionHeader)).pageColor;
+    expect(
+      tester.widget<CollectionHeader>(find.byType(CollectionHeader)).color,
+      Color.lerp(page, Colors.teal, headerTintStrength),
+    );
+    covers.setPicture('https://images.example/pink.jpg');
+    await settleScreen(tester);
+    await tester.pump(const Duration(seconds: 1));
+    expect(
+      tester.widget<CollectionHeader>(find.byType(CollectionHeader)).color,
+      Color.lerp(page, Colors.pink, headerTintStrength),
+    );
+  });
+
   // These reference images were rendered on macOS, like the other screen goldens.
   testWidgets('screenshot', (tester) async {
     await pumpScreen(tester, _album(), size: _phone);
@@ -242,6 +318,9 @@ void main() {
       find.byType(MaterialApp),
       matchesGoldenFile('goldens/song_menu.png'),
     );
+    // Drain the artwork lookup throttle when this golden runs on its own.
+    await tester.pump(const Duration(seconds: 4));
+    await tester.pump(const Duration(seconds: 4));
   }, skip: !Platform.isMacOS);
 
   testWidgets('Share opens a card to share and the phone\'s own apps', (

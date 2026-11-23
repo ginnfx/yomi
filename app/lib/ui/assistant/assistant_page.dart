@@ -1,3 +1,5 @@
+import 'package:url_launcher/url_launcher.dart';
+
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -518,6 +520,19 @@ class _Answer extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                for (final source in answer.sources)
+                  TextButton.icon(
+                    onPressed: () => launchUrl(
+                      source.url,
+                      mode: LaunchMode.externalApplication,
+                    ),
+                    icon: const Icon(Icons.open_in_new, size: 14),
+                    label: Text(
+                      source.title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
                 if (answer.reply.isNotEmpty)
                   _TypedText(
                     answer.reply,
