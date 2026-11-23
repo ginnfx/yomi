@@ -380,14 +380,14 @@ void main() {
     expect(audio.orderDuringLoad, [0, 3, 1, 4, 2]);
   });
 
-  test('the last song with nothing to suggest disables next', () async {
+  test('the last song cycles to another playable song', () async {
     await player.jumpTo(4);
     audio.indexes.add(4);
     audio.seeks.clear();
-    expect(player.canSkipNext, isFalse);
+    expect(player.canSkipNext, isTrue);
     await player.next();
     expect(audio.seeks, isEmpty);
-    expect(player.current?.id, 's4');
+    expect(player.current?.id, isNot('s4'));
   });
 
   test(
@@ -420,9 +420,59 @@ void main() {
         hasLength(6),
         reason: 'songs already queued stay out',
       );
-      expect(audio.seeks, [5]);
+      expect(audio.loads.last, 5);
     },
   );
+
+  test('endless continuation stays bounded over many skips', () async {
+    player.suggestNext = () => _songs(1000);
+    for (var i = 0; i < 200; i++) {
+      await player.jumpTo(player.queue.length - 1);
+      await player.next();
+      expect(player.queue.length, lessThanOrEqualTo(40));
+      expect(player.current, isNotNull);
+      expect(player.canSkipNext, isTrue);
+    }
+  });
+
+  test(
+    'server loss skips network-only entries in the existing queue',
+    () async {
+      await saveQueuedSong(3);
+      player.isServerDown = true;
+      await player.next();
+      expect(player.current?.id, 's3');
+      expect((audio.sources[3] as UriAudioSource).uri.scheme, 'file');
+    },
+  );
+
+  test('a prepared boost is playable while disconnected', () async {
+    final folder = await Directory.systemTemp.createTemp('yomi-boost-test');
+    final file = await File('${folder.path}/audio.mp3')
+        .writeAsBytes([73, 68, 51]);
+    await player.useBoost(_songs(5)[2], file, 3);
+    player.isServerDown = true;
+    await player.next();
+    expect(player.current?.id, 's2');
+    expect((audio.sources[2] as UriAudioSource).uri, file.uri);
+  });
+
+  test('boosting and disabling a queued song refreshes its source', () async {
+    final folder = await Directory.systemTemp.createTemp('yomi-boost-test');
+    final file = await File('${folder.path}/audio.mp3')
+        .writeAsBytes([73, 68, 51]);
+    await player.useBoost(_songs(5)[2], file, 6);
+    await player.next();
+    expect((audio.sources[2] as UriAudioSource).uri, file.uri);
+    await player.useBoost(_songs(5)[2], null, 0);
+    await player.next();
+    expect((audio.sources[2] as UriAudioSource).uri.scheme, 'http');
+    expect(
+      await file.exists(),
+      isTrue,
+      reason: 'native sources can still own retired files',
+    );
+  });
 
   test('previous restarts the song after a few seconds', () async {
     audio.currentPosition = const Duration(seconds: 10);

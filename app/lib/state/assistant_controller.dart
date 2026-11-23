@@ -61,6 +61,22 @@ class AssistantController extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// A standalone identification search, without changing the chat history.
+  Future<ChatAnswer> identify(String query) async {
+    final api = _api;
+    if (api == null) throw StateError('Assistant unavailable');
+    return (await api.chat(
+      [
+        ChatTurn.user(
+          'Identify this song from approximate title, translated title, or lyrics. '
+          'Use web search, then search the library. Query: $query',
+        ),
+      ],
+      topArtists: const [],
+      moods: const [],
+    )).matchedWith(index());
+  }
+
   Future<void> ask(String question) async {
     final text = question.trim();
     final api = _api;

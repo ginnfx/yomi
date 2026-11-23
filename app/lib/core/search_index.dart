@@ -37,10 +37,12 @@ final RegExp _notWordCharacters = RegExp(r'[^\p{L}\p{N}]+', unicode: true);
 final RegExp _unspacedScript = RegExp(r'[぀-ヿ㐀-鿿가-힯]');
 
 /// Lower case, no accents, and punctuation becoming spaces.
-String normalizeForSearch(String text) =>
-    removeDiacritics(text.toLowerCase())
-        .replaceAll(_notWordCharacters, ' ')
-        .trim();
+String normalizeForSearch(String text) => removeDiacritics(
+  String.fromCharCodes([
+    for (final rune in text.runes)
+      rune >= 0xFF01 && rune <= 0xFF5E ? rune - 0xFEE0 : rune,
+  ]).toLowerCase(),
+).replaceAll(_notWordCharacters, ' ').trim();
 
 List<String> _wordsOf(String text) {
   final normalized = normalizeForSearch(text);
