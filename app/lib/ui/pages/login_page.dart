@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../../core/lan_discovery.dart';
+
 import '../../core/friendly_error.dart';
 import '../../core/server_defaults.dart';
 import '../../state/session.dart';
@@ -145,12 +147,23 @@ class _LoginPageState extends State<LoginPage> {
                         ),
                         childrenPadding: const EdgeInsets.only(bottom: 6),
                         children: [
-                          TextField(
-                            controller: _server,
-                            keyboardType: TextInputType.url,
-                            autocorrect: false,
-                            decoration: const InputDecoration(
-                              labelText: 'Server address',
+                          ValueListenableBuilder(
+                            valueListenable: _server,
+                            builder: (context, value, _) => TextField(
+                              controller: _server,
+                              keyboardType: TextInputType.url,
+                              autocorrect: false,
+                              decoration: InputDecoration(
+                                labelText: 'Server address',
+                                helperText:
+                                    isUnencryptedPublicUrl(
+                                      normalizeServerUrl(value.text),
+                                    )
+                                    ? 'This address isn\'t encrypted. Use https:// '
+                                          'or Tailscale so others can\'t read your login.'
+                                    : null,
+                                helperMaxLines: 2,
+                              ),
                             ),
                           ),
                           const SizedBox(height: 14),

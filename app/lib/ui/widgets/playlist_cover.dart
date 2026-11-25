@@ -9,6 +9,7 @@ import '../theme.dart';
 import '../../core/models.dart';
 import 'cover_art.dart';
 import 'mosaic_cover.dart';
+import '../../core/saved_image.dart';
 
 /// Lets the owner choose a picture for a playlist from their photos.
 Future<void> pickPlaylistPicture(
@@ -125,13 +126,12 @@ class PlaylistCover extends StatelessWidget {
     final pixels = (size * MediaQuery.devicePixelRatioOf(context)).round();
     return ClipRRect(
       borderRadius: BorderRadius.circular(radius),
-      child: Image.network(
-        url,
+      child: Image(
+        image: ResizeImage.resizeIfNeeded(pixels, null, savedImage(url)),
         key: ValueKey(url),
         width: size,
         height: size,
         fit: BoxFit.cover,
-        cacheWidth: pixels,
         gaplessPlayback: true,
         errorBuilder: (_, _, _) => fallback,
       ),

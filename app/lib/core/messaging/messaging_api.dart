@@ -268,6 +268,10 @@ class MessagingApi implements MessagingTransport {
   final SubsonicClient auth;
   final int port;
 
+  /// A name from the server as one path segment, so "a/b" or ".." can't change the path.
+  static String _pathPart(String value) =>
+      Uri.encodeComponent(value).replaceAll('.', '%2E');
+
   Uri _uri(String path, [Map<String, String> extra = const {}]) =>
       Uri.parse(serverUrl.replaceAll(RegExp(r'/+$'), '')).replace(
         port: port,
@@ -305,6 +309,11 @@ class MessagingApi implements MessagingTransport {
       throw const MessagingOffline("The server didn't answer in time.");
     } on HttpException {
       throw const MessagingOffline('The connection was interrupted.');
+    } on TlsException {
+      throw const MessagingOffline("Couldn't make a secure connection.");
+    } on FormatException {
+      // Such as a Wi-Fi login page answering in place of the server.
+      throw const MessagingOffline('The server sent something unexpected.');
     } finally {
       client.close(force: true);
     }
@@ -506,12 +515,16 @@ class MessagingApi implements MessagingTransport {
   );
 
   @override
-  Uri avatarUri(String user, {int version = 0}) =>
-      _uri('/v1/profiles/$user/avatar', {if (version > 0) 'v': '$version'});
+  Uri avatarUri(String user, {int version = 0}) => _uri(
+    '/v1/profiles/${_pathPart(user)}/avatar',
+    {if (version > 0) 'v': '$version'},
+  );
 
   @override
-  Uri bannerUri(String user, {int version = 0}) =>
-      _uri('/v1/profiles/$user/banner', {if (version > 0) 'v': '$version'});
+  Uri bannerUri(String user, {int version = 0}) => _uri(
+    '/v1/profiles/${_pathPart(user)}/banner',
+    {if (version > 0) 'v': '$version'},
+  );
 
   @override
   Future<List<int>?> fetchImage(Uri uri) async {
@@ -534,6 +547,11 @@ class MessagingApi implements MessagingTransport {
       throw const MessagingOffline("The server didn't answer in time.");
     } on HttpException {
       throw const MessagingOffline('The connection was interrupted.');
+    } on TlsException {
+      throw const MessagingOffline("Couldn't make a secure connection.");
+    } on FormatException {
+      // Such as a Wi-Fi login page answering in place of the server.
+      throw const MessagingOffline('The server sent something unexpected.');
     } finally {
       client.close(force: true);
     }

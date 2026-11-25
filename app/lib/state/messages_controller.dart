@@ -143,6 +143,10 @@ class MessagesController extends ChangeNotifier {
       } on MessagingException catch (error) {
         debugPrint('Waiting for messages failed: $error');
         await Future<void>.delayed(_eventRetryAfter);
+      } on Object catch (error) {
+        // Anything else, such as a malformed answer, must not end listening for good.
+        debugPrint('Waiting for messages failed unexpectedly: $error');
+        await Future<void>.delayed(_eventRetryAfter);
       }
     }
   }
@@ -169,6 +173,10 @@ class MessagesController extends ChangeNotifier {
     } on MessagingException catch (error) {
       if (generation != _accountGeneration) return;
       debugPrint('Could not refresh messages: $error');
+    } on Object catch (error) {
+      // A malformed answer; the next poll may be fine.
+      if (generation != _accountGeneration) return;
+      debugPrint('Could not read the messages the server sent: $error');
     } finally {
       _isPolling = false;
       if (generation == _accountGeneration) _changed();

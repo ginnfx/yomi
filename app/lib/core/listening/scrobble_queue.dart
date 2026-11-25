@@ -105,7 +105,13 @@ class ScrobbleQueue {
     }
   }
 
-  Future<void> _save([int? epoch]) async {
+  Future<void> _writes = Future.value();
+
+  /// One write at a time, so two can't share the temp file or land out of order.
+  Future<void> _save([int? epoch]) =>
+      _writes = _writes.then((_) => _writeNow(epoch));
+
+  Future<void> _writeNow(int? epoch) async {
     if (epoch != null && epoch != _epoch) return;
     final temp = File('${file.path}.tmp');
     try {
@@ -118,7 +124,7 @@ class ScrobbleQueue {
         return;
       }
       await temp.rename(file.path);
-    } on FileSystemException catch (error) {
+    } on Object catch (error) {
       debugPrint('Could not save scrobble queue: $error');
     }
   }

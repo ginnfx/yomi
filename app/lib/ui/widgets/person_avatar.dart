@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../../core/messaging/messaging_api.dart';
 import '../../state/messages_controller.dart';
 import '../theme.dart';
+import '../../core/saved_image.dart';
 
 /// A friend's picture, or their initial when they haven't set one.
 class PersonAvatar extends StatelessWidget {
@@ -22,7 +23,7 @@ class PersonAvatar extends StatelessWidget {
       radius: radius,
       backgroundColor: YomiColors.surfaceHigh,
       foregroundImage: profile.hasAvatar && transport != null
-          ? NetworkImage(
+          ? savedImage(
               transport
                   .avatarUri(profile.user, version: profile.avatarVersion)
                   .toString(),

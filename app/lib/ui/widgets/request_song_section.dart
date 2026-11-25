@@ -10,6 +10,7 @@ import '../../state/catalog_controller.dart';
 import '../../state/reports_controller.dart';
 import '../theme.dart';
 import 'report_sheet.dart';
+import '../../core/saved_image.dart';
 
 class RequestSongSection extends StatefulWidget {
   const RequestSongSection({super.key, this.database});
@@ -114,8 +115,8 @@ class _RequestSongSectionState extends State<RequestSongSection> {
                       borderRadius: BorderRadius.circular(8),
                       child: song.cover == null
                           ? const Icon(Icons.music_note)
-                          : Image.network(
-                              song.cover!,
+                          : Image(
+                              image: savedImage(song.cover!),
                               fit: BoxFit.cover,
                               errorBuilder: (_, _, _) =>
                                   const Icon(Icons.music_note),
