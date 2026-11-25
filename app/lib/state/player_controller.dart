@@ -120,11 +120,13 @@ class PlayerController extends ChangeNotifier implements TransportCommands {
     final previous = _client;
     _client = client;
     if (client == null) {
-      _retiredBoosts.addAll(_boostedFiles.values);
+      final boosts = [..._boostedFiles.values, ..._retiredBoosts];
+      _retiredBoosts.clear();
       _boostedFiles.clear();
       _boostLevels.clear();
       _preloader.stop();
-      _player.stop();
+      // Deleted once nothing is playing them, so they don't outlast the account.
+      unawaited(_player.stop().then((_) => _deleteBoosts(boosts)));
       _queue = const [];
       _index = null;
       _needsNewSources = false;
@@ -696,17 +698,21 @@ class PlayerController extends ChangeNotifier implements TransportCommands {
       subscription.cancel();
     }
     unawaited(
-      _player.dispose().then((_) async {
-        for (final file in [..._boostedFiles.values, ..._retiredBoosts]) {
-          try {
-            await file.parent.delete(recursive: true);
-          } on FileSystemException {
-            /* Already removed. */
-          }
-        }
-      }),
+      _player.dispose().then(
+        (_) => _deleteBoosts([..._boostedFiles.values, ..._retiredBoosts]),
+      ),
     );
     super.dispose();
+  }
+
+  static Future<void> _deleteBoosts(List<File> files) async {
+    for (final file in files) {
+      try {
+        await file.parent.delete(recursive: true);
+      } on FileSystemException {
+        /* Already removed. */
+      }
+    }
   }
 }
 

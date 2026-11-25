@@ -184,10 +184,12 @@ void main() {
   });
 
   testWidgets(
-    'a replica placeholder does not suppress a repaired cover for an hour',
+    'a placeholder shows an outside cover but real art still replaces it later',
     (tester) async {
       await tester.runAsync(() async {
+        // An MP3 with no embedded picture: Navidrome answers with its default record.
         source.temporarilyMissing.add('k');
+        source.onServer['external-http://external/match'] = await _png();
         var fallbackCalls = 0;
         expect(
           await service.load(
@@ -195,21 +197,36 @@ void main() {
             'k',
             fallbackUrl: () async {
               fallbackCalls++;
-              return 'http://external/guess';
+              return 'http://external/match';
             },
           ),
-          isNull,
+          isNotNull,
         );
-        expect(fallbackCalls, 0);
+        expect(fallbackCalls, 1);
         expect(service.isMissing('k'), isFalse);
+        // The outside cover is never saved as the song's own cover.
+        expect(source.onDevice.containsKey('k'), isFalse);
         source.temporarilyMissing.clear();
         source.onServer['k'] = await _png();
-        now = now.add(const Duration(seconds: 16));
+        service.releaseMemory();
         expect(await service.load('http://s/k', 'k'), isNotNull);
-        expect(source.downloads, hasLength(2));
+        expect(source.onDevice.containsKey('k'), isTrue);
       });
     },
   );
+
+  testWidgets('a placeholder with no outside match is retried, not missing', (
+    tester,
+  ) async {
+    await tester.runAsync(() async {
+      source.temporarilyMissing.add('k');
+      expect(
+        await service.load('http://s/k', 'k', fallbackUrl: () async => null),
+        isNull,
+      );
+      expect(service.isMissing('k'), isFalse);
+    });
+  });
 
   testWidgets('a failed cover is tried again after a while', (tester) async {
     await tester.runAsync(() async {

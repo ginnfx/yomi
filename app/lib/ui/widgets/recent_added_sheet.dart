@@ -24,7 +24,10 @@ Future<void> showRecentlyAdded(BuildContext context) =>
 /// The newest songs in one paged list. Tap plays from that point; the ⋯ button
 /// offers the same actions as a song anywhere else.
 class RecentlyAddedSheet extends StatefulWidget {
-  const RecentlyAddedSheet({super.key, this.albumsPerPage = _defaultAlbumsPerPage});
+  const RecentlyAddedSheet({
+    super.key,
+    this.albumsPerPage = _defaultAlbumsPerPage,
+  });
 
   /// How many albums make up one page. Overridable so tests can page quickly.
   final int albumsPerPage;
@@ -71,7 +74,9 @@ class _RecentlyAddedSheetState extends State<RecentlyAddedSheet> {
       _error = null;
     });
     try {
-      final page = await context.read<SessionController>().client
+      final page = await context
+          .read<SessionController>()
+          .client
           .recentSongsPage(
             albumsPerPage: widget.albumsPerPage,
             albumOffset: _offset,
@@ -153,7 +158,7 @@ class _RecentlyAddedSheetState extends State<RecentlyAddedSheet> {
         return SongTile(
           key: ValueKey(_songs[i].id),
           song: _songs[i],
-          onTap: () => player.playQueue(_songs, startIndex: i),
+          onTap: () => player.playQueue(List.of(_songs), startIndex: i),
         );
       },
     );

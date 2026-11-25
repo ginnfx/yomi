@@ -36,11 +36,16 @@ Future<ProbeResult> probeUrl(
 }) async {
   final watch = Stopwatch()..start();
   try {
-    await SubsonicClient(
+    final client = SubsonicClient(
       baseUrl: url,
       username: user,
       password: password,
-    ).ping(timeout: timeout);
+    );
+    try {
+      await client.ping(timeout: timeout);
+    } finally {
+      client.close();
+    }
     return ProbeResult(url: url, isOk: true, elapsed: watch.elapsed);
   } on SubsonicException catch (error) {
     return ProbeResult(

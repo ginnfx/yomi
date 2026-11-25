@@ -95,7 +95,12 @@ class VaultStorage {
   Future<void> _save(Map<String, String> values) {
     final encoded = jsonEncode(values);
     // One write at a time, in order, so a slow one can't overwrite a newer one.
-    _writes = _writes.then((_) => _inner.write(key: _vaultKey, value: encoded));
-    return _writes;
+    // A failed write is reported to its own caller only, so it can't block every
+    // write after it.
+    final write = _writes
+        .catchError((Object _) {})
+        .then((_) => _inner.write(key: _vaultKey, value: encoded));
+    _writes = write;
+    return write;
   }
 }

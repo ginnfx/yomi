@@ -34,11 +34,16 @@ class SubsonicException implements Exception {
     this.message, {
     this.code,
     this.kind = ErrorKind.other,
+    this.mayHaveApplied = false,
   });
 
   final String message;
   final int? code;
   final ErrorKind kind;
+
+  /// The request was sent but no answer came back in time, so the server may already
+  /// have carried it out.
+  final bool mayHaveApplied;
 
   bool get isBadCredentials => code == 40 || kind == ErrorKind.badCredentials;
 
@@ -57,7 +62,6 @@ class ScanStatus {
   final int? count;
 }
 
-/// Thin client for the Subsonic/OpenSubsonic API that Navidrome serves.
 /// One page of the newest albums, flattened into songs, newest album first.
 class RecentSongsPage {
   const RecentSongsPage({
@@ -75,6 +79,7 @@ class RecentSongsPage {
   final bool hasMore;
 }
 
+/// Thin client for the Subsonic/OpenSubsonic API that Navidrome serves.
 class SubsonicClient {
   SubsonicClient({
     required String baseUrl,
@@ -89,6 +94,7 @@ class SubsonicClient {
        _cache = cache,
        _outbox = outbox,
        _password = password,
+       _ownsHttp = httpClient == null,
        _http = httpClient ?? http.Client(),
        _newSalt = saltGenerator ?? _randomSalt,
        _isReadOnly = isReadOnly ?? _alwaysWritable;
@@ -99,6 +105,14 @@ class SubsonicClient {
   final CatalogCache? _cache;
   final Outbox? _outbox;
   final http.Client _http;
+  final bool _ownsHttp;
+
+  /// Releases the connections this client opened. A client passed in stays open, as
+  /// its owner may still be using it.
+  void close() {
+    if (_ownsHttp) _http.close();
+  }
+
   final String Function() _newSalt;
   final bool Function() _isReadOnly;
 
@@ -136,6 +150,11 @@ class SubsonicClient {
       if (error.kind != ErrorKind.unreachable ||
           outbox == null ||
           !_waitableEndpoints.contains(endpoint)) {
+        rethrow;
+      }
+      // Sending it again later could repeat it, such as a second playlist.
+      if (error.mayHaveApplied && !_isRepeatable(endpoint, params)) {
+        _cache?.markAllStale();
         rethrow;
       }
       // Loading first keeps the saved changes from being overwritten by a late read.
@@ -210,6 +229,15 @@ class SubsonicClient {
     'deletePlaylist',
   };
 
+  /// Whether sending this change twice leaves the same result as sending it once.
+  static bool _isRepeatable(String endpoint, Map<String, Object?> params) =>
+      switch (endpoint) {
+        'createPlaylist' => false,
+        'updatePlaylist' =>
+          params['songIdToAdd'] == null && params['songIndexToRemove'] == null,
+        _ => true,
+      };
+
   /// A saved action that isn't a single server call: removing a song once the server's
   /// current list can be checked, so it can't remove the wrong one.
   static const String _removeSongAction = 'removeSongFromPlaylist';
@@ -233,8 +261,18 @@ class SubsonicClient {
               error.kind == ErrorKind.server ||
               error.kind == ErrorKind.readOnly ||
               error.isBadCredentials;
-          if (isTemporary) return;
-          debugPrint('Dropping a saved change the server refused: $error');
+          // A timed-out change may already be on the server; sending it again
+          // could repeat it.
+          final mayRepeat =
+              error.mayHaveApplied &&
+              !_isRepeatable(
+                outbox.items.first.endpoint,
+                outbox.items.first.params,
+              );
+          if (isTemporary && !mayRepeat) return;
+          debugPrint(
+            'Dropping a saved change: ${mayRepeat ? 'it may already be applied' : error}',
+          );
         }
         await outbox.removeFirst();
       }
@@ -361,9 +399,17 @@ class SubsonicClient {
             )
           : _http.get(uri);
       response = await request.timeout(timeout ?? _requestTimeout);
+    } on TimeoutException {
+      throw const SubsonicException(
+        'Cannot reach the server. (The request timed out.)',
+        kind: ErrorKind.unreachable,
+        mayHaveApplied: true,
+      );
     } on Exception catch (error) {
-      throw SubsonicException(
-        'Cannot reach the server. ($error)',
+      // The raw error can include the request address, and with it the login token.
+      debugPrint('Request to $endpoint failed: ${error.runtimeType}');
+      throw const SubsonicException(
+        'Cannot reach the server.',
         kind: ErrorKind.unreachable,
       );
     }

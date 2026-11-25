@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../../core/cover_palette.dart';
 import '../../state/session.dart';
 import '../theme.dart';
+import '../../core/saved_image.dart';
 
 /// Builds with the colour of a cover: a picture at [imageUrl] if given, otherwise the
 /// album art [coverArtId]. The colour is null until known, then fades in.
@@ -26,7 +27,7 @@ class CoverColorBuilder extends StatelessWidget {
     final key = url ?? coverArtId;
     final known = palette.peek(key);
     final future = url != null
-        ? palette.colorForImage(url, () => NetworkImage(url))
+        ? palette.colorForImage(url, () => savedImage(url))
         : palette.colorFor(context.read<SessionController>().client, key);
     return FutureBuilder<Color?>(
       future: future,

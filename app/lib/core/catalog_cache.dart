@@ -53,6 +53,10 @@ class CatalogCache {
   Future<void>? _writing;
   bool _isDirty = false;
 
+  /// Set by [clear] on sign-out. A request still running for the old account must not
+  /// write its library back to disk afterwards.
+  bool _isCleared = false;
+
   /// The endpoint name of each entry as it changes.
   Stream<String> get updates => _updates.stream;
 
@@ -89,6 +93,7 @@ class CatalogCache {
     Map<String, Object?> params,
     Map<String, dynamic> data,
   ) {
+    if (_isCleared) return;
     final key = _keyFor(endpoint, params);
     _entries.remove(key); // Re-adding moves it to the newest position.
     _entries[key] = _Saved(endpoint, _now().millisecondsSinceEpoch, data);
@@ -112,6 +117,7 @@ class CatalogCache {
 
   /// Forgets every entry from these endpoints.
   void remove(Set<String> endpoints) {
+    if (_isCleared) return;
     _entries.removeWhere((_, saved) => endpoints.contains(saved.endpoint));
     _changed();
     endpoints.forEach(_updates.add);
@@ -136,6 +142,7 @@ class CatalogCache {
   }
 
   Future<void> clear() async {
+    _isCleared = true;
     _entries.clear();
     _isDirty = false;
     await flush();
@@ -147,6 +154,7 @@ class CatalogCache {
   }
 
   void _changed() {
+    if (_isCleared) return;
     _isDirty = true;
     _writing ??= _writeLoop();
   }
@@ -171,6 +179,9 @@ class CatalogCache {
       _writing = null;
     }
   }
+
+  /// Stops sending updates. Only for a cache that is no longer used.
+  Future<void> dispose() => _updates.close();
 
   static String _keyFor(String endpoint, Map<String, Object?> params) =>
       jsonEncode([endpoint, params]);

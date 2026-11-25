@@ -21,6 +21,7 @@ import '../widgets/profile_header.dart';
 import 'collection_page.dart';
 import 'messages_page.dart';
 import 'playlist_preview_page.dart';
+import '../../core/saved_image.dart';
 
 /// Opens someone's profile. Your own shows what friends see.
 Future<void> openProfile(BuildContext context, String user) =>
@@ -234,7 +235,7 @@ class _FriendProfilePageState extends State<FriendProfilePage> {
     final ImageProvider? banner = ownBanner != null
         ? FileImage(ownBanner)
         : profile.hasBanner && transport != null
-        ? NetworkImage(
+        ? savedImage(
             transport
                 .bannerUri(profile.user, version: profile.bannerVersion)
                 .toString(),

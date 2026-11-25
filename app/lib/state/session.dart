@@ -88,11 +88,16 @@ typedef HomeProbe = Future<bool> Function(
 
 Future<bool> _pingProbe(String url, String user, String password) async {
   try {
-    await SubsonicClient(
+    final client = SubsonicClient(
       baseUrl: url,
       username: user,
       password: password,
-    ).ping(timeout: _homeProbeTimeout);
+    );
+    try {
+      await client.ping(timeout: _homeProbeTimeout);
+    } finally {
+      client.close();
+    }
     return true;
   } on Exception {
     return false;
@@ -132,7 +137,8 @@ class SessionController extends ChangeNotifier with WidgetsBindingObserver {
       'YOMI_MIGRATE_PERSONAL_SERVERS',
     ),
   }) : pool = pool ?? ServerPool(),
-       _httpClient = httpClient,
+       _ownsHttpClient = httpClient == null,
+       _httpClient = httpClient ?? http.Client(),
        _roleProbe = roleProbe ?? probeIsReplica,
        _storage =
            storage ??
@@ -212,7 +218,10 @@ class SessionController extends ChangeNotifier with WidgetsBindingObserver {
     }
   }
 
-  final http.Client? _httpClient;
+  /// Shared by every client built for a route, so changing route doesn't leave the
+  /// previous one's connections open.
+  final http.Client _httpClient;
+  final bool _ownsHttpClient;
   final VaultStorage _storage;
   final ConnectivityController? _connectivity;
   final HomeProbe _probe;
@@ -818,7 +827,7 @@ class SessionController extends ChangeNotifier with WidgetsBindingObserver {
     _isScanning = true;
     _lastScan = DateTime.now();
     try {
-      final found = await _lanFinder(_user, _password);
+      final found = await _lanFinder(_user, _password, home: _homeUrl);
       if (found == null || _client == null || !_valid(epoch)) return;
       final isNew = found != _homeUrl;
       _homeUrl = found;
@@ -891,6 +900,7 @@ class SessionController extends ChangeNotifier with WidgetsBindingObserver {
     _catalogCache = null;
     _accountId = null;
     await cache?.clear();
+    await cache?.dispose();
     final outbox = _outbox;
     _outbox = null;
     await outbox?.clear();
@@ -1027,6 +1037,7 @@ class SessionController extends ChangeNotifier with WidgetsBindingObserver {
     _debounce?.cancel();
     _reachRetry?.cancel();
     _connectivity?.removeListener(_onNetworkChanged);
+    if (_ownsHttpClient) _httpClient.close();
     super.dispose();
   }
 }

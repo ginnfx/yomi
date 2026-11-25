@@ -414,27 +414,35 @@ class CoverImageService {
   ) async {
     final saved = await _fromDevice(cacheKey);
     if (saved != null) return saved;
+    var isPlaceholder = false;
     if (url != null) {
       try {
         // A dropped connection returns null here and stops: the server still has the
         // cover, so waiting in line for an outside lookup would only hold it back.
         return await _download(url, cacheKey);
       } on CoverNotAvailable catch (error) {
-        // A replica may repair this reference on its next request. Keep retrying
-        // the embedded art instead of promoting an external guess as exact.
-        if (error.isTransient) return null;
+        // Navidrome's default record, as for an MP3 with no embedded picture. Show a
+        // matching outside cover meanwhile, but don't record the song as missing, so
+        // real art added later still replaces it.
+        isPlaceholder = error.isTransient;
         debugPrint('$error');
       }
     }
-    final fallback = await fallbackUrl?.call();
-    if (fallback != null) {
-      final external = 'external-$fallback';
-      final image =
-          await _fromDevice(external) ?? await _tryDownload(fallback, external);
-      if (image != null) return image;
-    }
+    final image = await _fromFallback(fallbackUrl);
+    if (image != null || isPlaceholder) return image;
     _missingAt[cacheKey] = _now();
     return null;
+  }
+
+  /// An exact-match cover from outside the server, saved on this device once found.
+  Future<ui.Image?> _fromFallback(
+    Future<String?> Function()? fallbackUrl,
+  ) async {
+    final fallback = await fallbackUrl?.call();
+    if (fallback == null) return null;
+    final external = 'external-$fallback';
+    return await _fromDevice(external) ??
+        await _tryDownload(fallback, external);
   }
 
   Future<ui.Image?> _tryDownload(String url, String cacheKey) async {
